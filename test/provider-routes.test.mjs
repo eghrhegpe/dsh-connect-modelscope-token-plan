@@ -90,6 +90,8 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由已注册");
     "roster 含 Qwen chat 模型、不含 wanx 生图模型"
   );
   assert.equal(res.body.roster.find((r) => r.id === "Qwen/Qwen2.5-VL-32B").vision, true, "vision 标记进 roster");
+  assert.equal(res.body.roster.find((r) => r.id === "Qwen/Qwen2.5-VL-32B").capability, "vision-input", "能力类型进 roster（结构化 input_modalities 命中）");
+  assert.equal(res.body.roster.find((r) => r.id === "Qwen/Qwen3.5-35B-A3B").capability, "vision-input", "无模态字段/任务标签时走策展清单兜底（该 id 实测能吃图）");
   assert.equal(res.body.llmAvailable, false, "本机 Host 无 llm 服务");
   assert.equal(res.body.registered, false);
 }

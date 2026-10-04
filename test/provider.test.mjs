@@ -10,6 +10,7 @@ import {
   LLM_PROVIDER_ID, LLM_DISPLAY_NAME, LLM_API_KEY_NAME,
   FALLBACK_CONTEXT_WINDOW, HIDE_ALL_MODELS,
   normalizeEntry, isVisionModel, isChatModel, contextWindowOf, maxOutputLengthOf,
+  resolveModelCapability,
   toPiDescriptor, filterByEnabled, isModelEnabled, buildDescriptors,
   rosterWithAvailability, summarizeCatalog
 } from "../src/host/llm-models.ts";
@@ -131,6 +132,46 @@ import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_S
   const summary = summarizeCatalog([normalizeEntry({ id: "a/A" }), normalizeEntry({ id: "Qwen/Qwen2.5-VL" }), normalizeEntry({ id: "wanx/wanx2.1-t2i" })]);
   assert.equal(summary.modelCount, 2, "生图模型不计入 chat 模型数");
   assert.equal(summary.visionCount, 1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §3b resolveModelCapability：任务标签 → 能力类型（能力路由）
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const cap = (id, tasks) => resolveModelCapability({ id, name: id, tasks });
+
+  // 权威标签路径（真机核实词表，2026-10-04）
+  assert.equal(cap("q/a", ["text-generation"]), "text", "text-generation → text");
+  assert.equal(cap("q/b", ["text2text-generation"]), "text", "text2text-generation → text");
+  assert.equal(cap("q/c", ["image-text-to-text"]), "vision-input", "image-text-to-text → vision-input");
+  assert.equal(cap("q/d", ["image-to-text"]), "image-to-text", "image-to-text → image-to-text");
+  assert.equal(cap("q/e", ["image-to-image"]), "image-to-image", "image-to-image → image-to-image");
+  assert.equal(cap("q/f", ["text-to-image-synthesis"]), "text-to-image", "text-to-image-synthesis → text-to-image（hub 真机实测任务名）");
+  assert.equal(cap("q/g", ["text-to-video-synthesis"]), "text-to-video", "text-to-video-synthesis → text-to-video");
+
+  // 多标签取最具体（rank 高的图像类赢）
+  assert.equal(cap("q/h", ["text-generation", "image-text-to-text"]), "vision-input", "多标签取图像相关而非 text");
+  assert.equal(cap("q/i", ["image-text-to-text", "image-to-image"]), "image-to-image", "多标签取更具体的图像类");
+
+  // 有标签但全不认识 → unknown（不猜）
+  assert.equal(cap("q/j", ["some-future-task"]), "unknown", "未知任务标签 → unknown，不猜");
+
+  // 无标签走兜底链：策展 / 名字启发 / unknown
+  assert.equal(resolveModelCapability({ id: "Qwen/Qwen2.5-VL-32B" }), "vision-input", "名字启发兜底 → vision-input");
+  assert.equal(resolveModelCapability({ id: "Qwen/Qwen3.5-35B-A3B" }), "vision-input", "策展清单兜底 → vision-input（该 id 实测能吃图，名字无 vl）");
+  assert.equal(resolveModelCapability({ id: "acme/Not-Real" }), "unknown", "无任何信号 → unknown");
+
+  // 结构化模态字段仍是最高权威，盖过任务标签
+  assert.equal(
+    resolveModelCapability({ id: "x/y", input_modalities: ["image", "text"], tasks: ["text-generation"] }),
+    "vision-input",
+    "结构化字段优先于任务标签"
+  );
+
+  // isVisionModel 是 capability 的布尔投影：图出图 / 文生图不算 vision
+  assert.equal(isVisionModel(normalizeEntry({ id: "q/e", tasks: ["image-to-image"] })), false, "image-to-image 不是 vision（图出图不吃图）");
+  assert.equal(isVisionModel(normalizeEntry({ id: "q/f", tasks: ["text-to-image-synthesis"] })), false, "text-to-image-synthesis 不是 vision");
+  assert.equal(isVisionModel(normalizeEntry({ id: "q/c", tasks: ["image-text-to-text"] })), true, "image-text-to-text 是 vision");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

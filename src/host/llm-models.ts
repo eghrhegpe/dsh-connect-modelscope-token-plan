@@ -100,18 +100,6 @@ const INPUT_MODALITY_KEYS = Object.freeze(["input_modalities", "modalities", "in
 const VISION_NAME_PATTERN = /(vl|vision|qwen2?\.?\d*-?vl|glm.*v|internvl|llava|pixtral)/i;
 
 /**
- * 详情端点（modelscope.cn/api/v1/models/{id}）Tasks[].Name 里「接受图片输入」的任务标签。
- * image-text-to-text = 图进文出（视觉语言 / 能吃图）；image-to-image、text-to-image 是图出，
- * 明确排除。扩展位留给 image-to-text / visual-question-answering / image-caption 等。
- *
- * 真机全量核实（2026-10-04，api-inference 当前 35 条目录，逐条拉详情端点）：目录里实际只
- * 出现过 4 个任务名——`text-generation`(16)、`image-text-to-text`(14)、`image-to-image`(2)、
- * `text2text-generation`(1)。**没有任何模型被标成下面扩展位里的词**，所以这条正则目前实际
- * 只命中 `image-text-to-text`；扩展位是防御性的，别为了方便放宽到会误伤图出的词。
- */
-const VISION_INPUT_TASKS = /image-text-to-text|image-to-text|visual-question-answering|image-caption/i;
-
-/**
  * 明确是图像**生成**模型的 id/名字才排除。
  *
  * 魔搭目录里这些是纯生图模型，打 `/chat/completions` 会 404。没标注的一律算
@@ -175,6 +163,7 @@ export function normalizeEntry(raw: unknown): CatalogEntry {
     ...source,
     id,
     name: str(source.name, id),
+    capability: resolveModelCapability(source),
     vision: isVisionModel(source),
     contextWindow: contextWindowOf(source),
     maxOutputLength: maxOutputLengthOf(source),
@@ -218,41 +207,118 @@ function tasksOf(source: Record<string, unknown>): string[] | undefined {
 }
 
 /**
+ * 一条目录条目的**能力类型**——把「是不是视觉」这种二值判定升级为能力路由。
+ *
+ * 这是承重的方向性决策：魔搭 `/v1/models` 零模态字段，但详情端点
+ * `Data.Tasks[].Name` 是平台声明的任务标签，能精确区分图入 / 图出 / 文生图 / 图生图。
+ * 把能力存成枚举，下游（vision 开关、将来的出图 / 改图 / 视频工具）就能按能力路由，
+ * 而不是各自写一套名字正则去猜。`unknown` 表示无信号，**绝不猜**。
+ *
+ * 词表全部来自真机核实（2026-10-04）：
+ * - api-inference 的 35 条目录里出现 4 个——`text-generation`(16)、
+ *   `image-text-to-text`(14)、`image-to-image`(2)、`text2text-generation`(1)；
+ * - hub 详情端点对文生图模型返回 `text-to-image-synthesis`（`Qwen/Qwen-Image`、
+ *   `black-forest-labs/FLUX.1-schnell`、`Tongyi-MAI/Z-Image-Turbo` 实测），
+ *   文生视频返回 `text-to-video-synthesis`。
+ *
+ * ⚠️ 能力标签 ≠ 可用端点：`text-to-image-synthesis` 只说明 hub 上有这么个模型，
+ * api-inference 的 35 条目录里**目前没有任何**文生图模型，所以出图工具的候选列表
+ * 今天仍为空。本模块只做能力标注，不假装可寻址。
+ * @typedef {"unknown"|"text"|"vision-input"|"image-to-text"|"image-to-image"|"text-to-image"|"text-to-video"} ModelCapability
+ */
+export type ModelCapability =
+  | "unknown"
+  | "text"            // text-generation / text2text-generation
+  | "vision-input"    // image-text-to-text / vqa：图进文出，能吃图
+  | "image-to-text"   // image-to-text / image-caption：图出文
+  | "image-to-image"  // 图生图 / 改图
+  | "text-to-image"   // 文生图（出图）
+  | "text-to-video";  // 文生视频
+
+/** 任务标签 → 能力。键为平台返回的小写任务名，词表见上方说明。 */
+const TASK_TO_CAPABILITY: Record<string, ModelCapability> = Object.freeze({
+  "text-generation": "text",
+  "text2text-generation": "text",
+  "image-text-to-text": "vision-input",
+  "visual-question-answering": "vision-input",
+  "image-to-text": "image-to-text",
+  "image-caption": "image-to-text",
+  "image-to-image": "image-to-image",
+  "text-to-image-synthesis": "text-to-image",
+  "text-to-video-synthesis": "text-to-video"
+});
+
+/** 能力优先级：图像类信号比「纯文本」具体，多个标签时取最具体的一个。 */
+const CAPABILITY_RANK: Record<ModelCapability, number> = Object.freeze({
+  unknown: 0,
+  text: 1,
+  "vision-input": 3,
+  "image-to-text": 3,
+  "image-to-image": 4,
+  "text-to-image": 5,
+  "text-to-video": 5
+});
+
+/** 从任务标签数组取能力；一个都不认识返回 undefined（调用方再走兜底）。 */
+function capabilityFromTasks(tasks: string[]): ModelCapability | undefined {
+  let best: ModelCapability | undefined;
+  let bestRank = -1;
+  for (const task of tasks) {
+    const capability = TASK_TO_CAPABILITY[task.trim().toLowerCase()];
+    if (capability === undefined) continue;
+    if (CAPABILITY_RANK[capability] > bestRank) {
+      best = capability;
+      bestRank = CAPABILITY_RANK[capability];
+    }
+  }
+  return best;
+}
+
+/**
+ * 解析一条目录条目的能力类型。
+ *
+ * 判定顺序（权威 → 兜底）：结构化模态字段 → 详情端点任务标签 → 策展清单 → 名字启发。
+ * 前两级是平台声明，后两级是「我们已知 / 我们推断」，绝不混淆。
+ * @param {object} entry - 一条归一目录条目。
+ * @returns {ModelCapability} 能力类型。
+ */
+export function resolveModelCapability(entry: CatalogEntry): ModelCapability {
+  const source = (entry ?? {}) as Record<string, unknown>;
+  // 1) 结构化字段是权威答案：字段里出现 image/vision 就是图像相关，别再用名字猜。
+  const modalities = inputModalitiesOf(source);
+  if (modalities !== undefined) {
+    return modalities.some((modality) => /image|vision/i.test(modality)) ? "vision-input" : "text";
+  }
+  // 2) 详情端点（modelscope.cn/api/v1/models/{id}）的 Tasks[].Name 是精确信号。
+  //    fetchModels 并行拉取详情、把标签挂到 entry.tasks；拉取失败则该模型 tasks 为空。
+  const tasks = tasksOf(source);
+  if (tasks !== undefined) {
+    const capability = capabilityFromTasks(tasks);
+    if (capability !== undefined) return capability;
+    return "unknown"; // 有标签但一个都不认识——不猜。
+  }
+  // 3) 策展清单 KNOWN_VISION_IDS 是详情端点不可达时的离线兜底（我们确知，非平台声明）。
+  const id = str(source.id, "");
+  if (id !== "" && KNOWN_VISION_IDS.has(id)) return "vision-input";
+  // 4) 名字启发最后才用——面板能说「按名字推断」，绝不假装平台声明过。
+  const idOrName = `${id} ${str(entry?.name, "")}`;
+  if (VISION_NAME_PATTERN.test(idOrName)) return "vision-input";
+  return "unknown";
+}
+
+/**
  * 一条目录条目能否吃图（vision）。
  *
- * 优先读结构化字段 `input_modalities`/`modalities`（含 `image`/`vision` 即真）；
- * 无结构化字段时回退名字启发（`VISION_NAME_PATTERN`）。多模态模型名里 `vl` 很
- * 常见，这条启发是社区惯例；漏判 = 模型收图时报 `UNSUPPORTED_CONTENT`，面板能
- * 看见，不算静默失败。
+ * 是 `resolveModelCapability` 的布尔投影：图进文出（`vision-input`）或图出文
+ * （`image-to-text`/caption）算视觉模型；图出图（`image-to-image`）、文生图
+ * （`text-to-image`）**不算**——它们不吃图，别混进 vision 开关。
+ * 漏判 = 模型收图时报 `UNSUPPORTED_CONTENT`，面板能看见，不算静默失败。
  * @param {object} entry - 一条归一目录条目。
  * @returns {boolean} 是否吃图。
  */
 export function isVisionModel(entry: CatalogEntry): boolean {
-  const source = (entry ?? {}) as Record<string, unknown>;
-  const modalities = inputModalitiesOf(source);
-  if (modalities !== undefined) {
-    // 结构化字段是权威答案：字段里出现 image/vision 就是吃图，别再用名字猜。
-    return modalities.some((modality) => /image|vision/i.test(modality));
-  }
-  // 详情端点（modelscope.cn/api/v1/models/{id}）的 Tasks[].Name 是精确信号：
-  // image-text-to-text = 图进文出（能吃图）；image-to-image / text-to-image 是图出，不算。
-  // 这是平台自己声明的任务标签，比名字启发权威。fetchModels 并行拉取详情、把标签挂到
-  // entry.tasks；拉取失败则该模型 tasks 为空 → 走下方策展 / 名字兜底。
-  const tasks = tasksOf(source);
-  if (tasks !== undefined) {
-    return tasks.some((task) => VISION_INPUT_TASKS.test(task));
-  }
-  // /v1/models 本身只返回 id/object/owned_by/created（零模态字段，不像 sensenova 有
-  // type），所以直接挂在目录条目上的结构化模态字段这条路对全部模型都走不通。但**详情端点**
-  // modelscope.cn/api/v1/models/{id} 的 Tasks[].Name 是平台声明的精确任务标签——上面
-  // 这段已经处理（命中 image-text-to-text 即真）。详情拉取失败时 entry.tasks 为空，落到这里。
-  // 策展清单 KNOWN_VISION_IDS 是详情端点**不可达时的离线兜底**：这些是我们从模型卡 / 用户
-  // 反馈确知的能吃图模型，不假装平台返回过；详情正常时它们会被上面的精确判定覆盖。
-  const id = str(source.id, "");
-  if (id !== "" && KNOWN_VISION_IDS.has(id)) return true;
-  // 最后才落到名字启发——面板能说「按名字推断」，绝不假装平台声明过。
-  const idOrName = `${id} ${str(entry?.name, "")}`;
-  return VISION_NAME_PATTERN.test(idOrName);
+  const capability = resolveModelCapability(entry);
+  return capability === "vision-input" || capability === "image-to-text";
 }
 
 /**
@@ -387,17 +453,18 @@ export function isModelEnabled(enabledIds: string[] | undefined, id: string): bo
  * 面板用的 roster：每条可寻址 chat 条目一行。
  *
  * 刻意是投影而非原始条目：快照只带 picker 需要的（id、展示名、与 descriptor
- * 相同的 vision 判定），平台将来新增的目录字段不会为了没理由泄到面板。
+ * 相同的 vision 判定、以及供能力路由用的 capability），平台将来新增的目录字段
+ * 不会为了没理由泄到面板。
  *
  * 去重保留**末次出现**（与 {@link buildDescriptors} 一致）：同 id 更新的读取赢。
  * 这里要是分叉了，面板清单和注册结果就会就「哪些模型存在」说两套话，勾选的模型
  * 可能变成未注册的。
  * @param {object[]} entries - 归一目录条目。
- * @returns {{id: string, name: string, vision: boolean}[]}
+ * @returns {{id: string, name: string, vision: boolean, capability: ModelCapability}[]}
  */
-export function rosterOf(entries: unknown): { id: string; name: string; vision: boolean }[] {
+export function rosterOf(entries: unknown): { id: string; name: string; vision: boolean; capability: ModelCapability }[] {
   const position = new Map<string, number>();
-  const out: { id: string; name: string; vision: boolean }[] = [];
+  const out: { id: string; name: string; vision: boolean; capability: ModelCapability }[] = [];
   for (const entry of Array.isArray(entries) ? entries : []) {
     // 生图模型不是 chat 模型，不进 roster——与注册的 offer 保持一致，否则勾选的
     // 模型可能变成未注册的。
@@ -407,7 +474,8 @@ export function rosterOf(entries: unknown): { id: string; name: string; vision: 
     const row = {
       id,
       name: str((entry as CatalogEntry)?.name, id),
-      vision: isVisionModel(entry as CatalogEntry)
+      vision: isVisionModel(entry as CatalogEntry),
+      capability: resolveModelCapability(entry as CatalogEntry)
     };
     if (position.has(id)) {
       out[position.get(id)!] = row;
@@ -466,12 +534,12 @@ export function buildDescriptors(entries: unknown, options: { providerId?: strin
  * 面板保留它们在清单里、灰显，让用户看得见「为什么模型从选择器里不见了」。
  * @param {object[]} entries - 归一目录条目。
  * @param {string[]} unavailableIds - 额度耗尽的模型 id；空数组 = 全部可用。
- * @returns {{id: string, name: string, vision: boolean, available: boolean, quotaExhausted: boolean, contextWindow: number, maxOutputLength: number}[]}
+ * @returns {{id: string, name: string, vision: boolean, capability: ModelCapability, available: boolean, quotaExhausted: boolean, contextWindow: number, maxOutputLength: number}[]}
  */
-export function rosterWithAvailability(entries: unknown, unavailableIds: string[]): { id: string; name: string; vision: boolean; available: boolean; quotaExhausted: boolean; contextWindow: number; maxOutputLength: number }[] {
+export function rosterWithAvailability(entries: unknown, unavailableIds: string[]): { id: string; name: string; vision: boolean; capability: ModelCapability; available: boolean; quotaExhausted: boolean; contextWindow: number; maxOutputLength: number }[] {
   const blocked = new Set(Array.isArray(unavailableIds) ? unavailableIds : []);
   const position = new Map<string, number>();
-  const out: { id: string; name: string; vision: boolean; available: boolean; quotaExhausted: boolean; contextWindow: number; maxOutputLength: number }[] = [];
+  const out: { id: string; name: string; vision: boolean; capability: ModelCapability; available: boolean; quotaExhausted: boolean; contextWindow: number; maxOutputLength: number }[] = [];
   for (const entry of Array.isArray(entries) ? entries : []) {
     if (!isChatModel(entry as CatalogEntry)) continue;
     const id = str((entry as CatalogEntry)?.id, "");
@@ -480,6 +548,7 @@ export function rosterWithAvailability(entries: unknown, unavailableIds: string[
       id,
       name: str((entry as CatalogEntry)?.name, id),
       vision: isVisionModel(entry as CatalogEntry),
+      capability: resolveModelCapability(entry as CatalogEntry),
       available: !blocked.has(id),
       quotaExhausted: blocked.has(id),
       // descriptor 自己会用的窗口：目录声明了就用，否则用 pi-ai 拿到的同一个

@@ -72,25 +72,36 @@ export const NO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 export const HIDE_ALL_MODELS = "__hide_all__";
 
 export function normalizeEntry(raw: unknown): CatalogEntry        // 见 §2
-export function isVisionModel(entry: CatalogEntry): boolean       // 见下
+export type ModelCapability = "unknown" | "text" | "vision-input" | "image-to-text" | "image-to-image" | "text-to-image" | "text-to-video";
+export function resolveModelCapability(entry: CatalogEntry): ModelCapability   // 见下
+export function isVisionModel(entry: CatalogEntry): boolean       // 见下（capability 的布尔投影）
 export function isChatModel(entry: CatalogEntry): boolean         // 见下
 export function contextWindowOf(entry: CatalogEntry): number
 export function maxOutputLengthOf(entry: CatalogEntry): number    // 0 = 未声明
 export function toPiDescriptor(entry: CatalogEntry, options: { providerId?: string; baseUrl?: string }): object
 export function filterByEnabled(entries: unknown, enabledIds?: unknown): object[]
 export function isModelEnabled(enabledIds: string[] | undefined, id: string): boolean
-export function rosterOf(entries: unknown): { id: string; name: string; vision: boolean }[]
+export function rosterOf(entries: unknown): { id: string; name: string; vision: boolean; capability: ModelCapability }[]
 export function buildDescriptors(entries: unknown, options: { providerId?: string; baseUrl?: string; enabledIds?: string[]; unavailableModelIds?: string[] }): object[]
-export function rosterWithAvailability(entries: unknown, unavailableIds: string[]): { id: string; name: string; vision: boolean; available: boolean; quotaExhausted: boolean; contextWindow: number; maxOutputLength: number }[]
+export function rosterWithAvailability(entries: unknown, unavailableIds: string[]): { id: string; name: string; vision: boolean; capability: ModelCapability; available: boolean; quotaExhausted: boolean; contextWindow: number; maxOutputLength: number }[]
 export function summarizeCatalog(entries: unknown): { modelCount: number; visionCount: number; visionIds: string[] }
 ```
 
 **判断规则（每一条都有理由，别改成「猜」）**：
 
-- `isVisionModel`：优先读结构化字段 `input_modalities`/`modalities`（含
-  `image`/`vision` 即真），无结构化字段时回退名字启发——`/(vl|vision|qwen2?\.?\d*-?vl|glm.*v|internvl|llava|pixtral)/i`。
-  多模态模型名里 `vl` 很常见，这条启发是社区惯例；漏判 = 模型收图时报
-  `UNSUPPORTED_CONTENT`，面板能看见，不算静默失败。
+- `resolveModelCapability`（M4+ 取代原来单薄的二值判定）：把「是不是 vision」升级为
+  **能力类型**。判定顺序（权威→兜底）：① 结构化 `input_modalities`/`modalities`
+  （含 `image`/`vision` 即 `vision-input`，否则 `text`）；② 详情端点
+  `Tasks[].Name` 任务标签 → `TASK_TO_CAPABILITY`（多标签按 `CAPABILITY_RANK` 取最具体）；
+  ③ 策展清单 `KNOWN_VISION_IDS`；④ 名字启发
+  `/(vl|vision|qwen2?\.?\d*-?vl|glm.*v|internvl|llava|pixtral)/i`。**有标签但全不认识
+  → `unknown`，绝不猜。** 词表真机核实：api-inference 只出现 `text-generation`/
+  `image-text-to-text`/`image-to-image`/`text2text-generation`；hub 详情端点对文生图
+  返回 `text-to-image-synthesis`，文生视频 `text-to-video-synthesis`。⚠️ 能力标签
+  ≠ 可用端点——api-inference 目录里目前**没有**文生图模型。
+- `isVisionModel`：`resolveModelCapability` 的布尔投影——`vision-input`（图进文出）
+  或 `image-to-text`（图出文）算吃图；`image-to-image`/`text-to-image` 不算。漏判 =
+  模型收图时报 `UNSUPPORTED_CONTENT`，面板能看见，不算静默失败。
 - `isChatModel`：**宽松方向**。只有明确是图像**生成**模型的 id/名字才排除：
   `/(wanx|qwen-image|cogview|flux|stable-diffusion|sdxl|sd3|txt2img|text-to-image|draw|seedream|kolors|hunyuan-?image|imagen)/i`
   或 `output_modalities` 只含 `image`。魔搭目录里这些是纯生图模型，打

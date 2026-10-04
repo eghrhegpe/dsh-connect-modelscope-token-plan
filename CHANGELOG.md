@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.0-M4+（未发布）— 能力分类器 `resolveModelCapability`
+
+- **把二值「是不是 vision」升级为能力路由**：新增 `resolveModelCapability(entry)`，
+  返回 `ModelCapability = unknown|text|vision-input|image-to-text|image-to-image|
+  text-to-image|text-to-video`；`isVisionModel` 退化为它的布尔投影
+  （`vision-input` / `image-to-text` 才算吃图，图出图 / 文生图不算）。
+- 判定顺序（权威→兜底）：结构化 `input_modalities` → 详情端点 `Tasks[].Name` 任务
+  标签（`TASK_TO_CAPABILITY`，多标签按 `CAPABILITY_RANK` 取最具体）→ 策展清单
+  `KNOWN_VISION_IDS` → 名字启发；有标签但全不认识 → `unknown`，**绝不猜**。
+- 词表真机核实（2026-10-04）：api-inference 35 条目录只出现
+  `text-generation`/`image-text-to-text`/`image-to-image`/`text2text-generation`；
+  hub 详情端点对文生图返回 `text-to-image-synthesis`（`Qwen/Qwen-Image`、
+  `FLUX.1-schnell`、`Z-Image-Turbo`），文生视频 `text-to-video-synthesis`。
+  ⚠️ 能力标签 ≠ 可用端点：api-inference 目录里目前**没有**文生图模型。
+- `normalizeEntry` 输出 `capability`，roster（`rosterOf` / `rosterWithAvailability`）
+  与 provider 路由响应都带上 `capability`，供将来的出图 / 改图工具按能力路由。
+- 测试：`provider.test.mjs` 增补任务标签→能力断言；`provider-routes.test.mjs` 断言
+  roster 携带 `capability`。
+
 ## 0.1.0-M4（未发布）— 正式接入 DSH 作为 LLM provider
 
 - **provider 注册**（id `modelscope-token-plan`，直连 apiBase，OpenAI 兼容）：
