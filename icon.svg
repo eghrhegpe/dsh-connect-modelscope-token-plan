@@ -1,10 +1,30 @@
-<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="18" cy="18" r="13" fill="url(#a)" />
-  <path d="M18 12v12M14 15.2h8M14 20.8h8" stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round" />
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- ModelScope 官方像素 "M" Logo 复刻：蓝紫圆角方块 + 白像素 M（含中央菱形与两侧 L 角） -->
   <defs>
-    <linearGradient id="a" x1="18" y1="5" x2="18" y2="31" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#6FD8B6" />
-      <stop offset="1" stop-color="#0F6E56" />
+    <linearGradient id="ms-bg" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5560F5" />
+      <stop offset="1" stop-color="#3739CC" />
     </linearGradient>
   </defs>
+
+  <rect x="1.5" y="1.5" width="61" height="61" rx="15" fill="url(#ms-bg)" />
+
+  <!-- 白色像素块组合（坐标与官方 150x167 参考图按 0.5 缩放对齐） -->
+  <g fill="#FFFFFF">
+    <!-- 顶部两竖臂 -->
+    <rect x="13" y="23" width="4" height="5" rx="0.3" />
+    <rect x="47" y="23" width="4" height="5" rx="0.3" />
+    <!-- 底部两竖臂 -->
+    <rect x="13" y="44" width="4" height="5" rx="0.3" />
+    <rect x="47" y="44" width="4" height="5" rx="0.3" />
+    <!-- 左侧 L 角：竖条 + 底部横条 -->
+    <rect x="5.5" y="29" width="2" height="13" rx="0.2" />
+    <rect x="5.5" y="37" width="8.5" height="4.5" rx="0.2" />
+    <!-- 右侧 L 角：竖条 + 底部横条（镜像） -->
+    <rect x="56.5" y="29" width="2" height="13" rx="0.2" />
+    <rect x="50" y="37" width="8.5" height="4.5" rx="0.2" />
+    <!-- 中央菱形（两个方块组成的 V 字形，中间留 1px 缝） -->
+    <rect x="26" y="36.5" width="5.5" height="4.5" rx="0.2" />
+    <rect x="32.5" y="36.5" width="5.5" height="4.5" rx="0.2" />
+  </g>
 </svg>
