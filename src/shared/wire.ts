@@ -58,6 +58,19 @@ export interface TokenStatus {
   ephemeral: boolean;
 }
 
+/**
+ * 官方「魔粒」余额（GET siteBase/openapi/v1/magicubes/balance，2026-10-04
+ * 实测可用，SPIKE.md §魔粒）。available/total/frozen 为 null = 上游没给该
+ * 数或本次没读到（error 说明原因）——null 不是 0。
+ */
+export interface BalanceData {
+  available: number | null;
+  total: number | null;
+  frozen: number | null;
+  fetchedAt: string | null;
+  error: string | null;
+}
+
 /** 成功快照。字段增删必须同步 test/wire.test.mjs 的钉死清单与面板 wire。 */
 export interface Snapshot {
   ok: true;
@@ -67,6 +80,8 @@ export interface Snapshot {
   pollSeconds: number;
   cacheSeconds: number;
   token: TokenStatus;
+  /** 官方魔粒余额——面板的头条数字。 */
+  balance: BalanceData;
   quota: {
     daily: QuotaWindow;
     perModelLimit: number;
@@ -98,6 +113,7 @@ export const SNAPSHOT_REQUIRED_KEYS = Object.freeze([
   "pollSeconds",
   "cacheSeconds",
   "token",
+  "balance",
   "quota",
   "events",
   "trend",

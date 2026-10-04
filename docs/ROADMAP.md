@@ -27,20 +27,24 @@
 2. credentials 记录 kind 只能是 `grant` / `api-key`，私有状态一律进插件状态文件；
 3. Host 侧改动必须完全重启 DSH 才生效（README 已声明）。
 
-## M2 — Client 半边（面板）
+## M2 — Client 半边（面板）（已完成）
 
-- `src/client/`：index / apply（`plugins.bundle.config` 槽） / panel-page（三 tab：额度 / 模型 / 接入）/ cards / http / i18n（zh+en）/ runtime / styles / wire。
+- `src/client/`：index（三世界注册）/ apply（`plugins.bundle.config` 槽）/
+  panel-page（三 tab：额度 / 模型 / 接入）/ cards / const / http / i18n（zh+en）
+  / runtime（React seam）/ styles / snapshot（决策层）/ format / use-snapshot-polling
+  / use-polling-interval。
 - React 由 loader 注入，`h()` + 内联 style token，无 JSX。
-- 轮询 hook：隐藏页暂停、错误退避、generation guard；cadence 以 Host 下发的 `pollSeconds` 为准。
-- 「额度」tab 必须标注：本地推算、非官方余额、计数范围（仅经本插件的调用）。
+- 「额度」tab 头条 = **官方魔粒余额**（spike 后记的升级）；本地计数带口径标注。
+- 模型 tab 每行「试调」按钮（usage 形态，消耗 1 次免费额度，面板有标注）。
 
-## M3 — 测试 + 装机验证
+## M3 — 测试 + 装机验证（进行中）
 
-- 离线套件（裸 node + strip-types，`erasableSyntaxOnly` 约束）：wire / config / usage-store / snapshot / routes / panel 决策 / i18n 字典一致。
-- fake 魔搭平台（本地 http server）做 routes 级测试；live-contract 脚本打真平台（信息性不阻塞）。
-- `npm run build` → lib/ + client.js 入库。
-- **测试绿之前不装进 profile**（PITFALLS：半成品插件会让 Host startup failed，爆炸半径是整机）。
-- 装机：`dsh plugin --profile <profile> add <本目录绝对路径>`，重启 DSH 验证。
+- 离线套件（裸 node + strip-types）：wire / config / usage-store / routes / panel
+  —— 全绿；panel 套件加载**构建产物** client.js（替身 React 渲染 PanelPage）。
+- 真机冒烟已过（真令牌 + 真上游，只读零额度）。
+- 待做：doctor 工具、e2e（真 Host + 假魔搭平台）、build-freshness 门禁。
+- **测试绿之后**装机：`dsh plugin --profile <profile> add <本目录绝对路径>`，
+  重启 DSH 验证。
 
 ## M4 — 可选增强（默认关）
 

@@ -8,8 +8,8 @@
 
 ## 三条事实（写代码前先认清）
 
-1. **魔搭没有余额查询接口**。2026-10-04 实测：推理成功响应、401、`/v1/models` 都不带任何 `X-RateLimit-*` / 额度头（详见 [docs/SPIKE.md](docs/SPIKE.md)）。社区流传的「读 `x-ratelimit-remaining`」在当前实现中不存在。
-2. 所以面板是**本地计数派**：「剩余」= 可配置的额度常数 − 插件本地计数（只统计经本插件 provider 的调用）。额度常数（`dailyQuotaTotal` / `dailyQuotaPerModel`）**只进配置不进代码**——魔搭规则漂移史（1000→500→实名后约 2000/天，单模型约 500/天）决定了它必须是随时可改的配置项。
+1. **官方有「魔粒」余额端点**：`GET {siteBase}/openapi/v1/magicubes/balance`（Bearer 访问令牌，匿名 401），返回 `{success, data:{total_balance, available_balance, frozen_amount}}`（2026-10-04 实测，见 [docs/SPIKE.md](docs/SPIKE.md)）。推理响应本身仍不带任何额度头。
+2. **本地计数是辅助**：面板头条是官方魔粒余额；本地计数只回答「经本插件的调用消耗了多少」，直连魔搭的其它客户端不计入（官方余额天然包含它们）。额度常数（`dailyQuotaTotal` / `dailyQuotaPerModel`）仅作参考线，规则漂移史（1000→500→实名后约 2000/天，单模型 200–500/天）决定了它必须留在配置里。
 3. **凭据只有一把静态钥匙**：魔搭访问令牌（个人中心生成，形如 `ms-…`），无 OIDC、无密码、无 refresh。默认读 DSH 凭据服务已有的 `MODELSCOPE_API_KEY` 引用，`MODELSCOPE_API_KEY` 环境变量作回退；令牌永不入日志、永不进插件目录。
 
 ## 免费额度怎么算（2026-10 快照，以官方为准）

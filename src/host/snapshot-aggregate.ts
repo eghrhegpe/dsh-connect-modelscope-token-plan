@@ -49,12 +49,19 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     if (!path.ok) shapeWarnings.push(`usage-source failed (${path.code}): ${path.error}`);
   }
 
+  // 官方魔粒余额（头条数据源）：需要令牌；无令牌时静默缺席（error 置 null，
+  // 面板在「接入」tab 引导配令牌，而不是在「额度」tab 报一条假故障）。
+  const tokenPresent = tokenState.ok ? tokenState.value.present : false;
+  const balance = await soft(inference.fetchBalance());
   // 模型目录：免认证、零额度；失败降级为 available:false + error。
   const models = await soft(inference.fetchModels());
   const modelIds = models.ok ? models.value.ids : [];
   if (!models.ok && models.code !== "network_error") {
     // 网络抖动不值得一条常驻警告（下一轮轮询自愈）；形状漂移值得。
     shapeWarnings.push(`models: ${models.error}`);
+  }
+  if (tokenPresent && !balance.ok && balance.code !== "network_error") {
+    shapeWarnings.push(`balance: ${balance.error}`);
   }
 
   const usedLocal = daily.ok ? daily.value.calls : 0;
@@ -70,6 +77,9 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     token: tokenState.ok
       ? tokenState.value
       : { present: false, source: "none", valid: null, checkedAt: null, ephemeral: true },
+    balance: balance.ok
+      ? { available: balance.value.available, total: balance.value.total, frozen: balance.value.frozen, fetchedAt: balance.value.fetchedAt, error: null }
+      : { available: null, total: null, frozen: null, fetchedAt: null, error: tokenPresent ? balance.error : null },
     quota: {
       daily: {
         limit: dailyLimit,

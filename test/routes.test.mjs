@@ -112,6 +112,50 @@ assert.ok([SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, PROBE_PATH].every((p) => hand
   assert.equal(forgotten.present, false);
 }
 
+// ── 魔粒余额：官方端点走 Bearer 令牌；形状漂移降级 ──
+{
+  await call(handlers, TOKEN_PATH, makeReq("POST", { body: { token: "ms-0123456789abcdef0123456789abcdef" } }));
+  currentFetch = async (url) => {
+    if (String(url).endsWith("/openapi/v1/magicubes/balance")) {
+      return new Response(JSON.stringify({ success: true, request_id: "x", data: { total_balance: 143, available_balance: 143, frozen_amount: 0 } }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    throw new Error("unexpected fetch target: " + String(url));
+  };
+  try {
+    const snap = await call(handlers, SNAPSHOT_PATH, makeReq("GET"));
+    assert.equal(snap.balance.available, 143, "官方余额进快照");
+    assert.equal(snap.balance.frozen, 0);
+    assert.equal(snap.balance.error, null);
+  } finally {
+    currentFetch = NO_NETWORK;
+  }
+
+  // 形状漂移：独立实例（成功余额在 cacheSeconds TTL 内回缓存，这是对的
+  // 缓存行为，漂移测试不能跟它共实例）。
+  {
+    const local = new Map();
+    apply(makeCtx(local), {});
+    await call(local, TOKEN_PATH, makeReq("POST", { body: { token: "ms-0123456789abcdef0123456789abcdef" } }));
+    currentFetch = async () => new Response(JSON.stringify({ success: true, data: "nope" }), { status: 200 });
+    try {
+      const drifted = await call(local, SNAPSHOT_PATH, makeReq("GET"));
+      assert.equal(drifted.balance.available, null, "余额形状漂移 → available null");
+      assert.match(String(drifted.balance.error), /shape drifted/);
+      assert.ok(drifted.shapeWarnings.some((w) => w.startsWith("balance:")), "余额漂移进 shapeWarnings");
+    } finally {
+      currentFetch = NO_NETWORK;
+    }
+  }
+
+  // 无令牌时余额静默缺席（error null），不冒充故障。
+  {
+    await call(handlers, TOKEN_FORGET_PATH, makeReq("POST", { body: {} }));
+    const anon = await call(handlers, SNAPSHOT_PATH, makeReq("GET"));
+    assert.equal(anon.balance.available, null);
+    assert.equal(anon.balance.error, null, "无令牌 → 余额静默缺席");
+  }
+}
+
 // ── probe：usage 成功记账；429 分诊；401 分诊 ──
 {
   const saved = await call(handlers, TOKEN_PATH, makeReq("POST", { body: { token: "ms-0123456789abcdef0123456789abcdef" } }));

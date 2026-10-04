@@ -1,5 +1,14 @@
 # SPIKE 2026-10-04 — 魔搭额度信号实测
 
+> **后记（同日，推翻 §结论 1 的一半）**：用户带来线索后实测，官方「魔粒」余额端点
+> **真实存在**：`GET https://modelscope.cn/openapi/v1/magicubes/balance`（Bearer
+> 访问令牌；匿名 401）。返回
+> `{"success":true,"request_id":"…","data":{"total_balance":143,"available_balance":143,"frozen_amount":0}}`。
+> `records/consumptions/usage/history` 等派生端点全部 404——官方只给余额快照。
+> 因此面板设计升级：**官方魔粒余额为主数据源**（真余额），本地计数降级为辅助
+> （经本插件的调用/token），原 §结论 1 只对「推理响应头」成立。魔粒的计费语义
+> （每次调用扣多少、24h/90d 有效期分层）官方未在端点中披露，待观察。
+
 目的：在写第一行实现前，回答一个问题——**魔搭上游到底有没有任何额度/限流信号可供面板消费？** 这决定 v1 面板走「响应头派」还是「本地计数派」。
 
 环境：本机 Windows（Git Bash curl），Node 24.16。令牌来自 DSH 凭据服务既有的 `MODELSCOPE_API_KEY` 引用（长度 39，`ms-` 前缀形态），全程未回显。

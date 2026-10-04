@@ -107,6 +107,44 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
     },
 
     /**
+     * 官方「魔粒」余额：GET siteBase/openapi/v1/magicubes/balance（Bearer
+     * 令牌；2026-10-04 实测可用，匿名 401，SPIKE.md §魔粒）。coalesced 缓存
+     * cacheSeconds，缓存键带令牌指纹——换令牌 ≤1 个 TTL 内必然读到新身份。
+     */
+    async fetchBalance(): Promise<{ available: number | null; total: number | null; frozen: number | null; fetchedAt: string }> {
+      const { value: token } = await tokenStore.resolve();
+      if (token === "") {
+        throw pluginError(CODE.AUTH_ERROR, "no ModelScope token configured — set MODELSCOPE_API_KEY or save one in the panel");
+      }
+      const url = settings.siteBase + "/openapi/v1/magicubes/balance";
+      const key = "balance#" + token.slice(-6);
+      return await read(key, async () => {
+        const response = await fetchWithTimeout(url, {
+          method: "GET",
+          headers: { authorization: "Bearer " + token, accept: "application/json" }
+        });
+        if (!response.ok) {
+          const message = await readErrorMessage(response);
+          const code = classifyStatus(response.status);
+          throw pluginError(code, redactSecrets("magicube balance failed with HTTP " + String(response.status) + (message === "" ? "" : ": " + message)));
+        }
+        const json = (await response.json().catch(() => null)) as { success?: unknown; data?: unknown } | null;
+        const data = json !== null && typeof json === "object" ? (json as { data?: unknown }).data : null;
+        if (json === null || typeof json !== "object" || json.success !== true || data === null || typeof data !== "object") {
+          throw pluginError(CODE.UPSTREAM_ERROR, "magicube balance shape drifted (expected {success:true, data:{total_balance,available_balance,frozen_amount}})");
+        }
+        const numOr = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : null);
+        const row = data as { total_balance?: unknown; available_balance?: unknown; frozen_amount?: unknown };
+        return {
+          available: numOr(row.available_balance),
+          total: numOr(row.total_balance),
+          frozen: numOr(row.frozen_amount),
+          fetchedAt: new Date().toISOString()
+        };
+      }, settings.cacheSeconds * 1000) as { available: number | null; total: number | null; frozen: number | null; fetchedAt: string };
+    },
+
+    /**
      * 一次 probe 调用。
      *
      * - usage：真调用（1 个 max_tokens 的 ping），**消耗 1 次免费额度**，

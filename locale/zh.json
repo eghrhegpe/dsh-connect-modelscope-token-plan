@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "魔搭接入 · 额度面板",
+    "description": "魔搭（ModelScope）API-Inference 免费额度面板：官方魔粒余额、本地调用计数与趋势、限流事件流、免认证模型目录与零额度令牌校验，可选把魔搭注册成 DSH 的 OpenAI 兼容 provider（路线图）。"
+  }
+}
