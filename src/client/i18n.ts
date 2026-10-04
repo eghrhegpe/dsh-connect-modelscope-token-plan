@@ -58,6 +58,8 @@ export const zh = {
   // 模型 tab 顶部「接入为 DSH 模型」区块（provider 注册 + 允许清单）。
   // 「试调」保留但降级为次要动作，所以它把「消耗额度」写进按钮本身。
   "models.probeKept": "试调（单次，消耗 1 次免费额度）",
+  "models.viewOnSite": "在魔搭查看 →",
+  "models.viewOnSiteTitle": "打开模型详情页（魔粒单价等只在网页展示）",
   "section.provider": "接入为 DSH 模型",
   "provider.enable": "把魔搭模型接入 DSH 模型选择器",
   "provider.on": "已接入",
@@ -159,6 +161,8 @@ export const en: typeof zh = {
   // The old "Try" probe survives as a SECONDARY action, so its copy carries
   // the cost it incurs.
   "models.probeKept": "Test call (consumes one free call)",
+  "models.viewOnSite": "View on ModelScope →",
+  "models.viewOnSiteTitle": "Open the model page (per-model Magicube price is web-only)",
   "section.provider": "Register as a DSH model",
   "provider.enable": "Register ModelScope models in the DSH model picker",
   "provider.on": "On",

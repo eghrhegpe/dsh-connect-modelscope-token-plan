@@ -34,3 +34,4 @@
 - **已知限制：`reasoning` 恒为 false**。魔搭 API-Inference 是多模型代理，是否吃 `reasoning_effort` 取决于背后那个模型；本插件无法离线得知每个 id 的档位表，保守默认不发该参数（模型用自己的默认），也不提供思考强度选择器。「宁可不选，不可错发」——发错档位会整条请求 400。见 [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md) §4。
 - 额度常数来自社区公开信息，非官方数据；官方调整后需要手动更新配置。
 - 429 响应形状未实测（不值得烧额度去触发），解析按 OpenAI 惯例兼容，漂移时面板会给 `shapeWarnings`。
+- 面板「模型」tab 的每个模型都外链到其魔搭详情页（`https://www.modelscope.cn/models/{owner}/{model}`）：魔粒单价只在网页展示、不在官方 API，所以这只是一个**人工核对用的跳转，不是数据源**（「为什么没有按模型消耗 API」见 [docs/REFERENCES.md](docs/REFERENCES.md)）。

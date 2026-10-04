@@ -44,3 +44,15 @@ export const MODELSCOPE_TOKEN_URL = "https://modelscope.cn/my/myaccesstoken";
  * 见 docs/REFERENCES.md 的 userscripts 上游）。纯公开 URL，仅外链。
  */
 export const MODELSCOPE_USAGE_URL = "https://modelscope.cn/magicube/usage?tab=consume";
+
+/**
+ * 模型详情页：魔粒单价（每 1K token 多少魔粒）只在**网页**展示，不在官方
+ * OpenAPI 里（抓网页/模型卡脆弱且会漂移，不进主数据源，见 docs/REFERENCES.md）。
+ * 纯公开 URL，仅外链——面板每个模型行拼出它，让用户在网页快速查「这个模型
+ * 烧多少魔粒」。id 即 `owner/model` 标准格式；`encodeURI` 保留 `/` 为路径分隔、
+ * 转义空格等不安全字符。
+ */
+export const MODELSCOPE_MODEL_URL_BASE = "https://www.modelscope.cn/models";
+export function modelscopeModelUrl(id: string): string {
+  return `${MODELSCOPE_MODEL_URL_BASE}/${encodeURI(id)}`;
+}

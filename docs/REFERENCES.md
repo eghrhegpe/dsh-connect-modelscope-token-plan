@@ -65,6 +65,39 @@
 
 ---
 
+## 为什么没有「按模型消耗」API（以及只能本地计数）
+
+实测结论：**魔搭没有「按模型积分/魔粒消耗」的官方接口**，消费明细只存在于登录态
+网页 `https://modelscope.cn/magicube/usage?tab=consume`，API/SDK 都拿不到。三份证据：
+
+1. **官方 OpenAPI spec**（内嵌于 `modelscope_hub` SDK，v1.1.0；`tests/data/openapi.json`
+   是权威契约）：`/magicubes/*` 家族**只有一个端点** `balance`，响应 `Magicube` schema
+   只有 `total_balance` / `available_balance` / `frozen_amount`，**没有按模型拆解、也
+   没有任何消费记录端点**。全 spec 与「价格/优惠」相关的只有 `cost_after_discount` /
+   `original_cost`——那是 **Studio 云主机部署的硬件价格**（ECS 规格），与推理魔粒
+   无关。唯一的 quota 信号是业务错误码 `QuotaLimitExceed`（E3027，"magicube balance
+   exhausted"），它是**请求被拒**的报错，不是「这个模型用了多少」。
+2. **真机 spike 记录**（SPIKE.md）：`records/consumptions/usage/history` 等派生端点
+   **全部 404**；推理响应无任何限流/额度响应头，body 只有标准 `usage`（prompt/
+   completion/total_tokens），**没有魔粒字段**。
+3. **刚跑的 api-inference 探测（零成本）**：`/openapi.json`、`/v1/openapi.json`、
+   `/v1/usage` → **全 404**；只有 `/v1/models` → 200。即 api-inference 的 OpenAI 兼容
+   面就是 `models` + `chat/completions`，没暴露 usage/quota 路径。
+
+**因此**：「每个模型消耗」只能本地计数——就是插件现在做的（usage 探针 + 本地计数
+store）。对比姊妹插件：sensenova 读官方余额端点、agnes 读
+`/api/v2/subscription/credits-balance`，**都是服务端聚合余额，同样不是按模型消耗**；
+魔搭情况更差——连消费记录 API 都没有，只能做**余额差值趋势**（每日首末两次读
+balance，差值≈当日总消耗，见 ROADMAP 的 backlog）。
+
+**按模型的魔粒单价**（每 1K token 多少魔粒）在网页**模型详情页**有展示，但**不在
+官方 OpenAPI 里**——要拿只能抓网页/模型卡，脆弱且会漂移，**不进主数据源**。面板用
+模型详情页 URL（`https://www.modelscope.cn/models/{owner}/{model}`，`owner/model` 即
+标准模型 id）做**外链**（client 半边每个模型行的「在魔搭查看 →」），方便人工核对单价；
+这只是网页跳转，**不是数据源**。
+
+---
+
 ## 通用教训（对应「有了工作区就要把数据拉下来」）
 
 本次 spike 只靠猜端点 + 试探，漏掉了 OpenAPI 里现成的 `/users/me`、`/models`

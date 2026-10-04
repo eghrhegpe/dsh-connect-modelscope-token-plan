@@ -13,7 +13,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 
 //#endregion
 //#region src/client/const.ts
-	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL;
+	function modelscopeModelUrl(id) {
+		return `${MODELSCOPE_MODEL_URL_BASE}/${encodeURI(id)}`;
+	}
+	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE;
 	var init_const = __esmMin((() => {
 		NS = "dsh-connect-modelscope-token-plan";
 		PANEL_ID = NS;
@@ -28,6 +31,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		HIDE_ALL_MODELS = "__hide_all__";
 		MODELSCOPE_TOKEN_URL = "https://modelscope.cn/my/myaccesstoken";
 		MODELSCOPE_USAGE_URL = "https://modelscope.cn/magicube/usage?tab=consume";
+		MODELSCOPE_MODEL_URL_BASE = "https://www.modelscope.cn/models";
 	}));
 
 //#endregion
@@ -79,6 +83,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"probe.validOk": "令牌有效（HTTP {status}）",
 			"probe.fail": "失败：{error}",
 			"models.probeKept": "试调（单次，消耗 1 次免费额度）",
+			"models.viewOnSite": "在魔搭查看 →",
+			"models.viewOnSiteTitle": "打开模型详情页（魔粒单价等只在网页展示）",
 			"section.provider": "接入为 DSH 模型",
 			"provider.enable": "把魔搭模型接入 DSH 模型选择器",
 			"provider.on": "已接入",
@@ -166,6 +172,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"probe.validOk": "Token valid (HTTP {status})",
 			"probe.fail": "Failed: {error}",
 			"models.probeKept": "Test call (consumes one free call)",
+			"models.viewOnSite": "View on ModelScope →",
+			"models.viewOnSiteTitle": "Open the model page (per-model Magicube price is web-only)",
 			"section.provider": "Register as a DSH model",
 			"provider.enable": "Register ModelScope models in the DSH model picker",
 			"provider.on": "On",
@@ -1281,7 +1289,17 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			}, row.name)), row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null, row.quotaExhausted === true ? h("span", { style: {
 				...S.modelBadge,
 				color: "var(--dsw-alias-state-error-primary)"
-			} }, tt("provider.quotaExhausted")) : null));
+			} }, tt("provider.quotaExhausted")) : null, h("a", {
+				style: {
+					...S.formNote,
+					margin: 0,
+					marginLeft: "auto"
+				},
+				href: modelscopeModelUrl(row.id),
+				target: "_blank",
+				rel: "noreferrer",
+				title: tt("models.viewOnSiteTitle")
+			}, tt("models.viewOnSite"))));
 		})), h("div", { style: S.rosterFoot }, h("button", {
 			type: "button",
 			style: S.button,
@@ -1721,7 +1739,16 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			disabled: probeBusy,
 			onClick: () => void runProbe(id, "usage"),
 			title: tt("probe.usage")
-		}, tt("models.probeKept"))))) : null, probeBusy ? h("div", { style: S.formNote }, tt("probe.busy")) : null, probeResult !== null ? h("div", {
+		}, tt("models.probeKept")), h("a", {
+			style: {
+				...S.formNote,
+				margin: 0
+			},
+			href: modelscopeModelUrl(id),
+			target: "_blank",
+			rel: "noreferrer",
+			title: tt("models.viewOnSiteTitle")
+		}, tt("models.viewOnSite"))))) : null, probeBusy ? h("div", { style: S.formNote }, tt("probe.busy")) : null, probeResult !== null ? h("div", {
 			style: S.formNote,
 			role: "status"
 		}, probeResult) : null, probeError !== null ? h("div", {

@@ -8,7 +8,7 @@ import { count, format, isoTime } from "./format.ts";
 import { h, useEffect, useMemo, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
-import { HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL } from "./const.ts";
+import { HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, modelscopeModelUrl } from "./const.ts";
 import { providerOf } from "./snapshot.ts";
 import { ToggleSwitch } from "./toggle-switch.ts";
 import type { BalanceData, ProviderStatus, QuotaEvent, Snapshot, TrendBucket, TokenStatus } from "../shared/wire.ts";
@@ -336,7 +336,8 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onRe
                 row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null,
                 row.quotaExhausted === true
                   ? h("span", { style: { ...S.modelBadge, color: "var(--dsw-alias-state-error-primary)" } }, tt("provider.quotaExhausted"))
-                  : null
+                  : null,
+                h("a", { style: { ...S.formNote, margin: 0, marginLeft: "auto" }, href: modelscopeModelUrl(row.id), target: "_blank", rel: "noreferrer", title: tt("models.viewOnSiteTitle") }, tt("models.viewOnSite"))
               )
             );
           })

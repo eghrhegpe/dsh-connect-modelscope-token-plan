@@ -25,6 +25,15 @@
   与 `test/provider-routes.test.mjs`（路由形状 / 哨兵 / 信任围栏），共 8 套件全绿；
   typecheck / build / doctor 全绿。
 - 设计契约见 docs/PROVIDER-M4.md。
+- **模型行外链魔搭详情页**：`const.ts` 新增 `MODELSCOPE_MODEL_URL_BASE` 与
+  `modelscopeModelUrl(id)`（拼 `https://www.modelscope.cn/models/{owner}/{model}`，
+  id 即标准 `owner/model`）；面板「模型」tab 完整目录 + 「接入为 DSH 模型」roster
+  的每行加「在魔搭查看 →」外链（新标签页打开模型详情页，魔粒单价只在网页展示，方便
+  人工核对；非数据源）。i18n zh/en 补 `models.viewOnSite` / `models.viewOnSiteTitle`。
+- **docs/REFERENCES.md** 补「为什么没有按模型消耗 API」一节：三份证据（官方 OpenAPI
+  spec / SPIKE / api-inference 探测）坐实魔搭无按模型消耗接口，消费明细只在登录态网页；
+  对比姊妹插件（sensenova/agnes 读服务端聚合余额），魔搭只能做余额差值趋势；按模型魔粒
+  单价在网页模型详情页、不在 OpenAPI，不进主数据源。README 诚实声明同步一句。
 
 ## 0.1.0（未发布）
 
