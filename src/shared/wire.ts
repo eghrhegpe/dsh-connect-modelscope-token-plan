@@ -51,9 +51,11 @@ export interface ModelEntry {
 /** 令牌状态。valid: null = 未检查过（不是「有效」也不是「无效」）。 */
 export interface TokenStatus {
   present: boolean;
-  source: "credentials" | "env" | "none";
+  source: "credentials" | "env" | "none" | "memory";
   valid: boolean | null;
   checkedAt: string | null;
+  /** true = 这台 Host 没有凭据服务，面板保存的令牌重启即丢。 */
+  ephemeral: boolean;
 }
 
 /** 成功快照。字段增删必须同步 test/wire.test.mjs 的钉死清单与面板 wire。 */
