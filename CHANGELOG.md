@@ -50,6 +50,14 @@
   免认证、零推理额度（与余额同主机 siteBase）。新增 `test/inference-vision.test.mjs`（mock
   详情端点端到端验证）+ `provider.test.mjs` 补 4 条 tasks 断言。docs/REFERENCES.md「vision」
   一节据实重写（此前「零模态元数据、只能策展」的断言不准确）。
+- **vision 词表真机全量核实 + 策展清单补全**：逐条拉当前 35 条目录的详情端点，确认任务名
+  词表只有 4 个——`text-generation`(16)、`image-text-to-text`(14)、`image-to-image`(2)、
+  `text2text-generation`(1)，**没有任何模型被标成正则扩展位里的词**，故 `VISION_INPUT_TASKS`
+  实际只命中 `image-text-to-text`（扩展位保持防御性，未放宽到会误伤图出的词）。
+  `KNOWN_VISION_IDS` 由 2 条补全到全部 14 条实测吃图模型——其中 `MiniMax-M3`/`Intern-S1`
+  系列/`Step-3.7-Flash` 名字不含 vl/vision，名字启发会漏，详情端点整段不可达时也能保住准确
+  视觉标签。`provider.test.mjs` 逐条断言 14 条兜底覆盖 + 3 条「名字无视觉 token 靠策展捞回」。
+  （`early-access/EA-29B-A4B` 详情端点 404、`Step-3.5-Flash` 无 Tasks，均自动回退名字启发。）
 
 ## 0.1.0（未发布）
 

@@ -43,6 +43,33 @@ import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_S
   assert.equal(isVisionModel(normalizeEntry({ id: "deepseek-ai/DeepSeek-V4.1-Flash" })), true, "策展清单命中 → vision（名字无 vl 但能吃图）");
   assert.equal(isVisionModel(normalizeEntry({ id: "Qwen/Qwen3.8-Flash-Next" })), true, "官方 SDK 示例证明能吃图 → vision（名字无 vl/vision）");
   assert.equal(isVisionModel(normalizeEntry({ id: "deepseek-ai/DeepSeek-V4-Pro" })), false, "未策展且名字无视觉 token → 非 vision");
+  // 策展清单 = 详情端点实测吃图的全量（2026-10-04，api-inference 35 条目录里共 14 条
+  // image-text-to-text）。这里逐条验证离线兜底覆盖完整，防止加了模型却漏进清单。
+  {
+    const curatedVision = [
+      "deepseek-ai/DeepSeek-V4.1-Flash",
+      "MiniMax/MiniMax-M3",
+      "OpenGVLab/InternVL3_5-241B-A28B",
+      "PaddlePaddle/ERNIE-4.5-VL-28B-A3B-PT",
+      "Qwen/Qwen3.5-122B-A10B",
+      "Qwen/Qwen3.5-27B",
+      "Qwen/Qwen3.5-35B-A3B",
+      "Qwen/Qwen3.5-397B-A17B",
+      "Qwen/Qwen3.8-27B",
+      "Qwen/Qwen3.8-Flash-Next",
+      "Shanghai_AI_Laboratory/Intern-S1",
+      "Shanghai_AI_Laboratory/Intern-S1-mini",
+      "Shanghai_AI_Laboratory/Intern-S2-Preview",
+      "stepfun-ai/Step-3.7-Flash"
+    ];
+    for (const id of curatedVision) {
+      assert.equal(isVisionModel(normalizeEntry({ id })), true, `策展兜底覆盖 ${id}`);
+    }
+    // 名字启发漏判、只能靠策展清单捞回的代表（名字不含 vl/vision/internvl 等 token）
+    assert.equal(isVisionModel(normalizeEntry({ id: "MiniMax/MiniMax-M3" })), true, "MiniMax-M3 名字无视觉 token，靠策展捞回");
+    assert.equal(isVisionModel(normalizeEntry({ id: "Shanghai_AI_Laboratory/Intern-S1" })), true, "Intern-S1 名字无视觉 token，靠策展捞回");
+    assert.equal(isVisionModel(normalizeEntry({ id: "stepfun-ai/Step-3.7-Flash" })), true, "Step-3.7-Flash 名字无视觉 token，靠策展捞回");
+  }
   // 详情端点 Tasks[].Name 精确判定（fetchModels 会把标签挂到 entry.tasks）
   assert.equal(isVisionModel(normalizeEntry({ id: "deepseek-ai/DeepSeek-V4.1-Flash", tasks: ["image-text-to-text"] })), true, "tasks 含 image-text-to-text → vision（精确，无需策展/名字）");
   assert.equal(isVisionModel(normalizeEntry({ id: "Qwen/Qwen-Image-Edit", tasks: ["image-to-image"] })), false, "tasks 含 image-to-image（图出非图入）→ 非 vision，不被误判");
