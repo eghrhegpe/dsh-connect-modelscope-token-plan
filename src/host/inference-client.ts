@@ -18,6 +18,7 @@
  */
 import { createCoalescedFetch } from "./coalesced-fetch.ts";
 import { CODE, classifyRateLimit, classifyStatus, parseRetryAfterMs } from "./codes.ts";
+import { normalizeEntry } from "./llm-models.ts";
 import { pluginError, errMsg, redactSecrets } from "./util.ts";
 import type { ResolvedSettings } from "./host-config.ts";
 import type { HostDeps } from "./types.ts";
@@ -33,6 +34,23 @@ export interface ProbeSuccess {
   modelId: string;
   usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null;
   elapsedMs: number;
+}
+
+/**
+ * 归一后的目录条目（M4 §2 的消费形状）。
+ *
+ * llm-models.ts 的 `CatalogEntry` 按 §3 声明为宽形状（`{id?: unknown; name?:
+ * unknown; [k: string]: unknown}`），是「条目被整条透传」的形态；本插件要喂给
+ * 面板/roster 的是这份**已判定的投影**，所以在这里单独声明窄形状。运行时字段
+ * 确实都是这个形状（`normalizeEntry` 产出的 id/name 是字符串、vision 是布尔），
+ * 差异只在类型标注，故以 `as unknown as` 断言一次。
+ */
+export interface CatalogEntry {
+  id: string;
+  name: string;
+  vision: boolean;
+  contextWindow: number;
+  maxOutputLength: number;
 }
 
 /**
@@ -83,9 +101,11 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
   return {
     /**
      * 模型目录：GET apiBase/models，免认证、零额度，coalesced 缓存
-     * cacheSeconds。返回 id 列表；形状漂移抛 UPSTREAM_ERROR 并带 detail。
+     * cacheSeconds。返回归一后的目录条目（entries，M4 用来建 descriptor）与
+     * 派生的 id 列表（ids，旧消费方继续可用）——两条路线读同一份条目，不会漂移；
+     * 形状漂移抛 UPSTREAM_ERROR 并带 detail。
      */
-    async fetchModels(): Promise<{ ids: string[]; fetchedAt: string }> {
+    async fetchModels(): Promise<{ entries: CatalogEntry[]; ids: string[]; fetchedAt: string }> {
       const url = settings.apiBase + "/models";
       const body = await read("models", async () => {
         const response = await fetchWithTimeout(url, { method: "GET" });
@@ -98,11 +118,14 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
         if (json === null || typeof json !== "object" || json.object !== "list" || !Array.isArray(json.data)) {
           throw pluginError(CODE.UPSTREAM_ERROR, "model catalog shape drifted (expected {object:'list', data:[...]})");
         }
-        const ids = (json.data as unknown[])
-          .map((entry) => (entry && typeof entry === "object" ? (entry as { id?: unknown }).id : null))
-          .filter((id): id is string => typeof id === "string" && id !== "");
-        return { ids, fetchedAt: new Date().toISOString() };
-      }, settings.cacheSeconds * 1000) as { ids: string[]; fetchedAt: string };
+        // 判断集中一份：inference-client 只透传原始条目，vision/窗口/输出上限
+        // 全由 llm-models.normalizeEntry 判（§2），本文件不做第二次判断。
+        const entries = (json.data as unknown[])
+          .map((raw) => normalizeEntry(raw) as unknown as CatalogEntry)
+          .filter((entry) => entry.id !== "");
+        const ids = entries.map((entry) => entry.id);
+        return { entries, ids, fetchedAt: new Date().toISOString() };
+      }, settings.cacheSeconds * 1000) as { entries: CatalogEntry[]; ids: string[]; fetchedAt: string };
       return body;
     },
 

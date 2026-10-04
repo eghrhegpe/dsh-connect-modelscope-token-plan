@@ -13,7 +13,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 
 //#endregion
 //#region src/client/const.ts
-	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL;
+	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL;
 	var init_const = __esmMin((() => {
 		NS = "dsh-connect-modelscope-token-plan";
 		PANEL_ID = NS;
@@ -22,6 +22,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		TOKEN_PATH = `/api/${NS}/token`;
 		TOKEN_FORGET_PATH = `/api/${NS}/token/forget`;
 		PROBE_PATH = `/api/${NS}/probe`;
+		PROVIDER_PATH = `/api/${NS}/provider`;
+		PROVIDER_ROSTER_PATH = `/api/${NS}/provider/roster`;
+		PROVIDER_RESET_PATH = `/api/${NS}/provider/reset`;
+		HIDE_ALL_MODELS = "__hide_all__";
 		MODELSCOPE_TOKEN_URL = "https://modelscope.cn/my/myaccesstoken";
 		MODELSCOPE_USAGE_URL = "https://modelscope.cn/magicube/usage?tab=consume";
 	}));
@@ -74,6 +78,27 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"probe.ok": "调用成功：{tokens} tokens / {ms}ms",
 			"probe.validOk": "令牌有效（HTTP {status}）",
 			"probe.fail": "失败：{error}",
+			"models.probeKept": "试调（单次，消耗 1 次免费额度）",
+			"section.provider": "接入为 DSH 模型",
+			"provider.enable": "把魔搭模型接入 DSH 模型选择器",
+			"provider.on": "已接入",
+			"provider.off": "未接入",
+			"provider.registered": "已注册（模型可在选择器里选用）",
+			"provider.notRegistered": "未注册",
+			"provider.llmMissing": "本机 Host 未提供 LLM 注册服务",
+			"provider.error": "接入失败：{error}",
+			"provider.models": "启用哪些模型",
+			"provider.allowAll": "全部",
+			"provider.hideAll": "全部隐藏",
+			"provider.saveList": "保存清单",
+			"provider.reset": "回到默认",
+			"provider.enabledCount": "已启用 {count} / {total}",
+			"provider.rosterHint": "勾选要进入 DSH 模型选择器的模型；不勾 = 全部提供",
+			"provider.quotaExhausted": "额度耗尽",
+			"provider.vision": "视觉",
+			"provider.notConfigured": "还没有访问令牌，先到「接入」tab 配置",
+			"provider.source.panel": "面板",
+			"provider.source.config": "配置",
 			"trend.none": "还没有本地调用记录。",
 			"trend.legend": "柱长相对区间内最大值，仅本地口径。",
 			"events.none": "暂无事件。",
@@ -140,6 +165,27 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"probe.ok": "Call succeeded: {tokens} tokens / {ms}ms",
 			"probe.validOk": "Token valid (HTTP {status})",
 			"probe.fail": "Failed: {error}",
+			"models.probeKept": "Test call (consumes one free call)",
+			"section.provider": "Register as a DSH model",
+			"provider.enable": "Register ModelScope models in the DSH model picker",
+			"provider.on": "On",
+			"provider.off": "Off",
+			"provider.registered": "Registered (models selectable in the picker)",
+			"provider.notRegistered": "Not registered",
+			"provider.llmMissing": "This Host exposes no LLM service",
+			"provider.error": "Provider error: {error}",
+			"provider.models": "Which models to enable",
+			"provider.allowAll": "All",
+			"provider.hideAll": "Hide all",
+			"provider.saveList": "Save list",
+			"provider.reset": "Reset",
+			"provider.enabledCount": "{count} / {total} enabled",
+			"provider.rosterHint": "Tick the models to offer; unticked = offer all",
+			"provider.quotaExhausted": "Quota exhausted",
+			"provider.vision": "vision",
+			"provider.notConfigured": "No token yet — configure it in the Access tab",
+			"provider.source.panel": "panel",
+			"provider.source.config": "config",
 			"trend.none": "No local call records yet.",
 			"trend.legend": "Bar lengths are relative to the maximum in the range (local scope only).",
 			"events.none": "No events.",
@@ -238,13 +284,14 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		if (api === null) throw new Error("client: react used before clientFactory ran");
 		return api;
 	}
-	var api, h, useState, useEffect, useCallback, useRef;
+	var api, h, useState, useEffect, useCallback, useMemo, useRef;
 	var init_runtime = __esmMin((() => {
 		api = null;
 		h = (type, props, ...children) => reactApi().createElement(type, props, ...children);
 		useState = (initial) => reactApi().useState(initial);
 		useEffect = (effect, deps) => reactApi().useEffect(effect, deps);
 		useCallback = (callback, deps) => reactApi().useCallback(callback, deps);
+		useMemo = (factory, deps) => reactApi().useMemo(factory, deps);
 		useRef = (initial) => reactApi().useRef(initial);
 	}));
 
@@ -738,6 +785,193 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	}));
 
 //#endregion
+//#region src/client/snapshot.ts
+/** 读一个快照应答。HTTP 恒 200，成败看 body.ok。 */
+	function interpretSnapshot(body) {
+		const payload = body;
+		if (payload && payload.ok === false) return {
+			data: null,
+			error: {
+				message: payload.error || "unexpected payload",
+				code: payload.code
+			}
+		};
+		if (!payload || payload.ok !== true) return {
+			data: null,
+			error: "unexpected payload"
+		};
+		return {
+			data: payload,
+			error: null
+		};
+	}
+	/**
+	* 把 wire/路由返回的 provider 块归一成 `ProviderStatus`；不合法一律降级。
+	* 形状由 wire.ts 钉死，本函数只做防御性归一（旧 Host 可能缺字段）。
+	*/
+	function providerOf(raw) {
+		if (raw === null || typeof raw !== "object") return DEGRADED_PROVIDER;
+		const p = raw;
+		const ids = Array.isArray(p.enabledIds) ? p.enabledIds.map((id) => String(id ?? "")).filter((id) => id !== "") : [];
+		const roster = Array.isArray(p.roster) ? p.roster.map((entry) => {
+			const row = entry ?? {};
+			const id = String(row.id ?? "");
+			return {
+				id,
+				name: typeof row.name === "string" && row.name !== "" ? row.name : id,
+				vision: row.vision === true,
+				available: row.available !== false,
+				quotaExhausted: row.quotaExhausted === true
+			};
+		}).filter((entry) => entry.id !== "") : [];
+		return {
+			enabled: p.enabled === true,
+			source: p.source === "panel" ? "panel" : "config",
+			llmAvailable: p.llmAvailable === true,
+			registered: p.registered === true,
+			error: typeof p.error === "string" ? p.error : null,
+			modelCount: typeof p.modelCount === "number" ? p.modelCount : roster.length,
+			enabledCount: typeof p.enabledCount === "number" ? p.enabledCount : 0,
+			allowed: p.allowed === "none" ? "none" : p.allowed === "list" ? "list" : "all",
+			enabledIds: ids,
+			roster
+		};
+	}
+	/** 非 2xx 响应的降级读法（无 body，状态码是唯一线索）。 */
+	function errorOfStatus(status) {
+		if (status === 401 || status === 403) return {
+			message: `HTTP ${status}`,
+			code: "auth_error"
+		};
+		return `HTTP ${status}`;
+	}
+	/** 面板决策：这张快照意味着什么。纯函数，Node 套件驱动同一个函数。 */
+	function viewOf(data, error, tt) {
+		const failure = error === null || error === void 0 ? null : typeof error === "string" ? {
+			message: error,
+			code: null
+		} : error;
+		const needsSetup = data === null && !FORM_EXCLUDED_CODES.has(failure?.code ?? null);
+		const guidanceKey = failure === null ? null : GUIDANCE_BY_CODE[failure.code] ?? null;
+		return {
+			failure,
+			needsSetup,
+			guidanceKey,
+			guidance: guidanceKey === null ? null : guidanceKey === "panel.configError" ? format(tt(guidanceKey), { error: failure?.message }) : tt(guidanceKey),
+			shapeWarnings: Array.isArray(data?.shapeWarnings) ? data.shapeWarnings : []
+		};
+	}
+	var DEGRADED_PROVIDER, GUIDANCE_BY_CODE, FORM_EXCLUDED_CODES;
+	var init_snapshot = __esmMin((() => {
+		init_format();
+		DEGRADED_PROVIDER = Object.freeze({
+			enabled: false,
+			source: "config",
+			llmAvailable: false,
+			registered: false,
+			error: "unavailable",
+			modelCount: 0,
+			enabledCount: 0,
+			allowed: "all",
+			enabledIds: [],
+			roster: []
+		});
+		GUIDANCE_BY_CODE = Object.freeze({
+			auth_error: "panel.authError",
+			config_error: "panel.configError",
+			network_error: "panel.networkError",
+			timeout_error: "panel.timeout",
+			upstream_error: "panel.upstream",
+			rate_limited: "panel.upstream",
+			quota_exceeded: "panel.upstream"
+		});
+		FORM_EXCLUDED_CODES = Object.freeze(/* @__PURE__ */ new Set([
+			"config_error",
+			"network_error",
+			"timeout_error",
+			"upstream_error",
+			"rate_limited",
+			"quota_exceeded"
+		]));
+	}));
+
+//#endregion
+//#region src/client/toggle-switch.ts
+/**
+	* 滑杆开关 + 短标签 + tooltip。
+	* @param props - 见 {@link ToggleSwitchProps}。
+	* @returns 包着真 checkbox input 的 `<label>` 树。
+	*/
+	function ToggleSwitch({ checked, onChange, label, busyLabel, busy = false, title }) {
+		const on = checked === true;
+		const text = busy && busyLabel !== void 0 ? busyLabel : label;
+		return h("label", {
+			style: {
+				display: "inline-flex",
+				alignItems: "center",
+				gap: 8,
+				position: "relative",
+				cursor: busy ? "wait" : "pointer",
+				opacity: busy ? .55 : 1,
+				verticalAlign: "middle"
+			},
+			...title !== void 0 && title !== "" ? { title } : {}
+		}, h("span", { style: {
+			position: "relative",
+			display: "inline-block",
+			width: TRACK_W,
+			height: TRACK_H,
+			flex: "none"
+		} }, h("input", {
+			type: "checkbox",
+			checked: on,
+			disabled: busy,
+			onChange,
+			style: {
+				position: "absolute",
+				inset: 0,
+				width: TRACK_W,
+				height: TRACK_H,
+				margin: 0,
+				opacity: 0,
+				cursor: busy ? "wait" : "pointer"
+			}
+		}), h("span", {
+			"aria-hidden": "true",
+			style: {
+				position: "absolute",
+				inset: 0,
+				borderRadius: 999,
+				pointerEvents: "none",
+				border: `1px solid ${on ? "var(--modelscope-brand, #7B3FF2)" : "var(--dsw-alias-border-l2, #36373b)"}`,
+				background: on ? "var(--modelscope-brand, #7B3FF2)" : "var(--dsw-alias-bg-layer-2, #2a2b31)",
+				transition: "background .15s, border-color .15s"
+			}
+		}, h("span", { style: {
+			position: "absolute",
+			top: 1.5,
+			left: 1.5,
+			width: THUMB,
+			height: THUMB,
+			borderRadius: "50%",
+			background: on ? "#fff" : "var(--dsw-alias-label-tertiary, #999)",
+			transform: on ? `translateX(${TRAVEL}px)` : "translateX(0)",
+			transition: "transform .15s, background .15s"
+		} }))), h("span", { style: {
+			fontSize: 13,
+			color: "var(--dsw-alias-label-primary, #e6e6e6)"
+		} }, text));
+	}
+	var TRACK_W, TRACK_H, THUMB, TRAVEL;
+	var init_toggle_switch = __esmMin((() => {
+		init_runtime();
+		TRACK_W = 30;
+		TRACK_H = 17;
+		THUMB = 12;
+		TRAVEL = 13;
+	}));
+
+//#endregion
 //#region src/client/cards.ts
 /** 可折叠 section 卡：全宽头部按钮 + 旋转 chevron；open/onToggle 由 props 进。 */
 	function SectionCard({ title, open, onToggle, children, tt }) {
@@ -902,12 +1136,174 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			rel: "noreferrer"
 		}, tt("token.link")));
 	}
+	/**
+	* 接入为 DSH 模型的区块（开关 + 注册状态 + 允许清单）。
+	*
+	* 这是 M4 把抽象「试调」升级成真接入的落点：开关翻转即 POST provider 路由，
+	* Host 在同一次请求里落盘并重注册适配器；允许清单勾完点「保存清单」即 POST
+	* roster 路由。写盘（开关/清单）失败必须让面板看见，所以失败由调用方传进
+	* `error` 一行渲染出来，不做乐观更新。
+	*
+	* 只有 ProviderCard 持 draft 状态（勾选清单），其余都是展示组件——与 TokenForm
+	* 同一类 hook 边界，Node 渲染套件可以驱动无状态的部分。draft 在 Host 值真正
+	* 变化时才跟过去（用 JSON 串做稳定信号，避免每次轮询都用新数组把在编辑的勾选
+	* 冲掉）；保存后由调用方 `load()` 刷新，快照回显的就是已落盘的值。
+	*
+	* 允许清单的语义（路由 §9 钉死）：空清单 = 不过滤 = 全部提供，所以「全部」
+	* 发 `[]`；「全部隐藏」发哨兵 `HIDE_ALL_MODELS`（「什么都不提供」）。哨兵
+	* 不是任何真实模型 id，所以同一套 `draft.includes(id)` 的勾选判断天然不会把
+	* 它画成勾中——不需要特判。
+	*
+	* 额度耗尽的模型保留在清单里（灰显、勾选框禁用），这是故意的：roster 是目录
+	* 事实，picker 那边由 Host 自己丢掉它们，面板不替它删。
+	*/
+	function ProviderCard({ provider, busy, error, onToggle, onSaveList, onReset, tokenPresent, tt }) {
+		const status = providerOf(provider);
+		const enabled = status.enabled === true;
+		const hostIds = status.enabledIds;
+		const hostKey = useMemo(() => JSON.stringify(hostIds), [hostIds]);
+		const [draft, setDraft] = useState(() => hostIds.slice());
+		useEffect(() => {
+			setDraft(hostIds);
+		}, [hostKey]);
+		const roster = status.roster;
+		const rosterIds = roster.map((row) => row.id);
+		const toggleOne = (id) => setDraft((current) => current.includes(id) ? current.filter((x) => x !== id) : [...current, id]);
+		const ticked = roster.filter((row) => draft.includes(row.id)).length;
+		const degraded = status.error === "unavailable";
+		let statusNode;
+		if (!degraded && typeof status.error === "string" && status.error !== "") statusNode = h("div", {
+			style: S.formError,
+			role: "alert"
+		}, format(tt("provider.error"), { error: status.error }));
+		else if (status.registered === true) statusNode = h("div", {
+			style: {
+				fontSize: 12,
+				color: "var(--dsw-alias-label-secondary)"
+			},
+			role: "status"
+		}, tt("provider.registered"));
+		else if (status.llmAvailable !== true) statusNode = h("div", { style: {
+			...S.formNote,
+			color: "var(--dsw-alias-state-warn-primary)"
+		} }, tt("provider.llmMissing"));
+		else statusNode = h("div", {
+			style: {
+				...S.muted,
+				fontSize: 12
+			},
+			role: "status"
+		}, tt("provider.notRegistered"));
+		const tokenHint = enabled && tokenPresent === false ? h("div", { style: {
+			...S.formNote,
+			color: "var(--dsw-alias-state-warn-primary)"
+		} }, tt("provider.notConfigured")) : null;
+		const sourceKey = status.source === "panel" ? "provider.source.panel" : "provider.source.config";
+		const switchRow = h("div", { style: {
+			display: "flex",
+			gap: 10,
+			alignItems: "center",
+			flexWrap: "wrap",
+			margin: "0 0 8px"
+		} }, h(ToggleSwitch, {
+			checked: enabled,
+			onChange: () => onToggle(!enabled),
+			busy,
+			label: tt(enabled ? "provider.on" : "provider.off"),
+			title: tt("provider.enable")
+		}), h("span", { style: {
+			fontSize: 11,
+			color: "var(--dsw-alias-label-secondary)"
+		} }, tt(sourceKey)));
+		const rosterBlock = roster.length === 0 ? h("div", { style: {
+			...S.muted,
+			fontSize: 12,
+			marginTop: 6
+		} }, tt("provider.rosterHint")) : h("div", { style: S.modelPanel }, h("div", { style: S.rosterTools }, h("span", {
+			style: S.rosterCount,
+			title: format(tt("provider.enabledCount"), {
+				count: ticked,
+				total: roster.length
+			})
+		}, format(tt("provider.enabledCount"), {
+			count: ticked,
+			total: roster.length
+		})), h("button", {
+			type: "button",
+			style: S.rosterBulk,
+			disabled: busy,
+			onClick: () => {
+				setDraft(rosterIds.slice());
+				onSaveList(rosterIds.slice());
+			}
+		}, tt("provider.allowAll")), h("button", {
+			type: "button",
+			style: S.rosterBulk,
+			disabled: busy,
+			onClick: () => {
+				setDraft([HIDE_ALL_MODELS]);
+				onSaveList([HIDE_ALL_MODELS]);
+			}
+		}, tt("provider.hideAll")), h("button", {
+			type: "button",
+			style: S.primary,
+			disabled: busy,
+			onClick: () => onSaveList(draft.slice())
+		}, tt("provider.saveList"))), h("ul", {
+			style: S.modelList,
+			role: "list"
+		}, roster.map((row) => {
+			const id = row.id;
+			const unusable = row.available === false || row.quotaExhausted === true;
+			return h("li", {
+				key: id,
+				style: unusable ? {
+					...S.modelRow,
+					...S.modelRowOff
+				} : S.modelRow
+			}, h("div", { style: S.modelRowHead }, h("label", { style: {
+				display: "flex",
+				alignItems: "center",
+				gap: 10,
+				flex: "1 1 auto",
+				minWidth: 0,
+				cursor: busy || unusable ? "default" : "pointer"
+			} }, h("input", {
+				type: "checkbox",
+				checked: draft.includes(id),
+				disabled: busy || unusable,
+				onChange: () => toggleOne(id),
+				style: S.modelCheck,
+				"aria-label": id
+			}), h("span", {
+				style: S.modelName,
+				title: id
+			}, row.name)), row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null, row.quotaExhausted === true ? h("span", { style: {
+				...S.modelBadge,
+				color: "var(--dsw-alias-state-error-primary)"
+			} }, tt("provider.quotaExhausted")) : null));
+		})), h("div", { style: S.rosterFoot }, h("button", {
+			type: "button",
+			style: S.button,
+			disabled: busy,
+			onClick: onReset
+		}, tt("provider.reset"))));
+		return h("div", null, switchRow, statusNode, tokenHint, h("div", { style: {
+			...S.sectionTitle,
+			margin: "18px 0 8px"
+		} }, tt("provider.models")), rosterBlock, error !== null ? h("div", {
+			style: S.formError,
+			role: "alert"
+		}, error) : null);
+	}
 	var EVENT_KIND_KEY;
 	var init_cards = __esmMin((() => {
 		init_format();
 		init_runtime();
 		init_styles();
 		init_const();
+		init_snapshot();
+		init_toggle_switch();
 		EVENT_KIND_KEY = {
 			quota: "events.quota",
 			rate_limit: "events.rate_limit",
@@ -954,73 +1350,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		return await response.json().catch(() => null);
 	}
 	var init_http = __esmMin((() => {}));
-
-//#endregion
-//#region src/client/snapshot.ts
-/** 读一个快照应答。HTTP 恒 200，成败看 body.ok。 */
-	function interpretSnapshot(body) {
-		const payload = body;
-		if (payload && payload.ok === false) return {
-			data: null,
-			error: {
-				message: payload.error || "unexpected payload",
-				code: payload.code
-			}
-		};
-		if (!payload || payload.ok !== true) return {
-			data: null,
-			error: "unexpected payload"
-		};
-		return {
-			data: payload,
-			error: null
-		};
-	}
-	/** 非 2xx 响应的降级读法（无 body，状态码是唯一线索）。 */
-	function errorOfStatus(status) {
-		if (status === 401 || status === 403) return {
-			message: `HTTP ${status}`,
-			code: "auth_error"
-		};
-		return `HTTP ${status}`;
-	}
-	/** 面板决策：这张快照意味着什么。纯函数，Node 套件驱动同一个函数。 */
-	function viewOf(data, error, tt) {
-		const failure = error === null || error === void 0 ? null : typeof error === "string" ? {
-			message: error,
-			code: null
-		} : error;
-		const needsSetup = data === null && !FORM_EXCLUDED_CODES.has(failure?.code ?? null);
-		const guidanceKey = failure === null ? null : GUIDANCE_BY_CODE[failure.code] ?? null;
-		return {
-			failure,
-			needsSetup,
-			guidanceKey,
-			guidance: guidanceKey === null ? null : guidanceKey === "panel.configError" ? format(tt(guidanceKey), { error: failure?.message }) : tt(guidanceKey),
-			shapeWarnings: Array.isArray(data?.shapeWarnings) ? data.shapeWarnings : []
-		};
-	}
-	var GUIDANCE_BY_CODE, FORM_EXCLUDED_CODES;
-	var init_snapshot = __esmMin((() => {
-		init_format();
-		GUIDANCE_BY_CODE = Object.freeze({
-			auth_error: "panel.authError",
-			config_error: "panel.configError",
-			network_error: "panel.networkError",
-			timeout_error: "panel.timeout",
-			upstream_error: "panel.upstream",
-			rate_limited: "panel.upstream",
-			quota_exceeded: "panel.upstream"
-		});
-		FORM_EXCLUDED_CODES = Object.freeze(/* @__PURE__ */ new Set([
-			"config_error",
-			"network_error",
-			"timeout_error",
-			"upstream_error",
-			"rate_limited",
-			"quota_exceeded"
-		]));
-	}));
 
 //#endregion
 //#region src/client/use-polling-interval.ts
@@ -1168,6 +1497,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			trend: true,
 			events: false,
 			catalog: true,
+			provider: true,
 			token: true
 		});
 		const [activeTab, setActiveTab] = useState("quota");
@@ -1206,6 +1536,38 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			catalog,
 			loadCatalog
 		]);
+		const rawProvider = data?.provider;
+		const hasProviderBlock = rawProvider !== void 0 && rawProvider !== null;
+		const [fetchedProvider, setFetchedProvider] = useState(null);
+		const provider = hasProviderBlock ? providerOf(rawProvider) : fetchedProvider ?? DEGRADED_PROVIDER;
+		useEffect(() => {
+			if (hasProviderBlock) return void 0;
+			let cancelled = false;
+			getJson(PROVIDER_PATH).then((body) => {
+				if (!cancelled && body !== null && body.ok === true) setFetchedProvider(providerOf(body));
+			}).catch(() => {});
+			return () => {
+				cancelled = true;
+			};
+		}, [hasProviderBlock]);
+		const [providerBusy, setProviderBusy] = useState(false);
+		const [providerError, setProviderError] = useState(null);
+		const runProviderWrite = useCallback(async (path, payload) => {
+			setProviderBusy(true);
+			setProviderError(null);
+			try {
+				const body = await postJson(path, payload);
+				if (body === null || body.ok !== true) throw new Error(typeof body?.error === "string" ? body.error : "HTTP error");
+				load();
+			} catch (reason) {
+				setProviderError(format(tt("provider.error"), { error: errorText(reason) }));
+			} finally {
+				setProviderBusy(false);
+			}
+		}, [load, tt]);
+		const toggleProvider = useCallback((enabled) => void runProviderWrite(PROVIDER_PATH, { enabled }), [runProviderWrite]);
+		const saveRoster = useCallback((enabledIds) => void runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds }), [runProviderWrite]);
+		const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
 		const [probeBusy, setProbeBusy] = useState(false);
 		const [probeResult, setProbeResult] = useState(null);
 		const [probeError, setProbeError] = useState(null);
@@ -1326,6 +1688,20 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			})));
 		};
 		const modelsBody = () => h("div", null, h(SectionCard, {
+			title: tt("section.provider"),
+			open: openSections.provider,
+			onToggle: () => toggleSection("provider"),
+			tt
+		}, h(ProviderCard, {
+			provider,
+			busy: providerBusy,
+			error: providerError,
+			onToggle: toggleProvider,
+			onSaveList: saveRoster,
+			onReset: resetProvider,
+			tokenPresent: data?.token.present === true,
+			tt
+		})), h(SectionCard, {
 			title: catalog !== null ? `${tt("section.catalog")} · ${format(tt("models.count"), { count: catalog.ids.length })}` : tt("section.catalog"),
 			open: openSections.catalog,
 			onToggle: () => toggleSection("catalog"),
@@ -1345,7 +1721,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			disabled: probeBusy,
 			onClick: () => void runProbe(id, "usage"),
 			title: tt("probe.usage")
-		}, tt("models.probeUsage"))))) : null, probeBusy ? h("div", { style: S.formNote }, tt("probe.busy")) : null, probeResult !== null ? h("div", {
+		}, tt("models.probeKept"))))) : null, probeBusy ? h("div", { style: S.formNote }, tt("probe.busy")) : null, probeResult !== null ? h("div", {
 			style: S.formNote,
 			role: "status"
 		}, probeResult) : null, probeError !== null ? h("div", {
@@ -1537,6 +1913,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 					LocalDailyCard,
 					ModelUsageTable,
 					PanelPage,
+					ProviderCard,
 					SectionCard,
 					TokenForm,
 					TrendBars

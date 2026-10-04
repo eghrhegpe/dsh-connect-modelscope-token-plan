@@ -8,14 +8,16 @@ import { registerSnapshotRoute } from "./routes/snapshot.ts";
 import { registerModelsRoute } from "./routes/models.ts";
 import { registerTokenRoute } from "./routes/token.ts";
 import { registerProbeRoute } from "./routes/probe.ts";
+import { registerProviderRoute } from "./routes/provider.ts";
 import type { Wiring } from "./types.ts";
 
-/** 注册全部四条路由，返回 off() 注销回调（注册序）。 */
+/** 注册全部路由，返回 off() 注销回调（注册序）。M4 起含 provider 路由。 */
 export function registerRoutes(ctx: any, wiring: Wiring): Array<() => void> {
   return [
     registerSnapshotRoute(ctx, wiring),
     registerModelsRoute(ctx, wiring),
     ...(registerTokenRoute(ctx, wiring) as Array<() => void>),
-    registerProbeRoute(ctx, wiring)
+    registerProbeRoute(ctx, wiring),
+    registerProviderRoute(ctx, wiring)
   ];
 }

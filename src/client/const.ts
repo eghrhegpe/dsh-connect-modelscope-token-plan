@@ -20,6 +20,18 @@ export const TOKEN_PATH = `/api/${NS}/token`;
 export const TOKEN_FORGET_PATH = `/api/${NS}/token/forget`;
 /** probe 路由（usage / validity 两种形态）。 */
 export const PROBE_PATH = `/api/${NS}/probe`;
+/** 接入为 DSH 模型 provider 的开关/状态路由。 */
+export const PROVIDER_PATH = `/api/${NS}/provider`;
+/** provider 允许清单（enabledIds）保存路由。 */
+export const PROVIDER_ROSTER_PATH = `/api/${NS}/provider/roster`;
+/** provider 开关 + 清单回到 patch 默认的路由。 */
+export const PROVIDER_RESET_PATH = `/api/${NS}/provider/reset`;
+/**
+ * 「什么都不提供」的哨兵 id：与 host/llm-models.ts 的 `HIDE_ALL_MODELS`
+ * 同一个字面量。空清单的语义是「不过滤（全部提供）」，所以「全部隐藏」
+ * 只能走这个哨兵——两端拼错一处就是「点隐藏反而全放出来」。
+ */
+export const HIDE_ALL_MODELS = "__hide_all__";
 
 /**
  * 魔搭访问令牌页：用户在这里生成/重置令牌。纯公开 URL——客户端只在新标签页

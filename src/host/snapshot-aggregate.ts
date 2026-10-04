@@ -12,6 +12,8 @@
  * @module dsh-connect-modelscope-token-plan/snapshot-aggregate
  */
 import { PLUGIN_VERSION, name } from "./host-config.ts";
+import { rosterWithAvailability, HIDE_ALL_MODELS } from "./llm-models.ts";
+import { resolveSwitchEnabled, switchSource } from "./switch-precedence.ts";
 import { errMsg } from "./util.ts";
 import type { Snapshot } from "../shared/wire.ts";
 import type { Wiring } from "./types.ts";
@@ -30,9 +32,41 @@ async function soft<T>(promise: Promise<T>): Promise<{ ok: true; value: T } | { 
   }
 }
 
+/**
+ * 把允许清单读成 M4 的三态语义（§11 的 `allowed`）。
+ *
+ * 空清单 = 不过滤（`all`）；哨兵 `HIDE_ALL_MODELS` = 什么都不提供（`none`）；
+ * 其余非空清单 = 严格白名单（`list`）。空清单已经占用了「不过滤」，所以「什么都不
+ * 提供」必须有第二种拼写——这正是 `HIDE_ALL_MODELS` 存在的原因。
+ */
+function resolveAllowed(enabledIds: string[]): "all" | "none" | "list" {
+  if (enabledIds.includes(HIDE_ALL_MODELS)) return "none";
+  if (enabledIds.length > 0) return "list";
+  return "all";
+}
+
+/**
+ * Provider 状态块降级形状：读不到开关/注册状态/目录时，面板仍然得到一个完整
+ * 可渲染的块（开关关、roster 空、error 说明原因），绝不让整条快照失败。
+ */
+function providerDegraded(error: string): Snapshot["provider"] {
+  return {
+    enabled: false,
+    source: "config",
+    llmAvailable: false,
+    registered: false,
+    error,
+    modelCount: 0,
+    enabledCount: 0,
+    allowed: "all",
+    enabledIds: [],
+    roster: []
+  };
+}
+
 /** 聚合快照 body。wiring 子集见 routes/snapshot.ts 的 Pick。 */
-export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "tokenStore" | "usageStore" | "inference" | "logger">): Promise<Snapshot> {
-  const { settings, tokenStore, usageStore, inference } = wiring;
+export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "tokenStore" | "usageStore" | "inference" | "providerStore" | "publisher" | "logger">): Promise<Snapshot> {
+  const { settings, tokenStore, usageStore, inference, providerStore, publisher } = wiring;
 
   const [tokenState, daily, perModel, trend, events] = await Promise.all([
     soft(tokenStore.state()),
@@ -56,6 +90,7 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
   // 模型目录：免认证、零额度；失败降级为 available:false + error。
   const models = await soft(inference.fetchModels());
   const modelIds = models.ok ? models.value.ids : [];
+  const modelEntries = models.ok ? models.value.entries : [];
   if (!models.ok && models.code !== "network_error") {
     // 网络抖动不值得一条常驻警告（下一轮轮询自愈）；形状漂移值得。
     shapeWarnings.push(`models: ${models.error}`);
@@ -63,6 +98,38 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
   if (tokenPresent && !balance.ok && balance.code !== "network_error") {
     shapeWarnings.push(`balance: ${balance.error}`);
   }
+
+  // ── provider 块（M4 §11）──
+  // 开关（面板值优先，patch 默认兜底）+ 注册状态 + 目录 roster，整块软失败：
+  // 任何一路读不到都走降级形状，绝不 ok:false。roster 用 llm-models 的
+  // rosterWithAvailability——面板保留额度耗尽的模型（灰显），picker 才丢弃它们，
+  // 两处口径不同是故意的。M4 阶段 unavailableIds 传 []（本插件暂无额度耗尽聚合）。
+  const provider = await soft((async () => {
+    const panel = await providerStore.enabled().catch(() => null);
+    const enabled = resolveSwitchEnabled(panel, settings.registerProvider);
+    const source = switchSource(panel);
+    const roster = rosterWithAvailability(modelEntries, []);
+    const enabledIds = Array.isArray(publisher.state.enabledIds) ? publisher.state.enabledIds : [];
+    const allowed = resolveAllowed(enabledIds);
+    const allowSet = new Set(enabledIds);
+    const enabledCount = allowed === "all"
+      ? roster.length
+      : allowed === "list"
+        ? roster.filter((row) => allowSet.has(row.id)).length
+        : 0;
+    return {
+      enabled,
+      source,
+      llmAvailable: publisher.state.llmAvailable === true,
+      registered: publisher.state.registered === true,
+      error: typeof publisher.state.error === "string" ? publisher.state.error : null,
+      modelCount: roster.length,
+      enabledCount,
+      allowed,
+      enabledIds,
+      roster
+    } satisfies Snapshot["provider"];
+  })());
 
   const usedLocal = daily.ok ? daily.value.calls : 0;
   const dailyLimit = settings.dailyQuotaTotal;
@@ -98,6 +165,8 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
       sample: modelIds.slice(0, 20),
       error: models.ok ? null : models.error
     },
+    // provider 块（M4 §11）：软失败，失败给降级形状而非整条快照失败。
+    provider: provider.ok ? provider.value : providerDegraded(provider.error),
     shapeWarnings,
     // quotaError 为 M4 预留（wire.ts 语义）；v0.1 的失败都走 shapeWarnings /
     // balance.error 呈现，此字段恒 null。

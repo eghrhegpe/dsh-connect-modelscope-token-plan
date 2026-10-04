@@ -25,6 +25,15 @@ export function registerModelsRoute(ctx: any, wiring: Pick<Wiring, "settings" | 
         writeJson(response, 200, {
           ok: true,
           models: catalog.ids.map((id) => ({ id })),
+          // M4：归一后的目录条目（不含 `raw`），供面板「接入模型」tab 勾选与展示
+          // 参数。旧面板继续读 models/count，不受影响。
+          entries: catalog.entries.map((entry) => ({
+            id: entry.id,
+            name: entry.name,
+            vision: entry.vision,
+            contextWindow: entry.contextWindow,
+            maxOutputLength: entry.maxOutputLength
+          })),
           count: catalog.ids.length,
           fetchedAt: catalog.fetchedAt,
           cacheSeconds: settings.cacheSeconds

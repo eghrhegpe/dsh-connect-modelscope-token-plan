@@ -8,3 +8,4 @@ export const MODELS_PATH = "/api/dsh-connect-modelscope-token-plan/models";
 export const TOKEN_PATH = "/api/dsh-connect-modelscope-token-plan/token";
 export const TOKEN_FORGET_PATH = "/api/dsh-connect-modelscope-token-plan/token/forget";
 export const PROBE_PATH = "/api/dsh-connect-modelscope-token-plan/probe";
+export const PROVIDER_PATH = "/api/dsh-connect-modelscope-token-plan/provider";

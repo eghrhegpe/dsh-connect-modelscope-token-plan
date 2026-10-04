@@ -47,11 +47,27 @@
 - **测试绿之后**装机：`dsh plugin --profile <profile> add <本目录绝对路径>`，
   重启 DSH 验证。
 
-## M4 — 可选增强（默认关）
+## M4 — 正式接入 DSH 作为 LLM provider（已完成，2026-10-04）
 
-- `registerProvider`：OpenAI 兼容 provider 注册（`modelscope-token-plan`），复用姊妹插件 `provider-publish.ts` 形态；注册后本地计数即涵盖全部 DSH 魔搭调用；
-- 429 自愈接入（QUOTA 快速失败 vs RATE_LIMIT 退避）；
-- e2e（真 Host + 假魔搭平台）进 CI 门禁；
+- ✅ **provider 注册**：`registerProvider`（id `modelscope-token-plan`，直连 apiBase，
+  OpenAI 兼容）。`llm-models.ts` 目录→descriptor、`llm-adapter.ts` +
+  `llm-adapter-core.ts` 装配（inert pi-ai auth + image hook）、`publish-core.ts` +
+  `provider-publish.ts` 状态机（publish 队列 / disposed 闸 / registerPair 单点 +
+  rollback 恢复旧对）、`provider-store.ts` 面板开关 + 允许清单（按 profile 分段）、
+  `routes/provider.ts` 三条路径。注册后 DSH 的全部魔搭调用都经本插件，**本地计数
+  即涵盖全部 DSH 魔搭调用**。设计契约见 [PROVIDER-M4.md](PROVIDER-M4.md)。
+- ✅ **面板「接入为 DSH 模型」**：模型 tab 顶部 provider 区块（开关 + roster 勾选 +
+  全部/全部隐藏/保存清单/回到默认）；原「试调」按钮保留为次要动作。
+- ✅ **429 自愈接入**：`llm-retry.ts`（QUOTA 快速失败 vs RATE_LIMIT 退避）+
+  `llm-error-fix.ts`（peer 把限频 429 误判成 QUOTA 的纠正层）——复用姊妹插件两件套。
+- ✅ 离线测试：`test/provider.test.mjs`（目录映射 / 开关+清单 / publish 三条语义）、
+  `test/provider-routes.test.mjs`（路由形状 / 哨兵 / 信任围栏）。
+- ✅ `docs/PROVIDER-M4.md`：本次改动的实现契约 + 三条承重语义说明。
+
+### M4 之后（backlog，未做）
+
+- **e2e**（真 Host + 假魔搭平台）进 CI 门禁；
 - **余额差值趋势**：usage-store 记录每日首末两次官方余额观察，日消耗 = 首减末——官方数据的日消耗曲线（OpenAPI 无记录端点，只能这样做，见 REFERENCES）；
 - `GET /users/me` 展示账号名（官方 OpenAPI 端点，端点家族盘点见 REFERENCES）；
-- 「每日签到领魔粒」提醒：签到是**网页行为**（登录态访问 magicube/usage 页触发，非 API），只能做面板外链 + 待办提醒，见 REFERENCES 的 userscripts 上游。
+- 「每日签到领魔粒」提醒：签到是**网页行为**（登录态访问 magicube/usage 页触发，非 API），只能做面板外链 + 待办提醒，见 REFERENCES 的 userscripts 上游；
+- 按模型探测 `reasoning_effort` 档位表后，再按模型开启思考（见 PROVIDER-M4.md §4 的保守默认说明）。

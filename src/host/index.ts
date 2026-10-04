@@ -19,6 +19,8 @@
 import { createTokenStore } from "./ms-auth.ts";
 import { createFileUsageStore } from "./usage-store.ts";
 import { createInferenceClient } from "./inference-client.ts";
+import { createFileProviderStore } from "./provider-store.ts";
+import { createProviderPublisher } from "./provider-publish.ts";
 import { profileSegment } from "./state-store.ts";
 import { registerRoutes } from "./routes.ts";
 import { resolveSettings, inject, name } from "./host-config.ts";
@@ -61,21 +63,72 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     logger: ctx.logger
   });
 
+  // ── M4：把魔搭接入 DSH 作为 LLM provider ──
+  // 面板开关持久层（provider-store，按 profile 分段：回答「这个 profile 要不要
+  // 接入」，两个 profile 不能互相覆盖）与注册状态机（provider-publish：publish
+  // 队列 / disposed 闸 / registerPair 单点 + rollback 恢复旧对）。`getLlm` 与
+  // `emit` 都传**函数**而非快照——llm 服务可能在本插件挂载之后才注册（与
+  // credentials 同一个「resolver-not-snapshot」模式）。
+  const providerStore = createFileProviderStore({ profile, logger: ctx.logger });
+  const publisher = createProviderPublisher({
+    settings,
+    panelSwitch: () => providerStore.enabled(),
+    getLlm: (service: string) => ctx.get?.(service) ?? null,
+    resolveApiKey: async () => (await tokenStore.resolve()).value,
+    emit: (event: string) => ctx.emit?.(event),
+    logger: ctx.logger
+  });
+
+  /**
+   * 读允许清单。
+   *
+   * M4 阶段**不落盘**允许清单（见 docs/PROVIDER-M4.md §10），所以从
+   * `publisher.state.enabledIds` 读最后一次 publish 用的那份；从未保存过为 `[]`，
+   * 语义是「不过滤」（与哨兵「什么都不提供」是两回事）。
+   */
+  const readEnabledIds = (): string[] =>
+    Array.isArray(publisher.state.enabledIds) ? publisher.state.enabledIds : [];
+
   const wiring = {
     settings,
     configError,
     tokenStore,
     usageStore,
     inference,
+    providerStore,
+    publisher,
     logger: ctx.logger
   };
 
   const offs = registerRoutes(ctx, wiring);
 
   ctx.effect(() => {
+    // M4 seed：挂载时立即 publish 一次（空目录 + 空清单），fire-and-forget。
+    // 本插件**不落盘目录**，所以 `seedPublisherFromCatalog` 可省略——读不到目录
+    // 就等第一次轮询；开关/清单保存在 provider-store，provider 路由直接 publish。
+    void publisher.publish([], [], []).catch(() => {});
+
+    // 目录轮询：`pollSeconds` 一次。变化时 `publish`（provider-publish 内部按
+    // catalogSignature 比对，未变则空转）；开关翻转、清单保存由 provider 路由
+    // 直接 publish，不在这里。
+    const timer = setInterval(async () => {
+      try {
+        const catalog = await inference.fetchModels();
+        const enabledIds = (await providerStore.enabled().catch(() => null)) === true ? readEnabledIds() : [];
+        await publisher.publish(catalog.entries, enabledIds, []);
+      } catch {
+        // 轮询失败不影响面板：下一轮再试，快照侧另有降级形状。
+      }
+    }, settings.pollSeconds * 1000);
+
     // 返回的是卸载清理：Cordis 在 fiber dispose 时跑它——提前跑会把刚注册的
     // 路由当场注销。
     return () => {
+      clearInterval(timer);
+      // 顺序承重：先 dispose（闸住后续 publish，不再注册进已撤下本插件的 Host），
+      // 再 release（摘掉已注册的 provider 对）。
+      publisher.dispose();
+      publisher.release();
       for (const off of offs) {
         try {
           off?.();

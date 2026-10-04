@@ -16,10 +16,19 @@ export type PluginError = Error & {
 
 /**
  * `apply()` 的测试缝：真实 Loader 不传任何东西，测试用它替换 peer 模块与
- * fetch。v0.1 只需要 fetch 缝（probe 路由与模型目录的 HTTP 出口）。
+ * fetch。v0.1 只需要 fetch 缝（probe 路由与模型目录的 HTTP 出口）；M4 追加
+ * 其余可选缝（pollMs / getLlm / emit / credentials），全部可选以保持向后兼容。
  */
 export interface HostDeps {
   fetchImpl?: typeof fetch;
+  /** 轮询间隔（毫秒）测试缝；M4 轮询实际取 settings.pollSeconds。 */
+  pollMs?: number;
+  /** 可选服务的解析缝（缺省走 ctx.get）。 */
+  getLlm?: (service: string) => unknown;
+  /** 事件发射缝（缺省走 ctx.emit）。 */
+  emit?: (event: string) => void;
+  /** 凭据服务的解析缝（缺省走 ctx.get("credentials")）。 */
+  credentials?: unknown;
 }
 
 /** 路由族共享的 wiring 袋；每个路由用 `Pick<Wiring, …>` 声明自己摸的子集。 */
@@ -29,5 +38,9 @@ export interface Wiring {
   tokenStore: ReturnType<typeof import("./ms-auth.ts").createTokenStore>;
   usageStore: ReturnType<typeof import("./usage-store.ts").createFileUsageStore>;
   inference: ReturnType<typeof import("./inference-client.ts").createInferenceClient>;
+  /** 面板开关持久层（M4 §8）：读/写「这个 profile 要不要接入 provider」。 */
+  providerStore: ReturnType<typeof import("./provider-store.ts").createFileProviderStore>;
+  /** provider 注册状态机（M4 §7）：publish/dispose/release 与 state。 */
+  publisher: ReturnType<typeof import("./provider-publish.ts").createProviderPublisher>;
   logger?: { warn?: (message: string, error?: unknown) => void };
 }

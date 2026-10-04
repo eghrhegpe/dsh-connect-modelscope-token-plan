@@ -45,8 +45,60 @@ export interface TrendBucket {
   tokens: number;
 }
 
+/**
+ * 模型目录条目（`GET /v1/models` 的 `data[]` 归一投影，见 llm-models.ts 的
+ * `normalizeEntry`）。向后兼容的扩展：旧契约只有 `id`，新增字段全部可选，
+ * 读旧响应的面板不受影响。
+ */
 export interface ModelEntry {
   id: string;
+  /** 展示名；平台未声明时回退 id。 */
+  name?: string;
+  /** 是否吃图：结构化字段（input_modalities）优先，名字启发兜底。 */
+  vision?: boolean;
+  /** 声明的窗口；未知时用 FALLBACK_CONTEXT_WINDOW（128k）兜底。 */
+  contextWindow?: number;
+  /** 声明的单次输出上限；0 = 平台未声明。 */
+  maxOutputLength?: number;
+}
+
+/**
+ * Provider 注册状态块（M4，§11）：面板「接入模型」开关区与模型勾选区读它。
+ *
+ * 与 models 块的分工：`models` 只回答「上游目录通不通、有几个模型」；`provider`
+ * 回答「这个 profile 要不要接入、接没接成、允许清单是什么」。两处口径不同是
+ * 故意的——roster 保留额度耗尽的模型（灰显），picker 才丢弃它们。
+ *
+ * 软失败：目录读不到时 `modelCount` 为 0、`roster` 为空、`error` 说明原因；
+ * 开关读不到时 `enabled:false, source:"config"`（patch 默认兜底）。
+ */
+export interface ProviderStatus {
+  /** 生效开关（面板保存值优先，patch 默认兜底）。 */
+  enabled: boolean;
+  /** 生效值来自哪一侧。 */
+  source: "panel" | "config";
+  /** Host 上是否存在可应答 registerAdapter 的 llm 服务。 */
+  llmAvailable: boolean;
+  /** 本插件的 provider 是否已注册且无错。 */
+  registered: boolean;
+  /** 最近一次注册/读取的失败原因（已脱敏），null = 无错。 */
+  error: string | null;
+  /** roster 长度（面板清单里的模型数）。 */
+  modelCount: number;
+  /** 允许清单命中的模型数。 */
+  enabledCount: number;
+  /** 允许清单语义：all = 不过滤；none = 哨兵「什么都不提供」；list = 严格清单。 */
+  allowed: "all" | "none" | "list";
+  /** 允许清单；空数组语义是「不过滤」（与哨兵 HIDE_ALL_MODELS 区分）。 */
+  enabledIds: string[];
+  /** 面板清单：每行带可用性与额度耗尽标记。 */
+  roster: {
+    id: string;
+    name: string;
+    vision: boolean;
+    available: boolean;
+    quotaExhausted: boolean;
+  }[];
 }
 
 /** 令牌状态。valid: null = 未检查过（不是「有效」也不是「无效」）。 */
@@ -93,6 +145,8 @@ export interface Snapshot {
   events: QuotaEvent[];
   trend: { days: number; buckets: TrendBucket[] };
   models: { available: boolean; count: number; sample: string[]; error: string | null };
+  /** Provider 注册状态（M4）：开关 + 注册 + 允许清单 + 面板 roster。 */
+  provider: ProviderStatus;
   shapeWarnings: string[];
   quotaError: { code: string } | null;
 }
@@ -124,6 +178,7 @@ export const SNAPSHOT_REQUIRED_KEYS = Object.freeze([
   "events",
   "trend",
   "models",
+  "provider",
   "shapeWarnings",
   "quotaError",
 ] as const);

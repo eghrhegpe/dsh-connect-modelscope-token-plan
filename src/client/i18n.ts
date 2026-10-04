@@ -55,6 +55,30 @@ export const zh = {
   "probe.validOk": "令牌有效（HTTP {status}）",
   "probe.fail": "失败：{error}",
 
+  // 模型 tab 顶部「接入为 DSH 模型」区块（provider 注册 + 允许清单）。
+  // 「试调」保留但降级为次要动作，所以它把「消耗额度」写进按钮本身。
+  "models.probeKept": "试调（单次，消耗 1 次免费额度）",
+  "section.provider": "接入为 DSH 模型",
+  "provider.enable": "把魔搭模型接入 DSH 模型选择器",
+  "provider.on": "已接入",
+  "provider.off": "未接入",
+  "provider.registered": "已注册（模型可在选择器里选用）",
+  "provider.notRegistered": "未注册",
+  "provider.llmMissing": "本机 Host 未提供 LLM 注册服务",
+  "provider.error": "接入失败：{error}",
+  "provider.models": "启用哪些模型",
+  "provider.allowAll": "全部",
+  "provider.hideAll": "全部隐藏",
+  "provider.saveList": "保存清单",
+  "provider.reset": "回到默认",
+  "provider.enabledCount": "已启用 {count} / {total}",
+  "provider.rosterHint": "勾选要进入 DSH 模型选择器的模型；不勾 = 全部提供",
+  "provider.quotaExhausted": "额度耗尽",
+  "provider.vision": "视觉",
+  "provider.notConfigured": "还没有访问令牌，先到「接入」tab 配置",
+  "provider.source.panel": "面板",
+  "provider.source.config": "配置",
+
   "trend.none": "还没有本地调用记录。",
   "trend.legend": "柱长相对区间内最大值，仅本地口径。",
 
@@ -130,6 +154,31 @@ export const en: typeof zh = {
   "probe.ok": "Call succeeded: {tokens} tokens / {ms}ms",
   "probe.validOk": "Token valid (HTTP {status})",
   "probe.fail": "Failed: {error}",
+
+  // The "register as a DSH model" block at the top of the Models tab.
+  // The old "Try" probe survives as a SECONDARY action, so its copy carries
+  // the cost it incurs.
+  "models.probeKept": "Test call (consumes one free call)",
+  "section.provider": "Register as a DSH model",
+  "provider.enable": "Register ModelScope models in the DSH model picker",
+  "provider.on": "On",
+  "provider.off": "Off",
+  "provider.registered": "Registered (models selectable in the picker)",
+  "provider.notRegistered": "Not registered",
+  "provider.llmMissing": "This Host exposes no LLM service",
+  "provider.error": "Provider error: {error}",
+  "provider.models": "Which models to enable",
+  "provider.allowAll": "All",
+  "provider.hideAll": "Hide all",
+  "provider.saveList": "Save list",
+  "provider.reset": "Reset",
+  "provider.enabledCount": "{count} / {total} enabled",
+  "provider.rosterHint": "Tick the models to offer; unticked = offer all",
+  "provider.quotaExhausted": "Quota exhausted",
+  "provider.vision": "vision",
+  "provider.notConfigured": "No token yet — configure it in the Access tab",
+  "provider.source.panel": "panel",
+  "provider.source.config": "config",
 
   "trend.none": "No local call records yet.",
   "trend.legend": "Bar lengths are relative to the maximum in the range (local scope only).",

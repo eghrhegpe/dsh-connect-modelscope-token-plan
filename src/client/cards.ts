@@ -5,11 +5,13 @@
  * @module dsh-connect-modelscope-token-plan/client/cards
  */
 import { count, format, isoTime } from "./format.ts";
-import { h, useState } from "./runtime.ts";
+import { h, useEffect, useMemo, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
-import { MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL } from "./const.ts";
-import type { BalanceData, QuotaEvent, Snapshot, TrendBucket, TokenStatus } from "../shared/wire.ts";
+import { HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL } from "./const.ts";
+import { providerOf } from "./snapshot.ts";
+import { ToggleSwitch } from "./toggle-switch.ts";
+import type { BalanceData, ProviderStatus, QuotaEvent, Snapshot, TrendBucket, TokenStatus } from "../shared/wire.ts";
 
 /** 可折叠 section 卡：全宽头部按钮 + 旋转 chevron；open/onToggle 由 props 进。 */
 export function SectionCard({ title, open, onToggle, children, tt }: {
@@ -197,5 +199,159 @@ export function TokenForm({ token, busy, error, onSave, onForget, onVerify, veri
     error !== null ? h("div", { style: S.formError, role: "alert" }, error) : null,
     h("div", { style: S.formNote }, tt("token.hint")),
     h("a", { style: S.formNote, href: MODELSCOPE_TOKEN_URL, target: "_blank", rel: "noreferrer" }, tt("token.link"))
+  );
+}
+
+/**
+ * 接入为 DSH 模型的区块（开关 + 注册状态 + 允许清单）。
+ *
+ * 这是 M4 把抽象「试调」升级成真接入的落点：开关翻转即 POST provider 路由，
+ * Host 在同一次请求里落盘并重注册适配器；允许清单勾完点「保存清单」即 POST
+ * roster 路由。写盘（开关/清单）失败必须让面板看见，所以失败由调用方传进
+ * `error` 一行渲染出来，不做乐观更新。
+ *
+ * 只有 ProviderCard 持 draft 状态（勾选清单），其余都是展示组件——与 TokenForm
+ * 同一类 hook 边界，Node 渲染套件可以驱动无状态的部分。draft 在 Host 值真正
+ * 变化时才跟过去（用 JSON 串做稳定信号，避免每次轮询都用新数组把在编辑的勾选
+ * 冲掉）；保存后由调用方 `load()` 刷新，快照回显的就是已落盘的值。
+ *
+ * 允许清单的语义（路由 §9 钉死）：空清单 = 不过滤 = 全部提供，所以「全部」
+ * 发 `[]`；「全部隐藏」发哨兵 `HIDE_ALL_MODELS`（「什么都不提供」）。哨兵
+ * 不是任何真实模型 id，所以同一套 `draft.includes(id)` 的勾选判断天然不会把
+ * 它画成勾中——不需要特判。
+ *
+ * 额度耗尽的模型保留在清单里（灰显、勾选框禁用），这是故意的：roster 是目录
+ * 事实，picker 那边由 Host 自己丢掉它们，面板不替它删。
+ */
+export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onReset, tokenPresent, tt }: {
+  provider: ProviderStatus | null;
+  busy: boolean;
+  /** 上一次开关/清单写盘的失败（调用方持有 busy 与错误，ProviderCard 只渲染）。 */
+  error: string | null;
+  onToggle: (enabled: boolean) => void;
+  onSaveList: (ids: string[]) => void;
+  onReset: () => void;
+  /** 面板是否已有令牌；缺省 = 未知，不渲染「先去配置」提示。 */
+  tokenPresent?: boolean | undefined;
+  tt: Tt;
+}): unknown {
+  // providerOf 再归一一次是防御：路由 GET 的结果也走这条，两端形状一致。
+  const status = providerOf(provider);
+  const enabled = status.enabled === true;
+  const hostIds = status.enabledIds;
+  const hostKey = useMemo(() => JSON.stringify(hostIds), [hostIds]);
+  const [draft, setDraft] = useState<string[]>(() => hostIds.slice());
+  // 只在 Host 值真正移动时跟过去（保存后由调用方 load() 回显，不靠本地乐观）。
+  useEffect(() => {
+    setDraft(hostIds);
+    // 刻意只依赖 hostKey：hostIds 每次轮询都是新数组，列它会在每帧覆盖在编辑的勾选。
+  }, [hostKey]);
+
+  const roster = status.roster;
+  const rosterIds = roster.map((row) => row.id);
+  const toggleOne = (id: string) => setDraft((current) => current.includes(id) ? current.filter((x) => x !== id) : [...current, id]);
+  const ticked = roster.filter((row) => draft.includes(row.id)).length;
+
+  // 状态行，顺序即优先级：具体失败 > 能力缺口 > 已注册 > 未注册。
+  const degraded = status.error === "unavailable";
+  let statusNode: unknown;
+  if (!degraded && typeof status.error === "string" && status.error !== "") {
+    statusNode = h("div", { style: S.formError, role: "alert" }, format(tt("provider.error"), { error: status.error }));
+  } else if (status.registered === true) {
+    statusNode = h("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" }, role: "status" }, tt("provider.registered"));
+  } else if (status.llmAvailable !== true) {
+    statusNode = h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("provider.llmMissing"));
+  } else {
+    statusNode = h("div", { style: { ...S.muted, fontSize: 12 }, role: "status" }, tt("provider.notRegistered"));
+  }
+
+  // 开关开着但还没有令牌：注册一定到不了位，明确指向「接入」tab，别让它
+  // 看起来像「开了等一会儿就好」。
+  const tokenHint = enabled && tokenPresent === false
+    ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("provider.notConfigured"))
+    : null;
+
+  // 源标注：面板保存的值 / patch 的默认。
+  const sourceKey = status.source === "panel" ? "provider.source.panel" : "provider.source.config";
+
+  const switchRow = h(
+    "div",
+    { style: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "0 0 8px" } },
+    h(ToggleSwitch, {
+      checked: enabled,
+      onChange: () => onToggle(!enabled),
+      busy,
+      label: tt(enabled ? "provider.on" : "provider.off"),
+      title: tt("provider.enable")
+    }),
+    h("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary)" } }, tt(sourceKey))
+  );
+
+  const rosterBlock = roster.length === 0
+    ? h("div", { style: { ...S.muted, fontSize: 12, marginTop: 6 } }, tt("provider.rosterHint"))
+    : h(
+        "div",
+        { style: S.modelPanel },
+        h(
+          "div",
+          { style: S.rosterTools },
+          h("span", {
+            style: S.rosterCount,
+            title: format(tt("provider.enabledCount"), { count: ticked, total: roster.length })
+          }, format(tt("provider.enabledCount"), { count: ticked, total: roster.length })),
+          h("button", {
+            type: "button", style: S.rosterBulk, disabled: busy,
+            onClick: () => { setDraft(rosterIds.slice()); onSaveList(rosterIds.slice()); }
+          }, tt("provider.allowAll")),
+          h("button", {
+            type: "button", style: S.rosterBulk, disabled: busy,
+            onClick: () => { setDraft([HIDE_ALL_MODELS]); onSaveList([HIDE_ALL_MODELS]); }
+          }, tt("provider.hideAll")),
+          h("button", {
+            type: "button", style: S.primary, disabled: busy,
+            onClick: () => onSaveList(draft.slice())
+          }, tt("provider.saveList"))
+        ),
+        h(
+          "ul",
+          { style: S.modelList, role: "list" },
+          roster.map((row) => {
+            const id = row.id;
+            const unusable = row.available === false || row.quotaExhausted === true;
+            return h(
+              "li",
+              { key: id, style: unusable ? { ...S.modelRow, ...S.modelRowOff } : S.modelRow },
+              h(
+                "div",
+                { style: S.modelRowHead },
+                h(
+                  "label",
+                  { style: { display: "flex", alignItems: "center", gap: 10, flex: "1 1 auto", minWidth: 0, cursor: busy || unusable ? "default" : "pointer" } },
+                  h("input", {
+                    type: "checkbox", checked: draft.includes(id), disabled: busy || unusable,
+                    onChange: () => toggleOne(id), style: S.modelCheck, "aria-label": id
+                  }),
+                  h("span", { style: S.modelName, title: id }, row.name)
+                ),
+                row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null,
+                row.quotaExhausted === true
+                  ? h("span", { style: { ...S.modelBadge, color: "var(--dsw-alias-state-error-primary)" } }, tt("provider.quotaExhausted"))
+                  : null
+              )
+            );
+          })
+        ),
+        h("div", { style: S.rosterFoot }, h("button", { type: "button", style: S.button, disabled: busy, onClick: onReset }, tt("provider.reset")))
+      );
+
+  return h(
+    "div",
+    null,
+    switchRow,
+    statusNode,
+    tokenHint,
+    h("div", { style: { ...S.sectionTitle, margin: "18px 0 8px" } }, tt("provider.models")),
+    rosterBlock,
+    error !== null ? h("div", { style: S.formError, role: "alert" }, error) : null
   );
 }

@@ -20,7 +20,7 @@ import { clockLong, count, errorText, format, isoTime, statedCadenceMs, when } f
 import { provideClientReact } from "./runtime.ts";
 import { en, zh } from "./i18n.ts";
 import { S } from "./styles.ts";
-import { BalanceCard, EventsList, LocalDailyCard, ModelUsageTable, SectionCard, TokenForm, TrendBars } from "./cards.ts";
+import { BalanceCard, EventsList, LocalDailyCard, ModelUsageTable, ProviderCard, SectionCard, TokenForm, TrendBars } from "./cards.ts";
 import { PanelPage } from "./panel-page.ts";
 import { usePollingInterval } from "./use-polling-interval.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
@@ -61,6 +61,7 @@ function clientFactory(loaderRequire: (specifier: string) => unknown): {
       LocalDailyCard,
       ModelUsageTable,
       PanelPage,
+      ProviderCard,
       SectionCard,
       TokenForm,
       TrendBars

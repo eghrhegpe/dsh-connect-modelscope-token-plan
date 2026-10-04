@@ -23,6 +23,7 @@ assert.deepEqual(
     "events",
     "trend",
     "models",
+    "provider",
     "shapeWarnings",
     "quotaError",
   ],
@@ -32,7 +33,7 @@ assert.deepEqual(
 // quota.countingNote 是闭集（面板据它渲染「本地推算」说明）。
 assert.equal(
   SNAPSHOT_REQUIRED_KEYS.length,
-  14,
+  15,
   "顶层键数量变化时，同步更新 Snapshot 接口与本清单",
 );
 

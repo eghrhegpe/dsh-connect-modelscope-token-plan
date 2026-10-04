@@ -3,16 +3,16 @@
  * 全部布局。渲染在 Plugins 页内、始终展开；轮询只在本卡挂载期间进行。
  * @module dsh-connect-modelscope-token-plan/client/panel-page
  */
-import { SectionCard, BalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm } from "./cards.ts";
-import { PANEL_ID, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH } from "./const.ts";
+import { SectionCard, BalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm, ProviderCard } from "./cards.ts";
+import { PANEL_ID, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH } from "./const.ts";
 import { format, errorText, isoTime } from "./format.ts";
 import { getJson, postJson } from "./http.ts";
-import { viewOf } from "./snapshot.ts";
+import { viewOf, providerOf, DEGRADED_PROVIDER } from "./snapshot.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
 import { h, useCallback, useEffect, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
-import type { Snapshot } from "../shared/wire.ts";
+import type { ProviderStatus, Snapshot } from "../shared/wire.ts";
 
 /** 三个固定视角。 */
 export type TabId = "quota" | "models" | "access";
@@ -23,7 +23,7 @@ export function PanelPage({ tt, localeSubscribe }: {
 }): unknown {
   const { data, error, loadedOnce, updatedAt, load } = useSnapshotPolling();
   const [, setLocaleRevision] = useState(0);
-  const [openSections, setOpenSections] = useState({ balance: true, local: true, trend: true, events: false, catalog: true, token: true });
+  const [openSections, setOpenSections] = useState({ balance: true, local: true, trend: true, events: false, catalog: true, provider: true, token: true });
   const [activeTab, setActiveTab] = useState<TabId>("quota");
 
   useEffect(() => {
@@ -57,6 +57,47 @@ export function PanelPage({ tt, localeSubscribe }: {
   useEffect(() => {
     if (activeTab === "models" && catalog === null) void loadCatalog();
   }, [activeTab, catalog, loadCatalog]);
+
+  // 接入为 DSH 模型：快照的 `provider` 块是首选；wire 已声明它，但旧 Host 或
+  // 过渡期可能不给——所以读成 unknown，由 providerOf 归一，缺失时用 GET
+  // PROVIDER_PATH 兜底一次。两者都读不到就走 DEGRADED_PROVIDER（ProviderCard
+  // 渲染「未接入 / 无 LLM 服务」，面板不白屏）。
+  const rawProvider: unknown = data?.provider;
+  const hasProviderBlock = rawProvider !== undefined && rawProvider !== null;
+  const [fetchedProvider, setFetchedProvider] = useState<ProviderStatus | null>(null);
+  const provider: ProviderStatus = hasProviderBlock ? providerOf(rawProvider) : (fetchedProvider ?? DEGRADED_PROVIDER);
+  useEffect(() => {
+    if (hasProviderBlock) return undefined;
+    let cancelled = false;
+    getJson(PROVIDER_PATH)
+      .then((body) => {
+        if (!cancelled && body !== null && body.ok === true) setFetchedProvider(providerOf(body));
+      })
+      .catch(() => { /* 保持降级形状；快照轮询会再试。 */ });
+    return () => { cancelled = true; };
+  }, [hasProviderBlock]);
+
+  // 写盘统一入口：开关、允许清单、回到默认都 POST 到 provider 路由族。失败
+  // 必须传播到面板（不静默吞）——这是用户的显式操作。成功即刷新快照，回显
+  // Host 实际落盘的值（不做乐观更新）。
+  const [providerBusy, setProviderBusy] = useState(false);
+  const [providerError, setProviderError] = useState<string | null>(null);
+  const runProviderWrite = useCallback(async (path: string, payload: Record<string, unknown>) => {
+    setProviderBusy(true);
+    setProviderError(null);
+    try {
+      const body = await postJson(path, payload);
+      if (body === null || body.ok !== true) throw new Error(typeof body?.error === "string" ? body.error : "HTTP error");
+      void load();
+    } catch (reason) {
+      setProviderError(format(tt("provider.error"), { error: errorText(reason) }));
+    } finally {
+      setProviderBusy(false);
+    }
+  }, [load, tt]);
+  const toggleProvider = useCallback((enabled: boolean) => void runProviderWrite(PROVIDER_PATH, { enabled }), [runProviderWrite]);
+  const saveRoster = useCallback((enabledIds: string[]) => void runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds }), [runProviderWrite]);
+  const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
 
   // probe：usage / validity 两种形态的统一入口 + 一行结果。
   const [probeBusy, setProbeBusy] = useState(false);
@@ -177,10 +218,26 @@ export function PanelPage({ tt, localeSubscribe }: {
     );
   };
 
-  // 模型 tab：完整目录 + 每行试调（usage 形态，消耗 1 次免费额度，面板有标注）。
+  // 模型 tab：顶部「接入为 DSH 模型」（开关 + 允许清单），下面是完整目录 +
+  // 每行试调（usage 形态）。「试调」保留但降级为次要动作——真正的接入在
+  // ProviderCard 的开关和勾选框里，目录表的按钮只做「这一条到底通不通」。
   const modelsBody = () => h(
     "div",
     null,
+    h(
+      SectionCard,
+      { title: tt("section.provider"), open: openSections.provider, onToggle: () => toggleSection("provider"), tt },
+      h(ProviderCard, {
+        provider,
+        busy: providerBusy,
+        error: providerError,
+        onToggle: toggleProvider,
+        onSaveList: saveRoster,
+        onReset: resetProvider,
+        tokenPresent: data?.token.present === true,
+        tt
+      })
+    ),
     h(
       SectionCard,
       {
@@ -202,7 +259,7 @@ export function PanelPage({ tt, localeSubscribe }: {
               "div",
               { key: id, style: S.trendRowHead },
               h("span", { style: S.trendModel, title: id }, id),
-              h("button", { type: "button", style: S.button, disabled: probeBusy, onClick: () => void runProbe(id, "usage"), title: tt("probe.usage") }, tt("models.probeUsage"))
+              h("button", { type: "button", style: S.button, disabled: probeBusy, onClick: () => void runProbe(id, "usage"), title: tt("probe.usage") }, tt("models.probeKept"))
             )))
         : null,
       probeBusy ? h("div", { style: S.formNote }, tt("probe.busy")) : null,
@@ -211,7 +268,8 @@ export function PanelPage({ tt, localeSubscribe }: {
     )
   );
 
-  // 接入 tab：令牌管理（保存/忘掉/验令牌）+ 状态 + 说明（provider 注册在路线图里，此处只读）。
+  // 接入 tab：令牌管理（保存/忘掉/验令牌）+ 状态 + 说明。provider 注册在模型
+  // tab 顶部（section.provider），令牌仍是它的前置条件——此 tab 只负责令牌。
   const accessBody = () => h(
     "div",
     null,

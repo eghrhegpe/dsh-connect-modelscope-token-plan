@@ -32,8 +32,10 @@
         # 单次魔搭请求超时（毫秒）。
         inferenceTimeoutMs: 30000
         # ------------------------------------------------------------------
-        # 第三步（对齐姊妹插件）：直接注册 OpenAI 兼容 provider（id
-        # `modelscope-token-plan`，直连 apiBase）。v0.1 未实现，占位默认关。
+        # 把魔搭注册成 DSH 的 LLM provider（id `modelscope-token-plan`，直连
+        # apiBase，OpenAI 兼容）。默认关（opt-in，与姊妹插件一致）；面板「模型」
+        # tab 的「接入为 DSH 模型」开关可随时翻转，面板保存值优先于这里的默认。
+        # 注册后魔搭模型进入 DSH 模型选择器，本地计数同时覆盖全部 DSH 魔搭调用。
         registerProvider: false
         # 追加可信 Host 名（默认 localhost / 127.0.0.1 / ::1，只增不替）。
         # allowedHosts: []

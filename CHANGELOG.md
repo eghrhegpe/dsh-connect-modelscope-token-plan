@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.0-M4（未发布）— 正式接入 DSH 作为 LLM provider
+
+- **provider 注册**（id `modelscope-token-plan`，直连 apiBase，OpenAI 兼容）：
+  `llm-models.ts`（目录→pi-ai descriptor，含 vision/chat 判定、窗口兜底、
+  `supportsDeveloperRole:false`、`reasoning:false` 保守默认）、
+  `llm-adapter-core.ts`（照抄姊妹插件的 PiAiAdapter 装配，inert auth + image hook）、
+  `llm-adapter.ts`、`publish-core.ts` + `provider-publish.ts`（publish 队列化 /
+  `disposed` 闸 / `registerPair` 单点 + rollback 恢复旧对 三条承重语义）、
+  `provider-store.ts`（面板开关 + 允许清单，同文件同载荷，按 profile 分段）、
+  `switch-precedence.ts`、`routes/provider.ts`（GET 读 / POST 开关 / POST roster /
+  POST reset，含 `HIDE_ALL_MODELS` 哨兵）。
+- **429 自愈**：`llm-retry.ts`（QUOTA 快速失败 vs RATE_LIMIT 退避）+
+  `llm-error-fix.ts`（peer 把限频 429 误判成 QUOTA 的纠正层），照抄姊妹插件两件套。
+- **面板「接入为 DSH 模型」**：模型 tab 顶部 provider 区块（开关 + roster 勾选 +
+  全部/全部隐藏/保存清单/回到默认，额度耗尽行灰显禁用），原「试调」按钮降级为次要
+  动作；`toggle-switch.ts` 照抄；i18n zh/en 各补 21 键。
+- **快照**：`Snapshot.provider` 块（开关/来源/注册状态/roster），软失败降级，
+  `SNAPSHOT_REQUIRED_KEYS` 14→15。
+- **Host 装配**：`index.ts` 挂 seed + 目录轮询 publish（`pollSeconds`），
+  teardown 先 `dispose` 再 `release`；`inference-client.fetchModels()` 改回
+  `{entries, ids, fetchedAt}`（`ids` 保留兼容旧消费方）。
+- **测试**：新增 `test/provider.test.mjs`（目录映射 / 开关+清单 / publish 三条语义）
+  与 `test/provider-routes.test.mjs`（路由形状 / 哨兵 / 信任围栏），共 8 套件全绿；
+  typecheck / build / doctor 全绿。
+- 设计契约见 docs/PROVIDER-M4.md。
+
 ## 0.1.0（未发布）
 
 - 仓库起步：清单 / 配置面 / 构建纪律（与姊妹插件同构）。
