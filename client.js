@@ -21,23 +21,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const slash = id.indexOf("/");
 		return slash >= 0 ? id.slice(0, slash) : id;
 	}
-	/**
-	* 目录排序：featured owner 置顶（按 `FEATURED_OWNERS` 顺序），其余按 owner 字母序，
-	* 同 owner 内按 id 字母序。纯函数、稳定；渲染前对 `catalog.ids` 跑一次即可。
-	*/
-	function sortCatalogIds(ids) {
-		const rank = (owner) => {
-			const i = FEATURED_OWNERS.indexOf(owner);
-			return i >= 0 ? i : FEATURED_OWNERS.length;
-		};
-		return [...ids].sort((a, b) => {
-			const oa = catalogOwner(a), ob = catalogOwner(b);
-			const ra = rank(oa), rb = rank(ob);
-			if (ra !== rb) return ra - rb;
-			if (oa !== ob) return oa < ob ? -1 : 1;
-			return a < b ? -1 : 1;
-		});
-	}
 	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
 	var init_const = __esmMin((() => {
 		NS = "dsh-connect-modelscope-token-plan";
@@ -85,7 +68,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"section.local": "本地调用（仅经本插件的调用）",
 			"section.trend": "近 {days} 天本地调用趋势",
 			"section.events": "限流与错误事件",
-			"section.catalog": "模型目录（免认证，不耗额度）",
 			"section.token": "访问令牌",
 			"section.expand": "展开",
 			"section.collapse": "折叠",
@@ -98,21 +80,15 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"balance.unavailable": "魔粒余额暂不可读：{error}",
 			"quota.headline": "今日 {calls} 次 · {models} 个模型",
 			"quota.note": "本地口径：只统计经本插件的调用，直连魔搭的其它客户端不计入；消耗总量以官方魔粒余额为准。",
-			"models.count": "{count} 个模型",
 			"models.none": "目录暂不可读：{error}",
 			"models.loading": "读取目录中…",
-			"models.fetched": "读取于 {time}",
-			"models.probeUsage": "试调",
-			"probe.usage": "测试一次调用（消耗 1 次额度）",
 			"probe.validity": "验令牌（零额度）",
-			"probe.busy": "请求中…",
-			"probe.ok": "调用成功：{tokens} tokens / {ms}ms",
 			"probe.validOk": "令牌有效（HTTP {status}）",
 			"probe.fail": "失败：{error}",
-			"models.probeKept": "试调（单次，消耗 1 次免费额度）",
 			"models.viewOnSite": "在魔搭查看 →",
 			"models.viewOnSiteTitle": "打开模型详情页（魔粒单价等只在网页展示）",
 			"models.featuredTitle": "推荐系列（深度求索 / 智谱 / 通义千问）",
+			"provider.featured": "推荐",
 			"section.provider": "接入为 DSH 模型",
 			"provider.enable": "把魔搭模型接入 DSH 模型选择器",
 			"provider.on": "已接入",
@@ -175,7 +151,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"section.local": "Local calls (only through this plugin)",
 			"section.trend": "Local call trend, last {days} days",
 			"section.events": "Rate-limit and error events",
-			"section.catalog": "Model catalog (unauthenticated, free)",
 			"section.token": "Access token",
 			"section.expand": "Expand",
 			"section.collapse": "Collapse",
@@ -188,21 +163,15 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"balance.unavailable": "Magicube balance temporarily unreadable: {error}",
 			"quota.headline": "Today {calls} calls · {models} models",
 			"quota.note": "Local scope: only calls through this plugin are counted; clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
-			"models.count": "{count} models",
 			"models.none": "Catalog unavailable: {error}",
 			"models.loading": "Loading catalog…",
-			"models.fetched": "read at {time}",
-			"models.probeUsage": "Try",
-			"probe.usage": "Test one call (consumes 1 free call)",
 			"probe.validity": "Verify token (free)",
-			"probe.busy": "Working…",
-			"probe.ok": "Call succeeded: {tokens} tokens / {ms}ms",
 			"probe.validOk": "Token valid (HTTP {status})",
 			"probe.fail": "Failed: {error}",
-			"models.probeKept": "Test call (consumes one free call)",
 			"models.viewOnSite": "View on ModelScope →",
 			"models.viewOnSiteTitle": "Open the model page (per-model Magicube price is web-only)",
 			"models.featuredTitle": "Recommended family (DeepSeek / Zhipu / Qwen)",
+			"provider.featured": "Recommended",
 			"section.provider": "Register as a DSH model",
 			"provider.enable": "Register ModelScope models in the DSH model picker",
 			"provider.on": "On",
@@ -655,25 +624,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				gap: 12,
 				minWidth: 0
 			},
-			trendRowFeatured: {
-				display: "flex",
-				alignItems: "baseline",
-				justifyContent: "space-between",
-				gap: 12,
-				minWidth: 0,
-				borderLeft: `2px solid ${BRAND}`,
-				paddingLeft: 8,
-				background: "var(--dsw-alias-bg-layer-2)",
-				borderRadius: "0 6px 6px 0"
-			},
-			catalogStar: {
-				flex: "none",
-				width: 14,
-				textAlign: "center",
-				fontSize: 12,
-				lineHeight: 1,
-				color: BRAND
-			},
 			trendModel: {
 				fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
 				fontSize: 12,
@@ -681,16 +631,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				overflow: "hidden",
 				textOverflow: "ellipsis",
 				whiteSpace: "nowrap"
-			},
-			trendModelFeatured: {
-				fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-				fontSize: 12,
-				minWidth: 0,
-				overflow: "hidden",
-				textOverflow: "ellipsis",
-				whiteSpace: "nowrap",
-				color: BRAND,
-				fontWeight: 600
 			},
 			trendCredits: {
 				fontSize: 13,
@@ -828,6 +768,15 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				borderRadius: 999,
 				background: "var(--dsw-alias-bg-layer-2)",
 				color: "var(--dsw-alias-label-secondary)"
+			},
+			modelBadgeFeatured: {
+				flex: "none",
+				fontSize: 11,
+				padding: "1px 7px",
+				borderRadius: 999,
+				background: "var(--dsw-alias-bg-layer-2)",
+				color: BRAND,
+				fontWeight: 600
 			},
 			modelMeta: {
 				paddingLeft: 25,
@@ -1344,7 +1293,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			}), h("span", {
 				style: S.modelName,
 				title: id
-			}, row.name)), row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null, row.quotaExhausted === true ? h("span", { style: {
+			}, row.name)), row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null, FEATURED_OWNERS.includes(catalogOwner(row.id)) ? h("span", {
+				style: S.modelBadgeFeatured,
+				title: tt("models.featuredTitle")
+			}, tt("provider.featured")) : null, row.quotaExhausted === true ? h("span", { style: {
 				...S.modelBadge,
 				color: "var(--dsw-alias-state-error-primary)"
 			} }, tt("provider.quotaExhausted")) : null, h("a", {
@@ -1572,7 +1524,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			local: true,
 			trend: true,
 			events: false,
-			catalog: true,
 			provider: true,
 			token: true
 		});
@@ -1589,29 +1540,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, []);
 		const { failure, needsSetup, guidance, shapeWarnings } = viewOf(data, error, tt);
 		const showSetup = needsSetup && loadedOnce;
-		const [catalog, setCatalog] = useState(null);
-		const [catalogError, setCatalogError] = useState(null);
-		const loadCatalog = useCallback(async () => {
-			try {
-				const body = await getJson(MODELS_PATH);
-				if (body !== null && body.ok === true && Array.isArray(body.models)) {
-					setCatalog({
-						ids: body.models.map((m) => String(m.id ?? "")).filter((id) => id !== ""),
-						fetchedAt: typeof body.fetchedAt === "string" ? body.fetchedAt : ""
-					});
-					setCatalogError(null);
-				} else setCatalogError(typeof body?.error === "string" ? body.error : "HTTP error");
-			} catch (reason) {
-				setCatalogError(errorText(reason));
-			}
-		}, []);
-		useEffect(() => {
-			if (activeTab === "models" && catalog === null) loadCatalog();
-		}, [
-			activeTab,
-			catalog,
-			loadCatalog
-		]);
 		const rawProvider = data?.provider;
 		const hasProviderBlock = rawProvider !== void 0 && rawProvider !== null;
 		const [fetchedProvider, setFetchedProvider] = useState(null);
@@ -1644,32 +1572,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const toggleProvider = useCallback((enabled) => void runProviderWrite(PROVIDER_PATH, { enabled }), [runProviderWrite]);
 		const saveRoster = useCallback((enabledIds) => void runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds }), [runProviderWrite]);
 		const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
-		const [probeBusy, setProbeBusy] = useState(false);
-		const [probeResult, setProbeResult] = useState(null);
-		const [probeError, setProbeError] = useState(null);
-		const runProbe = useCallback(async (modelId, kind) => {
-			setProbeBusy(true);
-			setProbeResult(null);
-			setProbeError(null);
-			try {
-				const body = await postJson(PROBE_PATH, {
-					modelId,
-					kind
-				});
-				if (body !== null && body.ok === true) {
-					const usage = body.usage;
-					setProbeResult(kind === "usage" && usage !== null && usage !== void 0 ? format(tt("probe.ok"), {
-						tokens: usage.totalTokens ?? 0,
-						ms: Number(body.elapsedMs ?? 0)
-					}) : format(tt("probe.validOk"), { status: Number(body.status ?? 0) }));
-					load();
-				} else setProbeError(typeof body?.error === "string" ? body.error : "HTTP error");
-			} catch (reason) {
-				setProbeError(errorText(reason));
-			} finally {
-				setProbeBusy(false);
-			}
-		}, [tt, load]);
 		const [tokenBusy, setTokenBusy] = useState(false);
 		const [tokenError, setTokenError] = useState(null);
 		const saveToken = useCallback(async (value) => {
@@ -1777,48 +1679,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			onReset: resetProvider,
 			tokenPresent: data?.token.present === true,
 			tt
-		})), h(SectionCard, {
-			title: catalog !== null ? `${tt("section.catalog")} · ${format(tt("models.count"), { count: catalog.ids.length })}` : tt("section.catalog"),
-			open: openSections.catalog,
-			onToggle: () => toggleSection("catalog"),
-			tt
-		}, catalog === null && catalogError === null ? h("div", { style: S.trendLegend }, tt("models.loading")) : null, catalogError !== null ? h("div", {
-			style: S.formNote,
-			role: "status"
-		}, format(tt("models.none"), { error: catalogError })) : null, catalog !== null ? h("div", null, h("div", { style: S.trendLegend }, format(tt("models.fetched"), { time: isoTime(catalog.fetchedAt) })), sortCatalogIds(catalog.ids).map((id) => {
-			const featured = FEATURED_OWNERS.includes(catalogOwner(id));
-			return h("div", {
-				key: id,
-				style: featured ? S.trendRowFeatured : S.trendRowHead
-			}, featured ? h("span", {
-				style: S.catalogStar,
-				title: tt("models.featuredTitle")
-			}, "★") : null, h("span", {
-				style: featured ? S.trendModelFeatured : S.trendModel,
-				title: id
-			}, id), h("button", {
-				type: "button",
-				style: S.button,
-				disabled: probeBusy,
-				onClick: () => void runProbe(id, "usage"),
-				title: tt("probe.usage")
-			}, tt("models.probeKept")), h("a", {
-				style: {
-					...S.formNote,
-					margin: 0
-				},
-				href: modelscopeModelUrl(id),
-				target: "_blank",
-				rel: "noreferrer",
-				title: tt("models.viewOnSiteTitle")
-			}, tt("models.viewOnSite")));
-		})) : null, probeBusy ? h("div", { style: S.formNote }, tt("probe.busy")) : null, probeResult !== null ? h("div", {
-			style: S.formNote,
-			role: "status"
-		}, probeResult) : null, probeError !== null ? h("div", {
-			style: S.formError,
-			role: "alert"
-		}, format(tt("probe.fail"), { error: probeError })) : null));
+		})));
 		const accessBody = () => h("div", null, h(SectionCard, {
 			title: tt("section.token"),
 			open: openSections.token,

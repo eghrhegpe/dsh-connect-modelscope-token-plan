@@ -4,7 +4,7 @@
  * @module dsh-connect-modelscope-token-plan/client/panel-page
  */
 import { SectionCard, BalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm, ProviderCard } from "./cards.ts";
-import { PANEL_ID, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, modelscopeModelUrl, FEATURED_OWNERS, catalogOwner, sortCatalogIds } from "./const.ts";
+import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH } from "./const.ts";
 import { format, errorText, isoTime } from "./format.ts";
 import { getJson, postJson } from "./http.ts";
 import { viewOf, providerOf, DEGRADED_PROVIDER } from "./snapshot.ts";
@@ -23,7 +23,7 @@ export function PanelPage({ tt, localeSubscribe }: {
 }): unknown {
   const { data, error, loadedOnce, updatedAt, load } = useSnapshotPolling();
   const [, setLocaleRevision] = useState(0);
-  const [openSections, setOpenSections] = useState({ balance: true, local: true, trend: true, events: false, catalog: true, provider: true, token: true });
+  const [openSections, setOpenSections] = useState({ balance: true, local: true, trend: true, events: false, provider: true, token: true });
   const [activeTab, setActiveTab] = useState<TabId>("quota");
 
   useEffect(() => {
@@ -37,26 +37,6 @@ export function PanelPage({ tt, localeSubscribe }: {
 
   const { failure, needsSetup, guidance, shapeWarnings } = viewOf(data, error, tt);
   const showSetup = needsSetup && loadedOnce;
-
-  // 模型目录：挂载时读一次 + 手动刷新。快照里只有 20 个样本，整表走 /models。
-  const [catalog, setCatalog] = useState<{ ids: string[]; fetchedAt: string } | null>(null);
-  const [catalogError, setCatalogError] = useState<string | null>(null);
-  const loadCatalog = useCallback(async () => {
-    try {
-      const body = await getJson(MODELS_PATH);
-      if (body !== null && body.ok === true && Array.isArray(body.models)) {
-        setCatalog({ ids: (body.models as Array<{ id?: unknown }>).map((m) => String(m.id ?? "")).filter((id) => id !== ""), fetchedAt: typeof body.fetchedAt === "string" ? body.fetchedAt : "" });
-        setCatalogError(null);
-      } else {
-        setCatalogError(typeof body?.error === "string" ? body.error : "HTTP error");
-      }
-    } catch (reason) {
-      setCatalogError(errorText(reason));
-    }
-  }, []);
-  useEffect(() => {
-    if (activeTab === "models" && catalog === null) void loadCatalog();
-  }, [activeTab, catalog, loadCatalog]);
 
   // 接入为 DSH 模型：快照的 `provider` 块是首选；wire 已声明它，但旧 Host 或
   // 过渡期可能不给——所以读成 unknown，由 providerOf 归一，缺失时用 GET
@@ -98,32 +78,6 @@ export function PanelPage({ tt, localeSubscribe }: {
   const toggleProvider = useCallback((enabled: boolean) => void runProviderWrite(PROVIDER_PATH, { enabled }), [runProviderWrite]);
   const saveRoster = useCallback((enabledIds: string[]) => void runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds }), [runProviderWrite]);
   const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
-
-  // probe：usage / validity 两种形态的统一入口 + 一行结果。
-  const [probeBusy, setProbeBusy] = useState(false);
-  const [probeResult, setProbeResult] = useState<string | null>(null);
-  const [probeError, setProbeError] = useState<string | null>(null);
-  const runProbe = useCallback(async (modelId: string, kind: "usage" | "validity") => {
-    setProbeBusy(true);
-    setProbeResult(null);
-    setProbeError(null);
-    try {
-      const body = await postJson(PROBE_PATH, { modelId, kind });
-      if (body !== null && body.ok === true) {
-        const usage = body.usage as { totalTokens?: number } | null;
-        setProbeResult(kind === "usage" && usage !== null && usage !== undefined
-          ? format(tt("probe.ok"), { tokens: usage.totalTokens ?? 0, ms: Number(body.elapsedMs ?? 0) })
-          : format(tt("probe.validOk"), { status: Number(body.status ?? 0) }));
-        void load();
-      } else {
-        setProbeError(typeof body?.error === "string" ? body.error : "HTTP error");
-      }
-    } catch (reason) {
-      setProbeError(errorText(reason));
-    } finally {
-      setProbeBusy(false);
-    }
-  }, [tt, load]);
 
   // 令牌保存 / 忘掉。
   const [tokenBusy, setTokenBusy] = useState(false);
@@ -218,9 +172,14 @@ export function PanelPage({ tt, localeSubscribe }: {
     );
   };
 
-  // 模型 tab：顶部「接入为 DSH 模型」（开关 + 允许清单），下面是完整目录 +
-  // 每行试调（usage 形态）。「试调」保留但降级为次要动作——真正的接入在
-  // ProviderCard 的开关和勾选框里，目录表的按钮只做「这一条到底通不通」。
+  // 模型 tab：只有「接入为 DSH 模型」（开关 + 允许清单）。
+  //
+  // 「模型目录（免认证，不耗额度）」那张表连同它的逐行试调按钮一起删掉了：
+  // /models 是免认证的原始列表，而这一页由 Host 的 roster 承担——roster 是
+  // 注册 provider 时实际会提供的模型（含可用性/额度/视觉标记），比一份裸 id
+  // 列表更接近用户的问题「我能在选择器里用什么」。两份列表并排只会让人对着
+  // 两个数字发愣。usage probe 不进 DSH 调用路径，只服务那张表，随表一起去掉；
+  // 零额度的 validity probe（验令牌）留在「接入」tab。
   const modelsBody = () => h(
     "div",
     null,
@@ -237,39 +196,6 @@ export function PanelPage({ tt, localeSubscribe }: {
         tokenPresent: data?.token.present === true,
         tt
       })
-    ),
-    h(
-      SectionCard,
-      {
-        title: catalog !== null
-          ? `${tt("section.catalog")} · ${format(tt("models.count"), { count: catalog.ids.length })}`
-          : tt("section.catalog"),
-        open: openSections.catalog,
-        onToggle: () => toggleSection("catalog"),
-        tt
-      },
-      catalog === null && catalogError === null
-        ? h("div", { style: S.trendLegend }, tt("models.loading"))
-        : null,
-      catalogError !== null ? h("div", { style: S.formNote, role: "status" }, format(tt("models.none"), { error: catalogError })) : null,
-      catalog !== null
-        ? h("div", null,
-            h("div", { style: S.trendLegend }, format(tt("models.fetched"), { time: isoTime(catalog.fetchedAt) })),
-            sortCatalogIds(catalog.ids).map((id) => {
-              const featured = (FEATURED_OWNERS as readonly string[]).includes(catalogOwner(id));
-              return h(
-                "div",
-                { key: id, style: featured ? S.trendRowFeatured : S.trendRowHead },
-                featured ? h("span", { style: S.catalogStar, title: tt("models.featuredTitle") }, "★") : null,
-                h("span", { style: featured ? S.trendModelFeatured : S.trendModel, title: id }, id),
-                h("button", { type: "button", style: S.button, disabled: probeBusy, onClick: () => void runProbe(id, "usage"), title: tt("probe.usage") }, tt("models.probeKept")),
-                h("a", { style: { ...S.formNote, margin: 0 }, href: modelscopeModelUrl(id), target: "_blank", rel: "noreferrer", title: tt("models.viewOnSiteTitle") }, tt("models.viewOnSite"))
-              );
-            }))
-        : null,
-      probeBusy ? h("div", { style: S.formNote }, tt("probe.busy")) : null,
-      probeResult !== null ? h("div", { style: S.formNote, role: "status" }, probeResult) : null,
-      probeError !== null ? h("div", { style: S.formError, role: "alert" }, format(tt("probe.fail"), { error: probeError })) : null
     )
   );
 

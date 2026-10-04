@@ -35,7 +35,11 @@
   / use-polling-interval。
 - React 由 loader 注入，`h()` + 内联 style token，无 JSX。
 - 「额度」tab 头条 = **官方魔粒余额**（spike 后记的升级）；本地计数带口径标注。
-- 模型 tab 每行「试调」按钮（usage 形态，消耗 1 次免费额度，面板有标注）。
+- 模型 tab：**只有**「接入为 DSH 模型」区块（provider 开关 + roster 勾选）。
+  ~~每行「试调」按钮~~ 与底部的「模型目录（免认证，不耗额度）」表已在 M4+
+  的面板收敛里删除——roster 本身就是「接入后实际提供哪些模型」，免认证目录表
+  与它并排只是重复；usage probe 只服务那张表，随之移除。零额度的 validity
+  probe（验令牌）留在「接入」tab。
 
 ## M3 — 测试 + 装机验证（进行中）
 
@@ -57,7 +61,9 @@
   `routes/provider.ts` 三条路径。注册后 DSH 的全部魔搭调用都经本插件，**本地计数
   即涵盖全部 DSH 魔搭调用**。设计契约见 [PROVIDER-M4.md](PROVIDER-M4.md)。
 - ✅ **面板「接入为 DSH 模型」**：模型 tab 顶部 provider 区块（开关 + roster 勾选 +
-  全部/全部隐藏/保存清单/回到默认）；原「试调」按钮保留为次要动作。
+  全部/全部隐藏/保存清单/回到默认）。~~原「试调」按钮保留为次要动作~~ —— 该按钮
+  随后在 M4+ 面板收敛里删除（见上）；roster 里 deepseek/glm/qwen 三家改挂一枚
+  「推荐」pill，取代目录表时代的整行染色。
 - ✅ **429 自愈接入**：`llm-retry.ts`（QUOTA 快速失败 vs RATE_LIMIT 退避）+
   `llm-error-fix.ts`（peer 把限频 429 误判成 QUOTA 的纠正层）——复用姊妹插件两件套。
 - ✅ 离线测试：`test/provider.test.mjs`（目录映射 / 开关+清单 / publish 三条语义）、

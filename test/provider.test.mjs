@@ -191,11 +191,43 @@ import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_S
   assert.equal(await store.enabled(), true);
   assert.equal(await store.isSet(), true);
 
+  // 上面这句读的是 cache.remember 填的内存值，所以「面板显示对了」并不等于
+  // 「磁盘写对了」。曾经 save() 把 enabled 交给 patchPayload 的 merge 分支，
+  // 开关值在落盘时被静默丢弃：内存 true / 磁盘无键，冷读即回落到「未接入」。
+  // 这里对同一目录另开一个 store（空缓存）来钉住真正的落盘值。
+  {
+    const cold = () => createFileProviderStore({ dir });
+    const onDisk = () => JSON.parse(readFileSync(join(dir, "provider.json"), "utf8"));
+    assert.equal(onDisk().enabled, true, "开关值必须落盘，不能只活在缓存里");
+    assert.equal(await cold().enabled(), true, "冷读（新进程/新缓存）必须也是 true");
+
+    // 关掉开关同样要落盘（反向也要钉：写 false 不能被磁盘上的 true 挡住）
+    await store.save(false);
+    assert.equal(onDisk().enabled, false, "关开关必须写 false 到磁盘");
+    assert.equal(await cold().enabled(), false, "冷读后仍是 false");
+    await store.save(true);
+    assert.equal(onDisk().enabled, true, "恢复 true");
+  }
+
   // 保存清单不能覆盖开关；反之亦然
   await store.saveEnabledIds(["a/A", "b/B"]);
   assert.equal(await store.enabled(), true, "保存清单后开关保持");
+  // 清单保存后开关不仅要「内存里还在」，磁盘上也必须还在。
+  assert.equal(
+    JSON.parse(readFileSync(join(dir, "provider.json"), "utf8")).enabled,
+    true,
+    "保存清单后开关在磁盘上保持"
+  );
   await store.save(false);
   assert.deepEqual(await store.enabledIds(), ["a/A", "b/B"], "保存开关后清单保持");
+  // ★ 用户报的那个 bug：保存开关会把已存的清单整个删掉（只传了 {enabled}，
+  //   而 body 只在 patch.enabledIds !== undefined 时才带该键）。清单在磁盘上
+  //   必须活着 —— 内存断言抓不到它，因为 cache.remember 用的是 list 变量。
+  assert.deepEqual(
+    JSON.parse(readFileSync(join(dir, "provider.json"), "utf8")).enabledIds,
+    ["a/A", "b/B"],
+    "保存开关后清单在磁盘上保持"
+  );
 
   // 清单去重保序
   await store.saveEnabledIds(["a/A", "a/A", "", "b/B"]);

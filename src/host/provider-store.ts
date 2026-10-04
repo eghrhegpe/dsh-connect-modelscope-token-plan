@@ -179,23 +179,27 @@ export function createFileProviderStore(options: StoreOptions = {}) {
 
   /**
    * Read one payload, then hand it to `write` — the read-modify-write that keeps
-   * the switch and the list from clobbering each other. `undefined` keys in
-   * `patch` mean "leave what is on disk alone", so a switch save cannot drop a
-   * list save and vice versa.
+   * the switch and the list from clobbering each other.
+   *
+   * Three-state keys, and they are SYMMETRIC between `enabled` and `enabledIds`:
+   * a key the caller omits (`undefined`) keeps whatever is on disk, an explicit
+   * `null` clears it back to "not set" (the ABSENCE of the key — that is how
+   * {@link forget} expresses "fall back to the config default"), and any other
+   * value is stored as given. An earlier `mergeEnabled` flag applied the
+   * "keep what is on disk" rule to `enabled` unconditionally, which silently
+   * discarded the very value a switch save was asked to store.
    * @param {object} patch - `{ enabled?, enabledIds? }` to persist.
-   * @param {boolean} [mergeEnabled] - keep the currently-stored switch value.
    * @returns {Promise<string|null>} the write refusal reason, or `null`.
    */
-  const patchPayload = async (patch: { enabled?: boolean | null; enabledIds?: string[] | null }, mergeEnabled: boolean) => {
+  const patchPayload = async (patch: { enabled?: boolean | null; enabledIds?: string[] | null }) => {
     const current = await parsePayload();
-    const body = {
-      version: PROVIDER_VERSION,
-      ...(mergeEnabled
-        ? (current.enabled === null ? {} : { enabled: current.enabled })
-        : (patch.enabled === undefined ? {} : { enabled: patch.enabled })),
-      ...(patch.enabledIds === undefined ? {} : { enabledIds: patch.enabledIds }),
-      updatedAt: new Date().toISOString()
-    };
+    /** `undefined` keeps the stored key; `null` clears it (key absent). */
+    const body: Record<string, unknown> = { version: PROVIDER_VERSION };
+    const enabled = patch.enabled === undefined ? current.enabled : patch.enabled;
+    if (enabled !== null) body.enabled = enabled;
+    const enabledIds = patch.enabledIds === undefined ? current.enabledIds : patch.enabledIds;
+    if (enabledIds !== null) body.enabledIds = enabledIds;
+    body.updatedAt = new Date().toISOString();
     return writePayload(body);
   };
 
@@ -281,7 +285,7 @@ export function createFileProviderStore(options: StoreOptions = {}) {
       // An ADR-006 refusal SURFACES, not just logs: this is an explicit user
       // action, and the route re-reads the value on the same request — silence
       // here left the panel showing an unchanged switch with no reason to act.
-      const refusal = await patchPayload({ enabled }, true);
+      const refusal = await patchPayload({ enabled });
       if (refusal !== null) throw new Error(refusal);
       cache.remember({ enabled, enabledIds: (await readPayload()).enabledIds ?? [] });
     },
@@ -293,7 +297,7 @@ export function createFileProviderStore(options: StoreOptions = {}) {
     async saveEnabledIds(ids: string[]) {
       const list = normalizeEnabledIds(ids);
       if (list === null) throw new TypeError("provider allow-list expects an array of strings");
-      const refusal = await patchPayload({ enabledIds: list }, true);
+      const refusal = await patchPayload({ enabledIds: list });
       if (refusal !== null) throw new Error(refusal);
       cache.remember({ enabled: (await readPayload()).enabled ?? null, enabledIds: list });
     },
@@ -306,7 +310,7 @@ export function createFileProviderStore(options: StoreOptions = {}) {
       // No `enabled`/`enabledIds` keys: "not set" is the absence of an answer,
       // not `false`/an empty list. Remember only once the write landed — a
       // refused write (ADR-006) leaves the file exactly as it was.
-      const refusal = await patchPayload({ enabled: null, enabledIds: null }, false);
+      const refusal = await patchPayload({ enabled: null, enabledIds: null });
       if (refusal !== null) throw new Error(refusal);
       cache.remember({ enabled: null, enabledIds: null });
     }

@@ -27,7 +27,6 @@ export const zh = {
   "section.local": "本地调用（仅经本插件的调用）",
   "section.trend": "近 {days} 天本地调用趋势",
   "section.events": "限流与错误事件",
-  "section.catalog": "模型目录（免认证，不耗额度）",
   "section.token": "访问令牌",
   "section.expand": "展开",
   "section.collapse": "折叠",
@@ -43,24 +42,19 @@ export const zh = {
   "quota.headline": "今日 {calls} 次 · {models} 个模型",
   "quota.note": "本地口径：只统计经本插件的调用，直连魔搭的其它客户端不计入；消耗总量以官方魔粒余额为准。",
 
-  "models.count": "{count} 个模型",
   "models.none": "目录暂不可读：{error}",
   "models.loading": "读取目录中…",
-  "models.fetched": "读取于 {time}",
-  "models.probeUsage": "试调",
-  "probe.usage": "测试一次调用（消耗 1 次额度）",
   "probe.validity": "验令牌（零额度）",
-  "probe.busy": "请求中…",
-  "probe.ok": "调用成功：{tokens} tokens / {ms}ms",
   "probe.validOk": "令牌有效（HTTP {status}）",
   "probe.fail": "失败：{error}",
 
   // 模型 tab 顶部「接入为 DSH 模型」区块（provider 注册 + 允许清单）。
-  // 「试调」保留但降级为次要动作，所以它把「消耗额度」写进按钮本身。
-  "models.probeKept": "试调（单次，消耗 1 次免费额度）",
+  // 目录表与它的行内 usage 试调一并删除（见 panel-page.ts modelsBody 注释），
+  // 所以只剩 token 管理用的零额度 validity probe。
   "models.viewOnSite": "在魔搭查看 →",
   "models.viewOnSiteTitle": "打开模型详情页（魔粒单价等只在网页展示）",
   "models.featuredTitle": "推荐系列（深度求索 / 智谱 / 通义千问）",
+  "provider.featured": "推荐",
   "section.provider": "接入为 DSH 模型",
   "provider.enable": "把魔搭模型接入 DSH 模型选择器",
   "provider.on": "已接入",
@@ -130,7 +124,6 @@ export const en: typeof zh = {
   "section.local": "Local calls (only through this plugin)",
   "section.trend": "Local call trend, last {days} days",
   "section.events": "Rate-limit and error events",
-  "section.catalog": "Model catalog (unauthenticated, free)",
   "section.token": "Access token",
   "section.expand": "Expand",
   "section.collapse": "Collapse",
@@ -146,25 +139,20 @@ export const en: typeof zh = {
   "quota.headline": "Today {calls} calls · {models} models",
   "quota.note": "Local scope: only calls through this plugin are counted; clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
 
-  "models.count": "{count} models",
   "models.none": "Catalog unavailable: {error}",
   "models.loading": "Loading catalog…",
-  "models.fetched": "read at {time}",
-  "models.probeUsage": "Try",
-  "probe.usage": "Test one call (consumes 1 free call)",
   "probe.validity": "Verify token (free)",
-  "probe.busy": "Working…",
-  "probe.ok": "Call succeeded: {tokens} tokens / {ms}ms",
   "probe.validOk": "Token valid (HTTP {status})",
   "probe.fail": "Failed: {error}",
 
   // The "register as a DSH model" block at the top of the Models tab.
-  // The old "Try" probe survives as a SECONDARY action, so its copy carries
-  // the cost it incurs.
-  "models.probeKept": "Test call (consumes one free call)",
+  // The catalog table and its per-row usage probe were removed (see the
+  // panel-page.ts modelsBody comment), leaving only the free validity probe
+  // the token form uses.
   "models.viewOnSite": "View on ModelScope →",
   "models.viewOnSiteTitle": "Open the model page (per-model Magicube price is web-only)",
   "models.featuredTitle": "Recommended family (DeepSeek / Zhipu / Qwen)",
+  "provider.featured": "Recommended",
   "section.provider": "Register as a DSH model",
   "provider.enable": "Register ModelScope models in the DSH model picker",
   "provider.on": "On",

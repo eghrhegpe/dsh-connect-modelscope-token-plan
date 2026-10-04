@@ -316,26 +316,33 @@ roster），失败给降级形状（`enabled:false, error, roster:[]`），**绝
 
 目标（用户诉求的落点）：**把抽象的「试调」按钮换成真接入**。
 
+> **后记（M4+ 面板收敛）**：本节描述的「试调按钮降级为次要动作」已被推翻——
+> 那张免认证目录表连同每行 usage 试调**整块删除**，模型 tab 现在只有
+> `section.provider` 一个区块。roster 自身就是「接入后实际提供哪些模型」，
+> 与免认证目录并排属于重复；usage probe 也只服务那张表，且根本不在 DSH 的调用
+> 路径上（真调用经 provider adapter）。**保留**的是零额度 validity probe
+> （`probe.validity`，接入 tab 的验令牌，`POST /probe` 路由不动）。
+> 目录表时代的整行染色（`trendRowFeatured`）同时降级为 roster 行上一枚
+> 「推荐」pill（`S.modelBadgeFeatured`，与「视觉」pill 同构）。细节见 CHANGELOG
+> 「0.1.0-M4+ — 面板收敛」。
+
 - `client/const.ts`：加 `PROVIDER_PATH`（§9）。
 - `client/i18n.ts`：zh/en 各加一组 provider 文案键（`tab.provider`、
   `provider.enable`、`provider.enabled`、`provider.disabled`、
   `provider.models`、`provider.allowAll`、`provider.hideAll`、
   `provider.enabledCount`、`provider.registered`、`provider.notRegistered`、
-  `provider.error`、`provider.rosterHint`、`provider.save`、`provider.probeKept`
-  等），en 键集钉为 typeof zh。
-- `client/panel-page.ts`：**模型 tab** 每行把「试调」按钮降级为**次要动作**
-  （保留 probe 能力，但主动作是模型勾选框），并加一个「接入为 DSH 模型」
-  开关区块（enable switch + 模型勾选 + 保存）。具体：
+  `provider.error`、`provider.rosterHint`、`provider.save`、`provider.featured`
+  等），en 键集钉为 typeof zh。（`provider.probeKept` 随目录表一起删除。）
+- `client/panel-page.ts`：**模型 tab** 加一个「接入为 DSH 模型」开关区块
+  （enable switch + 模型勾选 + 保存）。具体：
   - 新增第四个 tab `provider`（「接入模型」）或并入「接入」tab。**采用：
     「模型」tab 顶部加 provider 开关行 + 「接入」tab 保留令牌管理**，并新增
-    「接入模型」为模型 tab 的第二个 section（`section.provider`）。这样三个 tab
+    「接入模型」为模型 tab 的 section（`section.provider`）。这样三个 tab
     不变，改动最小、最不打断用户。
   - provider 开关：读 `data.provider`（§11 快照块）或 GET `PROVIDER_PATH`，
     切换即 POST `{enabled}`；状态显示 `registered/notRegistered/error`。
   - 模型勾选：`roster` 每行 checkbox（预选 = 当前 `enabledIds`），勾选变化
     点「保存清单」POST roster。提供「全部 / 清空 / 隐藏全部（哨兵）」快捷。
-  - **保留**原「试调」按钮作为次要（`probe.usage`），并在文案里注明「仅测通，
-    不消耗额度之外的说明照旧」。
 - `client/cards.ts`：加 `ProviderCard`（开关 + 状态 + roster + 快捷 + 保存）。
 - `client/snapshot.ts`：`interpretSnapshot` 透传 `provider` 块；失败分支给
   provider 降级形状。

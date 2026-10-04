@@ -8,7 +8,7 @@ import { count, format, isoTime } from "./format.ts";
 import { h, useEffect, useMemo, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
-import { HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, modelscopeModelUrl } from "./const.ts";
+import { HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, modelscopeModelUrl, FEATURED_OWNERS, catalogOwner } from "./const.ts";
 import { providerOf } from "./snapshot.ts";
 import { ToggleSwitch } from "./toggle-switch.ts";
 import type { BalanceData, ProviderStatus, QuotaEvent, Snapshot, TrendBucket, TokenStatus } from "../shared/wire.ts";
@@ -334,6 +334,9 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onRe
                   h("span", { style: S.modelName, title: id }, row.name)
                 ),
                 row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null,
+                (FEATURED_OWNERS as readonly string[]).includes(catalogOwner(row.id))
+                  ? h("span", { style: S.modelBadgeFeatured, title: tt("models.featuredTitle") }, tt("provider.featured"))
+                  : null,
                 row.quotaExhausted === true
                   ? h("span", { style: { ...S.modelBadge, color: "var(--dsw-alias-state-error-primary)" } }, tt("provider.quotaExhausted"))
                   : null,
