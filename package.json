@@ -1,0 +1,100 @@
+{
+  "name": "dsh-connect-modelscope-token-plan",
+  "displayName": "DSH Connect ModelScope Token Plan",
+  "icon": "./icon.svg",
+  "version": "0.1.0",
+  "description": "ModelScope (modelscope.cn) connect bundle for the Harness Web UI: a local-usage quota panel for the free API-Inference tier (daily call budget, per-model caps, 429 events, local trend) plus optional provider registration that brings ModelScope models into DSH conversation.",
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "modelscope",
+    "token-plan",
+    "quota",
+    "api-inference"
+  ],
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client.js",
+    "icon.svg",
+    "locale",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build:client": "tsdown -c tsdown.config.mjs",
+    "duplicate-check": "jscpd src --min-tokens 70 --reporters console-full",
+    "test": "node test/wire.test.mjs",
+    "doctor": "node tools/doctor.mjs",
+    "doctor:json": "node tools/doctor.mjs --json",
+    "build": "tsdown -c tsdown.config.mjs",
+    "prepack": "npm run build"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-renderer"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.2 <5.0.0",
+    "@deepseek-ai/dsh-client-locale": ">=0.1.5 <0.3",
+    "@deepseek-ai/dsh-client-ui-layout": ">=0.1.5 <0.3",
+    "@deepseek-ai/dsh-client-ui-renderer": ">=0.1.5 <0.3",
+    "@deepseek-ai/dsh-credentials": ">=0.1.5 <0.3",
+    "@deepseek-ai/dsh-home-paths": ">=0.1.5 <0.3",
+    "@deepseek-ai/dsh-host-webserver": ">=0.1.5 <0.3",
+    "@deepseek-ai/dsh-llm": ">=0.1.5 <0.3",
+    "@deepseek-ai/dsh-llm-pi-ai": ">=0.1.5 <0.3",
+    "@deepseek-ai/dsh-settings": ">=0.1.5 <0.3",
+    "@deepseek-ai/dsh-tools": ">=0.1.5 <0.3",
+    "@deepseek-ai/schemastery": "^3.18.2",
+    "@earendil-works/pi-ai": "^0.85.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": { "optional": true },
+    "@deepseek-ai/dsh-client-locale": { "optional": true },
+    "@deepseek-ai/dsh-client-ui-layout": { "optional": true },
+    "@deepseek-ai/dsh-client-ui-renderer": { "optional": true },
+    "@deepseek-ai/dsh-credentials": { "optional": true },
+    "@deepseek-ai/dsh-home-paths": { "optional": true },
+    "@deepseek-ai/dsh-host-webserver": { "optional": true },
+    "@deepseek-ai/dsh-llm": { "optional": true },
+    "@deepseek-ai/dsh-llm-pi-ai": { "optional": true },
+    "@deepseek-ai/dsh-settings": { "optional": true },
+    "@deepseek-ai/dsh-tools": { "optional": true },
+    "@deepseek-ai/schemastery": { "optional": true },
+    "@earendil-works/pi-ai": { "optional": true }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan.git"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "jscpd": "^5.4.0",
+    "tsdown": "^0.23.0",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,37 @@
+# 凭据与本机状态：绝不进版本库
+.env
+.env.*
+*.env
+# 运行时产物
+*.log
+logs/
+tmp/
+
+# 会话工具状态
+.zcode/
+.agnes/
+.box-agent/
+
+# 依赖与构建
+node_modules/
+package-lock.json
+dist/
+build/
+.build/
+*.tsbuildinfo
+
+# lib/ 与根 client.js 是**受版本管理的产物**（与姊妹插件 sensenova/agnes 同款
+# 决策，ADR-005）：DSH 市场的 `github:` 安装源走 pnpm git-dep，不跑 prepack——
+# lib/ 不入库则 GitHub 直装的包没有宿主入口（lib/index.js），卡片直接失效。
+# 策略：改 src/ 后跑 `npm run build`，把 lib/、client.js 与源码一起提交；
+# test/build-gate.mjs（后续接入）负责新鲜度门禁。
+
+# 编辑器与系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# 上游参考仓库容器（各子目录自带 .git，仅本地容纳、绝不进本仓库历史）
+/upstream/

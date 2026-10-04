@@ -1,0 +1,33 @@
+{
+  "$comment": "与姊妹插件（sensenova/agnes）同一套编译纪律。要点只有三条：1) strict 全开 + noUncheckedIndexedAccess/exactOptionalPropertyTypes，typecheck 是推送门禁；2) noEmit —— 构建是 tsdown 的活（lib/ 与 client.js 为入库产物）；3) erasableSyntaxOnly 是给测试宿主的，不是给类型的：离线套件用裸 node 直接 import src/**.ts（Node 22.19+/24 原生 strip-types，无 tsx/jiti），strip-only 跑不了 enum/namespace/参数属性/尖括号断言，普通 tsc 却放行 —— 不开这个标志，一个 .ts 文件可以 typecheck 全绿却在测试导入时 ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX。开了它，TS1294 把这四类语法在编译期拦下。本项目不用 .tsx。",
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noImplicitThis": true,
+    "useUnknownInCatchVariables": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src/host", "src/client", "src/shared", "types/*.d.ts"],
+  "exclude": ["node_modules", "upstream", "lib", "test", "assets", "docs", ".github"]
+}
