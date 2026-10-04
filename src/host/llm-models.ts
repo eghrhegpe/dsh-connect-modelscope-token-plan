@@ -108,6 +108,22 @@ const VISION_NAME_PATTERN = /(vl|vision|qwen2?\.?\d*-?vl|glm.*v|internvl|llava|p
 const IMAGE_GEN_NAME_PATTERN = /(wanx|qwen-image|cogview|flux|stable-diffusion|sdxl|sd3|txt2img|text-to-image|draw|seedream|kolors|hunyuan-?image|imagen)/i;
 
 /**
+ * 人工策展的「已知多模态（能吃图）模型」清单。
+ *
+ * 为什么需要：魔搭 `/v1/models` 实测每条只返回 `id`/`object`/`owned_by`/`created`，
+ * **没有任何模态字段**（不像 sensenova 有 `type` 字段可判）。`isVisionModel` 因此只能
+ * 靠名字启发，而 `DeepSeek-V4.1-Flash` 这类「名字不含 vl/vision 但确实能吃图」的模型
+ * 会被漏掉 → 面板视觉标签缺失、DSH 模型选择器不提供图输入。
+ *
+ * 这份清单是「我们已知」（模型卡 / 用户反馈），不是平台声明；与名字启发一样，**不假装
+ * 上游返回过**。真机若某模型吃图却不在清单，最坏只是收 `UNSUPPORTED_CONTENT`，不静默
+ * 失败。新增已确知的多模态模型时在此追加 id 即可。
+ */
+const KNOWN_VISION_IDS = Object.freeze(new Set([
+  "deepseek-ai/DeepSeek-V4.1-Flash"
+]));
+
+/**
  * 把原始 `/v1/models` data 条目变成归一目录条目。
  *
  * 只做投影与回退，不做判断：`id` 必取，`name` 回退 id，`vision`/`contextWindow`/
@@ -165,9 +181,14 @@ export function isVisionModel(entry: CatalogEntry): boolean {
     // 结构化字段是权威答案：字段里出现 image/vision 就是吃图，别再用名字猜。
     return modalities.some((modality) => /image|vision/i.test(modality));
   }
-  // 只有完全没结构化字段时才落到名字启发——面板能说「按名字推断」，绝不假装
-  // 平台声明过。
-  const idOrName = `${str(entry?.id, "")} ${str(entry?.name, "")}`;
+  // 魔搭 /v1/models 实测只返回 id/object/owned_by/created，**零模态元数据**（不像
+  // sensenova 有 type 字段可判），结构化字段这条路对全部模型都走不通。于是先查人工策展的
+  // 「已知多模态」清单（KNOWN_VISION_IDS）：这些是我们从模型卡 / 用户反馈确知的能吃图
+  // 模型，不假装平台返回过。清单命中即真。
+  const id = str(source.id, "");
+  if (id !== "" && KNOWN_VISION_IDS.has(id)) return true;
+  // 最后才落到名字启发——面板能说「按名字推断」，绝不假装平台声明过。
+  const idOrName = `${id} ${str(entry?.name, "")}`;
   return VISION_NAME_PATTERN.test(idOrName);
 }
 

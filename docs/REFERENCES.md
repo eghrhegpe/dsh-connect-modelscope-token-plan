@@ -96,6 +96,19 @@ balance，差值≈当日总消耗，见 ROADMAP 的 backlog）。
 标准模型 id）做**外链**（client 半边每个模型行的「在魔搭查看 →」），方便人工核对单价；
 这只是网页跳转，**不是数据源**。
 
+### 模型「能否吃图」（vision）同样拿不到结构化信号
+
+`isVisionModel` 优先读 `input_modalities`/`modalities` 等结构化模态字段；但**魔搭
+`/v1/models` 实测每条只返回 `id`/`object`(空串)/`owned_by`/`created` 四个字段，零模态
+元数据**（不像 sensenova 有 `type` 字段可判）。因此所有模型都走不到结构化分支，只能靠
+名字启发 `VISION_NAME_PATTERN`（`vl`/`vision`/`internvl`…）。
+
+后果：`DeepSeek-V4.1-Flash` 这类「名字不含 vl/vision、但确实能吃图」的模型会被漏判 →
+面板视觉标签缺失、DSH 模型选择器不提供图输入。修法不是去解析那个不存在的字段，而是
+`llm-models.ts` 里维护一份**人工策展的 `KNOWN_VISION_IDS` 清单**（模型卡/用户反馈确知
+的多模态模型）。清单是「我们已知」，**不是平台声明**——与名字启发一样不假装上游返回过；
+漏策展最坏只收 `UNSUPPORTED_CONTENT`，不静默失败。新增已确知多模态模型时在此追加 id。
+
 ---
 
 ## 通用教训（对应「有了工作区就要把数据拉下来」）
