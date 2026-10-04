@@ -39,6 +39,12 @@
   （`deepseek-ai`/`ZhipuAI`/`Qwen`）与 `sortCatalogIds`：featured 置顶分组、其余按
   owner 字母序、同 owner 内按 id 字母序；置顶行加 ★ 标记 + 品牌色左边线 + 加粗名
   （`styles.ts` 新增 `trendRowFeatured`/`catalogStar`/`trendModelFeatured`，仅视觉不改层级）。
+- **第三方参考方案说明 `docs/REFERENCE-modelsdev.md`**：拉取 `anomalyco/models.dev`
+  （Mastra 文档 `imageInput` 列的真正数据源），记录其用 `[modalities].input`
+  含 `"image"` 标记视觉模型的编码方式；对比本插件「详情端点实时判定
+  `Tasks[].Name == "image-text-to-text"`」方案——models.dev 对魔搭仅收编 7 个纯文本
+  模型、不含 `DeepSeek-V4.1-Flash` 等视觉模型，故本插件不用其作 drop-in 数据源，
+  文档并附可选的反哺 PR 路径。
   i18n zh/en 补 `models.featuredTitle`；新增 `test/catalog.test.mjs` 覆盖排序与高亮判定。
 - **vision 判定升级为详情端点精确信号**：`/v1/models` 仍无模态字段，但
   `modelscope.cn/api/v1/models/{owner}/{name}` 的 `Data.Tasks[].Name` 提供精确任务标签
