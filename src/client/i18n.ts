@@ -24,8 +24,7 @@ export const zh = {
   "tab.access": "接入",
 
   "section.balance": "魔粒余额（官方数据）",
-  "section.local": "本地计数（仅经本插件的调用）",
-  "section.perModel": "今日单模型调用",
+  "section.local": "本地调用（仅经本插件的调用）",
   "section.trend": "近 {days} 天本地调用趋势",
   "section.events": "限流与错误事件",
   "section.catalog": "模型目录（免认证，不耗额度）",
@@ -41,11 +40,8 @@ export const zh = {
   "balance.usagePage": "官方用量明细（网页）→",
   "balance.unavailable": "魔粒余额暂不可读：{error}",
 
-  "quota.dailyUsed": "今日本地调用",
-  "quota.dailyLimit": "参考上限（配置值）",
-  "quota.remaining": "推算剩余",
-  "quota.exhausted": "已达参考上限",
-  "quota.countingNote": "本地推算只统计经本插件的调用；直连魔搭的其它客户端不计入。消耗以官方魔粒余额为准。",
+  "quota.headline": "今日 {calls} 次 · {models} 个模型",
+  "quota.note": "本地口径：只统计经本插件的调用，直连魔搭的其它客户端不计入；消耗总量以官方魔粒余额为准。",
 
   "models.count": "{count} 个模型",
   "models.none": "目录暂不可读：{error}",
@@ -104,8 +100,7 @@ export const en: typeof zh = {
   "tab.access": "Access",
 
   "section.balance": "Magicube balance (official)",
-  "section.local": "Local counting (only calls through this plugin)",
-  "section.perModel": "Per-model calls today",
+  "section.local": "Local calls (only through this plugin)",
   "section.trend": "Local call trend, last {days} days",
   "section.events": "Rate-limit and error events",
   "section.catalog": "Model catalog (unauthenticated, free)",
@@ -121,11 +116,8 @@ export const en: typeof zh = {
   "balance.usagePage": "Official usage details (web) →",
   "balance.unavailable": "Magicube balance temporarily unreadable: {error}",
 
-  "quota.dailyUsed": "Local calls today",
-  "quota.dailyLimit": "Reference limit (configured)",
-  "quota.remaining": "Computed remaining",
-  "quota.exhausted": "Reference limit reached",
-  "quota.countingNote": "The local estimate only counts calls through this plugin; clients calling ModelScope directly are not counted. The official Magicube balance is the authority.",
+  "quota.headline": "Today {calls} calls · {models} models",
+  "quota.note": "Local scope: only calls through this plugin are counted; clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
 
   "models.count": "{count} models",
   "models.none": "Catalog unavailable: {error}",

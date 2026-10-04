@@ -47,8 +47,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"tab.models": "模型",
 			"tab.access": "接入",
 			"section.balance": "魔粒余额（官方数据）",
-			"section.local": "本地计数（仅经本插件的调用）",
-			"section.perModel": "今日单模型调用",
+			"section.local": "本地调用（仅经本插件的调用）",
 			"section.trend": "近 {days} 天本地调用趋势",
 			"section.events": "限流与错误事件",
 			"section.catalog": "模型目录（免认证，不耗额度）",
@@ -62,11 +61,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"balance.note": "魔粒是魔搭 API-Inference 的官方额度单位，此数字来自官方接口（openapi/v1/magicubes/balance），是真实余额。预扣 = 进行中任务未返回结果时的暂扣额度。",
 			"balance.usagePage": "官方用量明细（网页）→",
 			"balance.unavailable": "魔粒余额暂不可读：{error}",
-			"quota.dailyUsed": "今日本地调用",
-			"quota.dailyLimit": "参考上限（配置值）",
-			"quota.remaining": "推算剩余",
-			"quota.exhausted": "已达参考上限",
-			"quota.countingNote": "本地推算只统计经本插件的调用；直连魔搭的其它客户端不计入。消耗以官方魔粒余额为准。",
+			"quota.headline": "今日 {calls} 次 · {models} 个模型",
+			"quota.note": "本地口径：只统计经本插件的调用，直连魔搭的其它客户端不计入；消耗总量以官方魔粒余额为准。",
 			"models.count": "{count} 个模型",
 			"models.none": "目录暂不可读：{error}",
 			"models.loading": "读取目录中…",
@@ -117,8 +113,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"tab.models": "Models",
 			"tab.access": "Access",
 			"section.balance": "Magicube balance (official)",
-			"section.local": "Local counting (only calls through this plugin)",
-			"section.perModel": "Per-model calls today",
+			"section.local": "Local calls (only through this plugin)",
 			"section.trend": "Local call trend, last {days} days",
 			"section.events": "Rate-limit and error events",
 			"section.catalog": "Model catalog (unauthenticated, free)",
@@ -132,11 +127,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"balance.note": "Magicube is the official unit of ModelScope API-Inference quota; this number comes from the official endpoint (openapi/v1/magicubes/balance) and is the real balance. Frozen = held for in-flight tasks.",
 			"balance.usagePage": "Official usage details (web) →",
 			"balance.unavailable": "Magicube balance temporarily unreadable: {error}",
-			"quota.dailyUsed": "Local calls today",
-			"quota.dailyLimit": "Reference limit (configured)",
-			"quota.remaining": "Computed remaining",
-			"quota.exhausted": "Reference limit reached",
-			"quota.countingNote": "The local estimate only counts calls through this plugin; clients calling ModelScope directly are not counted. The official Magicube balance is the authority.",
+			"quota.headline": "Today {calls} calls · {models} models",
+			"quota.note": "Local scope: only calls through this plugin are counted; clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
 			"models.count": "{count} models",
 			"models.none": "Catalog unavailable: {error}",
 			"models.loading": "Loading catalog…",
@@ -792,21 +784,21 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			rel: "noreferrer"
 		}, tt("balance.usagePage"))));
 	}
-	/** 本地计数卡：今日调用 vs 参考上限的推算条 + 口径说明。 */
+	/**
+	* 本地调用卡：纯统计口径——今日次数 + 按模型分布 + 一句口径说明。
+	* 刻意**不画**「推算剩余/参考上限」进度条：官方已改为魔粒计费，「2000 次」
+	* 是次数口径的社区快照，与魔粒余额并排展示是误导（README「三条事实」#2）。
+	* 本地计数回答的是官方余额回答不了的问题：哪个模型在烧、何时撞的 429。
+	*/
 	function LocalDailyCard({ snapshot, tt }) {
-		const { daily, perModelLimit } = snapshot.quota;
-		const pct = daily.limit > 0 ? Math.min(100, daily.usedLocal / daily.limit * 100) : null;
-		const tone = pct !== null && pct >= 90 ? S.barFillError : pct !== null && pct >= 70 ? S.barFillWarn : S.barFill;
-		return h("div", { style: S.card }, h("div", { style: S.poolName }, `${tt("quota.dailyUsed")} · ${count(daily.usedLocal)}`), h("div", {
-			style: S.bar,
-			role: "progressbar",
-			"aria-valuenow": pct === null ? 0 : Math.round(pct),
-			"aria-valuemin": 0,
-			"aria-valuemax": 100
-		}, h("div", { style: {
-			...tone,
-			width: `${pct ?? 0}%`
-		} })), h("div", { style: S.quotaTop }, h("span", { style: S.quotaUsed }, `${tt("quota.remaining")} ${count(daily.remainingComputed)} · ${tt("quota.dailyLimit")} ${count(daily.limit)} · ${tt("section.perModel")} ≤${count(perModelLimit)}`), pct !== null && pct >= 100 ? h("span", { style: S.error }, tt("quota.exhausted")) : null), h("div", { style: S.trendLegend }, tt("quota.countingNote")));
+		const { daily, perModel } = snapshot.quota;
+		return h("div", { style: S.card }, h("div", { style: S.poolName }, format(tt("quota.headline"), {
+			calls: count(daily.usedLocal),
+			models: count(perModel.length)
+		})), h(ModelUsageTable, {
+			rows: perModel,
+			tt
+		}), h("div", { style: S.trendLegend }, tt("quota.note")));
 	}
 	/** 今日单模型排行（相对最大者画条）。 */
 	function ModelUsageTable({ rows, tt }) {
@@ -1165,7 +1157,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const [openSections, setOpenSections] = useState({
 			balance: true,
 			local: true,
-			perModel: false,
 			trend: true,
 			events: false,
 			catalog: true,
@@ -1283,14 +1274,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				tt
 			}, h(LocalDailyCard, {
 				snapshot: snap,
-				tt
-			})), h(SectionCard, {
-				title: tt("section.perModel"),
-				open: openSections.perModel,
-				onToggle: () => toggleSection("perModel"),
-				tt
-			}, h(ModelUsageTable, {
-				rows: snap.quota.perModel,
 				tt
 			})), h(SectionCard, {
 				title: format(tt("section.trend"), { days: snap.trend.days }),

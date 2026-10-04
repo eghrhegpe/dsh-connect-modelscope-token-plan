@@ -3,7 +3,7 @@
  * 全部布局。渲染在 Plugins 页内、始终展开；轮询只在本卡挂载期间进行。
  * @module dsh-connect-modelscope-token-plan/client/panel-page
  */
-import { SectionCard, BalanceCard, LocalDailyCard, ModelUsageTable, TrendBars, EventsList, TokenForm } from "./cards.ts";
+import { SectionCard, BalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm } from "./cards.ts";
 import { PANEL_ID, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH } from "./const.ts";
 import { format, errorText, isoTime } from "./format.ts";
 import { getJson, postJson } from "./http.ts";
@@ -23,7 +23,7 @@ export function PanelPage({ tt, localeSubscribe }: {
 }): unknown {
   const { data, error, loadedOnce, updatedAt, load } = useSnapshotPolling();
   const [, setLocaleRevision] = useState(0);
-  const [openSections, setOpenSections] = useState({ balance: true, local: true, perModel: false, trend: true, events: false, catalog: true, token: true });
+  const [openSections, setOpenSections] = useState({ balance: true, local: true, trend: true, events: false, catalog: true, token: true });
   const [activeTab, setActiveTab] = useState<TabId>("quota");
 
   useEffect(() => {
@@ -135,11 +135,6 @@ export function PanelPage({ tt, localeSubscribe }: {
         SectionCard,
         { title: tt("section.local"), open: openSections.local, onToggle: () => toggleSection("local"), tt },
         h(LocalDailyCard, { snapshot: snap, tt })
-      ),
-      h(
-        SectionCard,
-        { title: tt("section.perModel"), open: openSections.perModel, onToggle: () => toggleSection("perModel"), tt },
-        h(ModelUsageTable, { rows: snap.quota.perModel, tt })
       ),
       h(
         SectionCard,

@@ -80,23 +80,20 @@ export function BalanceCard({ balance, tt }: { balance: BalanceData | null | unk
   );
 }
 
-/** 本地计数卡：今日调用 vs 参考上限的推算条 + 口径说明。 */
+/**
+ * 本地调用卡：纯统计口径——今日次数 + 按模型分布 + 一句口径说明。
+ * 刻意**不画**「推算剩余/参考上限」进度条：官方已改为魔粒计费，「2000 次」
+ * 是次数口径的社区快照，与魔粒余额并排展示是误导（README「三条事实」#2）。
+ * 本地计数回答的是官方余额回答不了的问题：哪个模型在烧、何时撞的 429。
+ */
 export function LocalDailyCard({ snapshot, tt }: { snapshot: Snapshot; tt: Tt }): unknown {
-  const { daily, perModelLimit } = snapshot.quota;
-  const pct = daily.limit > 0 ? Math.min(100, (daily.usedLocal / daily.limit) * 100) : null;
-  const tone = pct !== null && pct >= 90 ? S.barFillError : pct !== null && pct >= 70 ? S.barFillWarn : S.barFill;
+  const { daily, perModel } = snapshot.quota;
   return h(
     "div",
     { style: S.card },
-    h("div", { style: S.poolName }, `${tt("quota.dailyUsed")} · ${count(daily.usedLocal)}`),
-    h("div", { style: S.bar, role: "progressbar", "aria-valuenow": pct === null ? 0 : Math.round(pct), "aria-valuemin": 0, "aria-valuemax": 100 }, h("div", { style: { ...tone, width: `${pct ?? 0}%` } })),
-    h(
-      "div",
-      { style: S.quotaTop },
-      h("span", { style: S.quotaUsed }, `${tt("quota.remaining")} ${count(daily.remainingComputed)} · ${tt("quota.dailyLimit")} ${count(daily.limit)} · ${tt("section.perModel")} ≤${count(perModelLimit)}`),
-      pct !== null && pct >= 100 ? h("span", { style: S.error }, tt("quota.exhausted")) : null
-    ),
-    h("div", { style: S.trendLegend }, tt("quota.countingNote"))
+    h("div", { style: S.poolName }, format(tt("quota.headline"), { calls: count(daily.usedLocal), models: count(perModel.length) })),
+    h(ModelUsageTable, { rows: perModel, tt }),
+    h("div", { style: S.trendLegend }, tt("quota.note"))
   );
 }
 
