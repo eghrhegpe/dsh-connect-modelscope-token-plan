@@ -19,9 +19,29 @@
 import { createCoalescedFetch } from "./coalesced-fetch.ts";
 import { CODE, classifyRateLimit, classifyStatus, parseRetryAfterMs } from "./codes.ts";
 import { normalizeEntry } from "./llm-models.ts";
-import { pluginError, errMsg, redactSecrets } from "./util.ts";
+import { pluginError, errMsg, redactSecrets, str } from "./util.ts";
 import type { ResolvedSettings } from "./host-config.ts";
 import type { HostDeps } from "./types.ts";
+
+/**
+ * 有界并发 map：对 items 逐个跑 fn（异步），同时最多 limit 个在飞。
+ * 用于目录加载时并行拉取各模型详情端点，避免一次性打爆主站。
+ */
+async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < items.length) {
+      const i = cursor++;
+      const item = items[i];
+      if (item === undefined) continue;
+      results[i] = await fn(item);
+    }
+  }
+  const n = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return results;
+}
 
 /** probe 的两种形态（SPIKE.md §结论 5）。 */
 export type ProbeKind = "usage" | "validity";
@@ -98,6 +118,31 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
     }
   };
 
+  /**
+   * 单个模型的详情端点任务标签（modelscope.cn/api/v1/models/{id}）。
+   * 免认证 GET，零推理额度（实测匿名 200）。返回 `Data.Tasks[].Name`（+
+   * `widgets[].task` 兜底）去重后的标签数组；任意失败 / 非预期形状返回空数组，
+   * 调用方据此回退策展清单 + 名字启发。
+   */
+  const fetchTaskTags = async (id: string): Promise<string[]> => {
+    const detailUrl = settings.siteBase + "/api/v1/models/" + encodeURI(id);
+    const response = await fetchWithTimeout(detailUrl, { method: "GET", headers: { accept: "application/json" } });
+    if (!response.ok) return [];
+    const json = (await response.json().catch(() => null)) as { Code?: unknown; Data?: { Tasks?: unknown; widgets?: unknown } } | null;
+    if (json === null || typeof json !== "object" || json.Code !== 200) return [];
+    const data = (json.Data ?? {}) as { Tasks?: unknown; widgets?: unknown };
+    const tasks: string[] = [];
+    for (const t of Array.isArray(data.Tasks) ? (data.Tasks as Record<string, unknown>[]) : []) {
+      const name = str(t?.Name, "");
+      if (name !== "") tasks.push(name);
+    }
+    for (const w of Array.isArray(data.widgets) ? (data.widgets as Record<string, unknown>[]) : []) {
+      const task = str(w?.task, "");
+      if (task !== "") tasks.push(task);
+    }
+    return Array.from(new Set(tasks));
+  };
+
   return {
     /**
      * 模型目录：GET apiBase/models，免认证、零额度，coalesced 缓存
@@ -118,13 +163,25 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
         if (json === null || typeof json !== "object" || json.object !== "list" || !Array.isArray(json.data)) {
           throw pluginError(CODE.UPSTREAM_ERROR, "model catalog shape drifted (expected {object:'list', data:[...]})");
         }
-        // 判断集中一份：inference-client 只透传原始条目，vision/窗口/输出上限
-        // 全由 llm-models.normalizeEntry 判（§2），本文件不做第二次判断。
-        const entries = (json.data as unknown[])
-          .map((raw) => normalizeEntry(raw) as unknown as CatalogEntry)
+        const raws = json.data as unknown[];
+        // 并行拉取每个模型的详情端点任务标签（modelscope.cn/api/v1/models/{id}），
+        // 免认证、零推理额度；有界并发避免打爆主站。单模型失败不影响整体，tags 留空 →
+        // 该模型回退策展清单 + 名字启发。标签随目录一起被 cacheSeconds 缓存。
+        const ids = (raws as Record<string, unknown>[]).map((r) => str(r.id, "")).filter((id) => id !== "");
+        const tagArrays = await mapWithConcurrency(ids, 6, (id) => fetchTaskTags(id).catch(() => [] as string[]));
+        const tagsById = new Map<string, string[]>();
+        ids.forEach((id, i) => tagsById.set(id, tagArrays[i] ?? []));
+        // 判断集中一份：inference-client 只透传原始条目（附带详情标签），vision/窗口/
+        // 输出上限全由 llm-models.normalizeEntry 判（§2），本文件不做第二次判断。
+        const entries = raws
+          .map((raw) => {
+            const id = str((raw as Record<string, unknown>).id, "");
+            const tags = tagsById.get(id) ?? [];
+            return normalizeEntry({ ...(raw as Record<string, unknown>), tasks: tags.length > 0 ? tags : undefined });
+          })
           .filter((entry) => entry.id !== "");
-        const ids = entries.map((entry) => entry.id);
-        return { entries, ids, fetchedAt: new Date().toISOString() };
+        const ids2 = entries.map((entry) => entry.id);
+        return { entries, ids: ids2, fetchedAt: new Date().toISOString() };
       }, settings.cacheSeconds * 1000) as { entries: CatalogEntry[]; ids: string[]; fetchedAt: string };
       return body;
     },

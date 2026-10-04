@@ -43,6 +43,12 @@ import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_S
   assert.equal(isVisionModel(normalizeEntry({ id: "deepseek-ai/DeepSeek-V4.1-Flash" })), true, "策展清单命中 → vision（名字无 vl 但能吃图）");
   assert.equal(isVisionModel(normalizeEntry({ id: "Qwen/Qwen3.8-Flash-Next" })), true, "官方 SDK 示例证明能吃图 → vision（名字无 vl/vision）");
   assert.equal(isVisionModel(normalizeEntry({ id: "deepseek-ai/DeepSeek-V4-Pro" })), false, "未策展且名字无视觉 token → 非 vision");
+  // 详情端点 Tasks[].Name 精确判定（fetchModels 会把标签挂到 entry.tasks）
+  assert.equal(isVisionModel(normalizeEntry({ id: "deepseek-ai/DeepSeek-V4.1-Flash", tasks: ["image-text-to-text"] })), true, "tasks 含 image-text-to-text → vision（精确，无需策展/名字）");
+  assert.equal(isVisionModel(normalizeEntry({ id: "Qwen/Qwen-Image-Edit", tasks: ["image-to-image"] })), false, "tasks 含 image-to-image（图出非图入）→ 非 vision，不被误判");
+  assert.equal(isVisionModel(normalizeEntry({ id: "ZhipuAI/GLM-5.2", tasks: ["text-generation"] })), false, "tasks 含 text-generation → 非 vision");
+  // 有结构化任务标签时以标签为准，哪怕名字像视觉
+  assert.equal(isVisionModel(normalizeEntry({ id: "Foo/bar-vl", tasks: ["text-generation"] })), false, "有任务标签时以标签为准（名字像视觉也压住）");
 
   // chat：宽松方向，只排除明确生图模型
   assert.equal(isChatModel(normalizeEntry({ id: "m", output_modalities: ["image"] })), false, "output_modalities 只含 image → 生图");

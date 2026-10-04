@@ -40,6 +40,16 @@
   owner 字母序、同 owner 内按 id 字母序；置顶行加 ★ 标记 + 品牌色左边线 + 加粗名
   （`styles.ts` 新增 `trendRowFeatured`/`catalogStar`/`trendModelFeatured`，仅视觉不改层级）。
   i18n zh/en 补 `models.featuredTitle`；新增 `test/catalog.test.mjs` 覆盖排序与高亮判定。
+- **vision 判定升级为详情端点精确信号**：`/v1/models` 仍无模态字段，但
+  `modelscope.cn/api/v1/models/{owner}/{name}` 的 `Data.Tasks[].Name` 提供精确任务标签
+  （`image-text-to-text`=图进文出=能吃图；`image-to-image`/`text-to-image`=图出，排除）。
+  `fetchModels` 在拿到目录 id 后**并行拉取**（有界并发 6、`Promise.allSettled`、单失败不影响
+  整体）每个详情，标签挂到 `entry.tasks`，`isVisionModel` 据此精确判定；详情端点不可达时回退
+  策展清单（`KNOWN_VISION_IDS`，降级为离线兜底）+ 名字启发。`inference-client.ts` 新增
+  `mapWithConcurrency`/`fetchTaskTags`；`llm-models.ts` 新增 `VISION_INPUT_TASKS`/`tasksOf`。
+  免认证、零推理额度（与余额同主机 siteBase）。新增 `test/inference-vision.test.mjs`（mock
+  详情端点端到端验证）+ `provider.test.mjs` 补 4 条 tasks 断言。docs/REFERENCES.md「vision」
+  一节据实重写（此前「零模态元数据、只能策展」的断言不准确）。
 
 ## 0.1.0（未发布）
 

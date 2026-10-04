@@ -96,18 +96,30 @@ balance，差值≈当日总消耗，见 ROADMAP 的 backlog）。
 标准模型 id）做**外链**（client 半边每个模型行的「在魔搭查看 →」），方便人工核对单价；
 这只是网页跳转，**不是数据源**。
 
-### 模型「能否吃图」（vision）同样拿不到结构化信号
+### 模型「能否吃图」（vision）：`/v1/models` 无模态，但详情端点有精确任务标签
 
-`isVisionModel` 优先读 `input_modalities`/`modalities` 等结构化模态字段；但**魔搭
-`/v1/models` 实测每条只返回 `id`/`object`(空串)/`owned_by`/`created` 四个字段，零模态
-元数据**（不像 sensenova 有 `type` 字段可判）。因此所有模型都走不到结构化分支，只能靠
-名字启发 `VISION_NAME_PATTERN`（`vl`/`vision`/`internvl`…）。
+`isVisionModel` 判定顺序：① 目录条目的结构化模态字段（`input_modalities`/`modalities`，
+魔搭 `/v1/models` 实测每条只返回 `id`/`object`(空串)/`owned_by`/`created`，**这条对所有
+模型都走不通**，不像 sensenova 有 `type` 字段）→ ② **详情端点
+`modelscope.cn/api/v1/models/{owner}/{name}` 的 `Tasks[].Name` 精确信号**：`image-text-to-text`
+= 图进文出（能吃图），`image-to-image`/`text-to-image` 是图出（不含）→ ③ 策展清单
+`KNOWN_VISION_IDS`（详情端点不可达时的离线兜底）→ ④ 名字启发 `VISION_NAME_PATTERN`。
 
-后果：`DeepSeek-V4.1-Flash` 这类「名字不含 vl/vision、但确实能吃图」的模型会被漏判 →
-面板视觉标签缺失、DSH 模型选择器不提供图输入。修法不是去解析那个不存在的字段，而是
-`llm-models.ts` 里维护一份**人工策展的 `KNOWN_VISION_IDS` 清单**（模型卡/用户反馈确知
-的多模态模型）。清单是「我们已知」，**不是平台声明**——与名字启发一样不假装上游返回过；
-漏策展最坏只收 `UNSUPPORTED_CONTENT`，不静默失败。新增已确知多模态模型时在此追加 id。
+为什么 ① 走不通却能靠 ②：`/v1/models` 这个 OpenAI 兼容桩不返回任何模态字段；但模型
+详情端点（hub API，与余额同主机 `siteBase`，**免认证、零推理额度**，实测匿名 200）会
+返回 `Data.Tasks[].Name`。`fetchModels` 在拿到目录 id 后**并行拉取**（有界并发 6，
+`Promise.allSettled`，单失败不影响整体）每个详情，把标签挂到 `entry.tasks`，再交
+`isVisionModel` 判。标签随目录一起被 `cacheSeconds` 缓存，不会每次开面板都打几十个请求。
+
+实测词表（已验证）：`DeepSeek-V4.1-Flash`、`Qwen/Qwen3.8-Flash-Next`、`OpenGVLab/InternVL3_5`
+→ `image-text-to-text`（吃图）；`Qwen/Qwen-Image-Edit` → `image-to-image`（图出，非吃图）；
+`ZhipuAI/GLM-5.2` → `text-generation`。`image-text-to-text` 天然排除生图模型，比
+`task=multimodal` 粗筛精确得多。**注意**：`/v1/models?task=multimodal` 在推理端点
+**无效**（返回同一份条目），`task` 过滤只存在于主站 hub 检索 API，不在 `api-inference`。
+
+详情拉取失败/超时时该模型 `tasks` 为空 → 回退 ③ 策展 + ④ 名字启发（不静默失败）。策展清单
+`KNOWN_VISION_IDS` 是「我们已知」（模型卡/用户反馈），不是平台声明；新增已确知多模态模型时
+在此追加 id 即可。
 
 ---
 
