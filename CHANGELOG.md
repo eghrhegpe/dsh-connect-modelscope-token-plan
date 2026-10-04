@@ -34,6 +34,12 @@
   spec / SPIKE / api-inference 探测）坐实魔搭无按模型消耗接口，消费明细只在登录态网页；
   对比姊妹插件（sensenova/agnes 读服务端聚合余额），魔搭只能做余额差值趋势；按模型魔粒
   单价在网页模型详情页、不在 OpenAPI，不进主数据源。README 诚实声明同步一句。
+- **模型目录排序 + 高亮**：原目录是 `/v1/models` 原始返回序，三家好用模型被拆散
+  （deepseek 在顶、Qwen 在中间、glm/ZhipuAI 在底）。新增 `FEATURED_OWNERS`
+  （`deepseek-ai`/`ZhipuAI`/`Qwen`）与 `sortCatalogIds`：featured 置顶分组、其余按
+  owner 字母序、同 owner 内按 id 字母序；置顶行加 ★ 标记 + 品牌色左边线 + 加粗名
+  （`styles.ts` 新增 `trendRowFeatured`/`catalogStar`/`trendModelFeatured`，仅视觉不改层级）。
+  i18n zh/en 补 `models.featuredTitle`；新增 `test/catalog.test.mjs` 覆盖排序与高亮判定。
 
 ## 0.1.0（未发布）
 

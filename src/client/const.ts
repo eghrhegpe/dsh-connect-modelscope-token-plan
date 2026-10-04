@@ -56,3 +56,34 @@ export const MODELSCOPE_MODEL_URL_BASE = "https://www.modelscope.cn/models";
 export function modelscopeModelUrl(id: string): string {
   return `${MODELSCOPE_MODEL_URL_BASE}/${encodeURI(id)}`;
 }
+
+/**
+ * 用户认可「好用」的三家（按 owner）。模型目录原先是 API 原始返回序，这三家被拆散
+ * （deepseek 在顶、Qwen 在中间、glm/ZhipuAI 在底），既没排序也不突出。置顶分组 +
+ * 高亮让好模型一眼可见。数组顺序即置顶内的展示序。
+ */
+export const FEATURED_OWNERS = Object.freeze(["deepseek-ai", "ZhipuAI", "Qwen"]);
+
+/** 从 `owner/model` 取 owner（无斜杠时整段作 owner）。 */
+export function catalogOwner(id: string): string {
+  const slash = id.indexOf("/");
+  return slash >= 0 ? id.slice(0, slash) : id;
+}
+
+/**
+ * 目录排序：featured owner 置顶（按 `FEATURED_OWNERS` 顺序），其余按 owner 字母序，
+ * 同 owner 内按 id 字母序。纯函数、稳定；渲染前对 `catalog.ids` 跑一次即可。
+ */
+export function sortCatalogIds(ids: string[]): string[] {
+  const rank = (owner: string): number => {
+    const i = (FEATURED_OWNERS as readonly string[]).indexOf(owner);
+    return i >= 0 ? i : FEATURED_OWNERS.length;
+  };
+  return [...ids].sort((a, b) => {
+    const oa = catalogOwner(a), ob = catalogOwner(b);
+    const ra = rank(oa), rb = rank(ob);
+    if (ra !== rb) return ra - rb;
+    if (oa !== ob) return oa < ob ? -1 : 1;
+    return a < b ? -1 : 1;
+  });
+}

@@ -147,7 +147,12 @@ export const S = {
   trendHeadLabel: { fontSize: 12, color: "var(--dsw-alias-label-secondary)", fontWeight: 500 },
   trendRow: { display: "flex", flexDirection: "column", gap: 8, padding: "10px 0", borderBottom: "1px solid var(--dsw-alias-border-l1)" },
   trendRowHead: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, minWidth: 0 },
+  // 目录里「好用三家」(deepseek/glm/qwen) 的高亮：左边线 + 轻微底色 + 圆角 +
+  // ★ 标记 + 品牌色加粗名。只改视觉，不抢层级（section card 仍是唯一外框）。
+  trendRowFeatured: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, minWidth: 0, borderLeft: `2px solid ${BRAND}`, paddingLeft: 8, background: "var(--dsw-alias-bg-layer-2)", borderRadius: "0 6px 6px 0" },
+  catalogStar: { flex: "none", width: 14, textAlign: "center", fontSize: 12, lineHeight: 1, color: BRAND },
   trendModel: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  trendModelFeatured: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: BRAND, fontWeight: 600 },
   trendCredits: { fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums" },
   // The trend card sits on layer-1 like the pool cards, so its bar track
   // must be layer-2 (the quota bars invert this: layer-1 inside layer-2).

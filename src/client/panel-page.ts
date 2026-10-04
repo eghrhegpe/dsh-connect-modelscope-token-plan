@@ -4,7 +4,7 @@
  * @module dsh-connect-modelscope-token-plan/client/panel-page
  */
 import { SectionCard, BalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm, ProviderCard } from "./cards.ts";
-import { PANEL_ID, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, modelscopeModelUrl } from "./const.ts";
+import { PANEL_ID, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, modelscopeModelUrl, FEATURED_OWNERS, catalogOwner, sortCatalogIds } from "./const.ts";
 import { format, errorText, isoTime } from "./format.ts";
 import { getJson, postJson } from "./http.ts";
 import { viewOf, providerOf, DEGRADED_PROVIDER } from "./snapshot.ts";
@@ -255,13 +255,17 @@ export function PanelPage({ tt, localeSubscribe }: {
       catalog !== null
         ? h("div", null,
             h("div", { style: S.trendLegend }, format(tt("models.fetched"), { time: isoTime(catalog.fetchedAt) })),
-            catalog.ids.map((id) => h(
-              "div",
-              { key: id, style: S.trendRowHead },
-              h("span", { style: S.trendModel, title: id }, id),
-              h("button", { type: "button", style: S.button, disabled: probeBusy, onClick: () => void runProbe(id, "usage"), title: tt("probe.usage") }, tt("models.probeKept")),
-              h("a", { style: { ...S.formNote, margin: 0 }, href: modelscopeModelUrl(id), target: "_blank", rel: "noreferrer", title: tt("models.viewOnSiteTitle") }, tt("models.viewOnSite"))
-            )))
+            sortCatalogIds(catalog.ids).map((id) => {
+              const featured = (FEATURED_OWNERS as readonly string[]).includes(catalogOwner(id));
+              return h(
+                "div",
+                { key: id, style: featured ? S.trendRowFeatured : S.trendRowHead },
+                featured ? h("span", { style: S.catalogStar, title: tt("models.featuredTitle") }, "★") : null,
+                h("span", { style: featured ? S.trendModelFeatured : S.trendModel, title: id }, id),
+                h("button", { type: "button", style: S.button, disabled: probeBusy, onClick: () => void runProbe(id, "usage"), title: tt("probe.usage") }, tt("models.probeKept")),
+                h("a", { style: { ...S.formNote, margin: 0 }, href: modelscopeModelUrl(id), target: "_blank", rel: "noreferrer", title: tt("models.viewOnSiteTitle") }, tt("models.viewOnSite"))
+              );
+            }))
         : null,
       probeBusy ? h("div", { style: S.formNote }, tt("probe.busy")) : null,
       probeResult !== null ? h("div", { style: S.formNote, role: "status" }, probeResult) : null,

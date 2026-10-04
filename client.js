@@ -16,7 +16,29 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	function modelscopeModelUrl(id) {
 		return `${MODELSCOPE_MODEL_URL_BASE}/${encodeURI(id)}`;
 	}
-	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE;
+	/** 从 `owner/model` 取 owner（无斜杠时整段作 owner）。 */
+	function catalogOwner(id) {
+		const slash = id.indexOf("/");
+		return slash >= 0 ? id.slice(0, slash) : id;
+	}
+	/**
+	* 目录排序：featured owner 置顶（按 `FEATURED_OWNERS` 顺序），其余按 owner 字母序，
+	* 同 owner 内按 id 字母序。纯函数、稳定；渲染前对 `catalog.ids` 跑一次即可。
+	*/
+	function sortCatalogIds(ids) {
+		const rank = (owner) => {
+			const i = FEATURED_OWNERS.indexOf(owner);
+			return i >= 0 ? i : FEATURED_OWNERS.length;
+		};
+		return [...ids].sort((a, b) => {
+			const oa = catalogOwner(a), ob = catalogOwner(b);
+			const ra = rank(oa), rb = rank(ob);
+			if (ra !== rb) return ra - rb;
+			if (oa !== ob) return oa < ob ? -1 : 1;
+			return a < b ? -1 : 1;
+		});
+	}
+	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
 	var init_const = __esmMin((() => {
 		NS = "dsh-connect-modelscope-token-plan";
 		PANEL_ID = NS;
@@ -32,6 +54,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		MODELSCOPE_TOKEN_URL = "https://modelscope.cn/my/myaccesstoken";
 		MODELSCOPE_USAGE_URL = "https://modelscope.cn/magicube/usage?tab=consume";
 		MODELSCOPE_MODEL_URL_BASE = "https://www.modelscope.cn/models";
+		FEATURED_OWNERS = Object.freeze([
+			"deepseek-ai",
+			"ZhipuAI",
+			"Qwen"
+		]);
 	}));
 
 //#endregion
@@ -85,6 +112,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"models.probeKept": "试调（单次，消耗 1 次免费额度）",
 			"models.viewOnSite": "在魔搭查看 →",
 			"models.viewOnSiteTitle": "打开模型详情页（魔粒单价等只在网页展示）",
+			"models.featuredTitle": "推荐系列（深度求索 / 智谱 / 通义千问）",
 			"section.provider": "接入为 DSH 模型",
 			"provider.enable": "把魔搭模型接入 DSH 模型选择器",
 			"provider.on": "已接入",
@@ -174,6 +202,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"models.probeKept": "Test call (consumes one free call)",
 			"models.viewOnSite": "View on ModelScope →",
 			"models.viewOnSiteTitle": "Open the model page (per-model Magicube price is web-only)",
+			"models.featuredTitle": "Recommended family (DeepSeek / Zhipu / Qwen)",
 			"section.provider": "Register as a DSH model",
 			"provider.enable": "Register ModelScope models in the DSH model picker",
 			"provider.on": "On",
@@ -626,6 +655,25 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				gap: 12,
 				minWidth: 0
 			},
+			trendRowFeatured: {
+				display: "flex",
+				alignItems: "baseline",
+				justifyContent: "space-between",
+				gap: 12,
+				minWidth: 0,
+				borderLeft: `2px solid ${BRAND}`,
+				paddingLeft: 8,
+				background: "var(--dsw-alias-bg-layer-2)",
+				borderRadius: "0 6px 6px 0"
+			},
+			catalogStar: {
+				flex: "none",
+				width: 14,
+				textAlign: "center",
+				fontSize: 12,
+				lineHeight: 1,
+				color: BRAND
+			},
 			trendModel: {
 				fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
 				fontSize: 12,
@@ -633,6 +681,16 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				overflow: "hidden",
 				textOverflow: "ellipsis",
 				whiteSpace: "nowrap"
+			},
+			trendModelFeatured: {
+				fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+				fontSize: 12,
+				minWidth: 0,
+				overflow: "hidden",
+				textOverflow: "ellipsis",
+				whiteSpace: "nowrap",
+				color: BRAND,
+				fontWeight: 600
 			},
 			trendCredits: {
 				fontSize: 13,
@@ -1727,28 +1785,34 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, catalog === null && catalogError === null ? h("div", { style: S.trendLegend }, tt("models.loading")) : null, catalogError !== null ? h("div", {
 			style: S.formNote,
 			role: "status"
-		}, format(tt("models.none"), { error: catalogError })) : null, catalog !== null ? h("div", null, h("div", { style: S.trendLegend }, format(tt("models.fetched"), { time: isoTime(catalog.fetchedAt) })), catalog.ids.map((id) => h("div", {
-			key: id,
-			style: S.trendRowHead
-		}, h("span", {
-			style: S.trendModel,
-			title: id
-		}, id), h("button", {
-			type: "button",
-			style: S.button,
-			disabled: probeBusy,
-			onClick: () => void runProbe(id, "usage"),
-			title: tt("probe.usage")
-		}, tt("models.probeKept")), h("a", {
-			style: {
-				...S.formNote,
-				margin: 0
-			},
-			href: modelscopeModelUrl(id),
-			target: "_blank",
-			rel: "noreferrer",
-			title: tt("models.viewOnSiteTitle")
-		}, tt("models.viewOnSite"))))) : null, probeBusy ? h("div", { style: S.formNote }, tt("probe.busy")) : null, probeResult !== null ? h("div", {
+		}, format(tt("models.none"), { error: catalogError })) : null, catalog !== null ? h("div", null, h("div", { style: S.trendLegend }, format(tt("models.fetched"), { time: isoTime(catalog.fetchedAt) })), sortCatalogIds(catalog.ids).map((id) => {
+			const featured = FEATURED_OWNERS.includes(catalogOwner(id));
+			return h("div", {
+				key: id,
+				style: featured ? S.trendRowFeatured : S.trendRowHead
+			}, featured ? h("span", {
+				style: S.catalogStar,
+				title: tt("models.featuredTitle")
+			}, "★") : null, h("span", {
+				style: featured ? S.trendModelFeatured : S.trendModel,
+				title: id
+			}, id), h("button", {
+				type: "button",
+				style: S.button,
+				disabled: probeBusy,
+				onClick: () => void runProbe(id, "usage"),
+				title: tt("probe.usage")
+			}, tt("models.probeKept")), h("a", {
+				style: {
+					...S.formNote,
+					margin: 0
+				},
+				href: modelscopeModelUrl(id),
+				target: "_blank",
+				rel: "noreferrer",
+				title: tt("models.viewOnSiteTitle")
+			}, tt("models.viewOnSite")));
+		})) : null, probeBusy ? h("div", { style: S.formNote }, tt("probe.busy")) : null, probeResult !== null ? h("div", {
 			style: S.formNote,
 			role: "status"
 		}, probeResult) : null, probeError !== null ? h("div", {
