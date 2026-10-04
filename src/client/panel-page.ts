@@ -114,6 +114,31 @@ export function PanelPage({ tt, localeSubscribe }: {
   }, [load]);
 
   const tokenState = data?.token ?? null;
+  // 验令牌（validity probe）需要一个 model id——鉴权与模型无关，取目录样本的
+  // 第一个即可；目录不可读时没有 id，按钮不渲染（诚实降级，不猜模型名）。
+  const sampleModel = data?.models.sample[0] ?? null;
+
+  // 验令牌：独立于 usage probe 的状态（两个 tab 不互相串结果）。
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [verifyNote, setVerifyNote] = useState<string | null>(null);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const runValidity = useCallback(async (modelId: string) => {
+    setVerifyBusy(true);
+    setVerifyNote(null);
+    setVerifyError(null);
+    try {
+      const body = await postJson(PROBE_PATH, { modelId, kind: "validity" });
+      if (body !== null && body.ok === true) {
+        setVerifyNote(format(tt("probe.validOk"), { status: Number(body.status ?? 0) }));
+      } else {
+        setVerifyError(typeof body?.error === "string" ? body.error : "HTTP error");
+      }
+    } catch (reason) {
+      setVerifyError(errorText(reason));
+    } finally {
+      setVerifyBusy(false);
+    }
+  }, [tt]);
 
   // 额度 tab：官方魔粒余额（头条）→ 本地计数 → 单模型 → 趋势 → 事件。
   const quotaBody = () => {
@@ -130,6 +155,9 @@ export function PanelPage({ tt, localeSubscribe }: {
     return h(
       "div",
       null,
+      snap.token.present === false
+        ? h("div", { style: S.formNote, role: "status" }, tt("panel.noToken"))
+        : null,
       h(SectionCard, { title: tt("section.balance"), open: openSections.balance, onToggle: () => toggleSection("balance"), tt }, h(BalanceCard, { balance: snap.balance, tt })),
       h(
         SectionCard,
@@ -183,14 +211,25 @@ export function PanelPage({ tt, localeSubscribe }: {
     )
   );
 
-  // 接入 tab：令牌管理 + 状态 + 说明（provider 注册在路线图里，此处只读）。
+  // 接入 tab：令牌管理（保存/忘掉/验令牌）+ 状态 + 说明（provider 注册在路线图里，此处只读）。
   const accessBody = () => h(
     "div",
     null,
     h(
       SectionCard,
       { title: tt("section.token"), open: openSections.token, onToggle: () => toggleSection("token"), tt },
-      h(TokenForm, { token: tokenState, busy: tokenBusy, error: tokenError, onSave: (value: string) => void saveToken(value), onForget: () => void forgetToken(), tt })
+      h(TokenForm, {
+        token: tokenState,
+        busy: tokenBusy || verifyBusy,
+        error: tokenError,
+        onSave: (value: string) => void saveToken(value),
+        onForget: () => void forgetToken(),
+        onVerify: sampleModel === null ? undefined : () => void runValidity(sampleModel),
+        verifyTitle: sampleModel ?? undefined,
+        tt
+      }),
+      verifyNote !== null ? h("div", { style: S.formNote, role: "status" }, verifyNote) : null,
+      verifyError !== null ? h("div", { style: S.formError, role: "alert" }, format(tt("probe.fail"), { error: verifyError })) : null
     )
   );
 

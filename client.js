@@ -80,7 +80,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"events.quota": "额度",
 			"events.rate_limit": "限频",
 			"events.error": "错误",
-			"token.status": "状态：{present}（来源 {source}）",
+			"token.status": "状态：{present}（来源 {source}，校验 {valid}）",
 			"token.save": "保存",
 			"token.forget": "忘掉已保存",
 			"token.placeholder": "粘贴 ms-… 访问令牌",
@@ -146,7 +146,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"events.quota": "Quota",
 			"events.rate_limit": "Rate limit",
 			"events.error": "Error",
-			"token.status": "Status: {present} (source {source})",
+			"token.status": "Status: {present} (source {source}, check {valid})",
 			"token.save": "Save",
 			"token.forget": "Forget saved",
 			"token.placeholder": "Paste an ms-… access token",
@@ -857,14 +857,16 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			title: event.message
 		}, event.message))));
 	}
-	/** 令牌表单：保存 / 忘掉 + 状态行 + 外链。唯一持 state 的展示组件。 */
-	function TokenForm({ token, busy, error, onSave, onForget, tt }) {
+	/** 令牌表单：保存 / 忘掉 / 验令牌 + 状态行 + 外链。唯一持 state 的展示组件。 */
+	function TokenForm({ token, busy, error, onSave, onForget, onVerify, verifyTitle, tt }) {
 		const [value, setValue] = useState("");
 		const source = token === null ? "none" : token.source;
 		const sourceKey = source === "credentials" ? "source.credentials" : source === "env" ? "source.env" : source === "memory" ? "source.memory" : "source.none";
+		const validKey = token !== null && token.valid === true ? "validity.yes" : "validity.no";
 		return h("div", null, h("div", { style: S.quotaUsed }, format(tt("token.status"), {
 			present: token !== null && token.present ? tt("present.yes") : tt("present.no"),
-			source: tt(sourceKey)
+			source: tt(sourceKey),
+			valid: tt(validKey)
 		})), token !== null && token.ephemeral ? h("div", { style: S.formNote }, tt("token.ephemeral")) : null, h("div", { style: S.rosterTools }, h("input", {
 			style: S.input,
 			type: "password",
@@ -884,7 +886,13 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			style: S.button,
 			disabled: busy,
 			onClick: onForget
-		}, tt("token.forget")) : null), error !== null ? h("div", {
+		}, tt("token.forget")) : null, onVerify !== void 0 ? h("button", {
+			type: "button",
+			style: S.button,
+			disabled: busy,
+			onClick: onVerify,
+			title: verifyTitle
+		}, tt("probe.validity")) : null), error !== null ? h("div", {
 			style: S.formError,
 			role: "alert"
 		}, error) : null, h("div", { style: S.formNote }, tt("token.hint")), h("a", {
@@ -1252,6 +1260,27 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			}
 		}, [load]);
 		const tokenState = data?.token ?? null;
+		const sampleModel = data?.models.sample[0] ?? null;
+		const [verifyBusy, setVerifyBusy] = useState(false);
+		const [verifyNote, setVerifyNote] = useState(null);
+		const [verifyError, setVerifyError] = useState(null);
+		const runValidity = useCallback(async (modelId) => {
+			setVerifyBusy(true);
+			setVerifyNote(null);
+			setVerifyError(null);
+			try {
+				const body = await postJson(PROBE_PATH, {
+					modelId,
+					kind: "validity"
+				});
+				if (body !== null && body.ok === true) setVerifyNote(format(tt("probe.validOk"), { status: Number(body.status ?? 0) }));
+				else setVerifyError(typeof body?.error === "string" ? body.error : "HTTP error");
+			} catch (reason) {
+				setVerifyError(errorText(reason));
+			} finally {
+				setVerifyBusy(false);
+			}
+		}, [tt]);
 		const quotaBody = () => {
 			if (data === null) return h("div", { style: S.empty }, failure === null ? tt("panel.loading") : h("div", { role: "alert" }, guidance ?? format(tt("panel.error"), { error: failure.message })));
 			if (showSetup && failure !== null) return h("div", {
@@ -1259,7 +1288,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				role: "alert"
 			}, guidance ?? format(tt("panel.error"), { error: failure.message }));
 			const snap = data;
-			return h("div", null, h(SectionCard, {
+			return h("div", null, snap.token.present === false ? h("div", {
+				style: S.formNote,
+				role: "status"
+			}, tt("panel.noToken")) : null, h(SectionCard, {
 				title: tt("section.balance"),
 				open: openSections.balance,
 				onToggle: () => toggleSection("balance"),
@@ -1327,12 +1359,20 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			tt
 		}, h(TokenForm, {
 			token: tokenState,
-			busy: tokenBusy,
+			busy: tokenBusy || verifyBusy,
 			error: tokenError,
 			onSave: (value) => void saveToken(value),
 			onForget: () => void forgetToken(),
+			onVerify: sampleModel === null ? void 0 : () => void runValidity(sampleModel),
+			verifyTitle: sampleModel ?? void 0,
 			tt
-		})));
+		}), verifyNote !== null ? h("div", {
+			style: S.formNote,
+			role: "status"
+		}, verifyNote) : null, verifyError !== null ? h("div", {
+			style: S.formError,
+			role: "alert"
+		}, format(tt("probe.fail"), { error: verifyError })) : null));
 		return h("div", {
 			style: S.page,
 			"data-dsh-plugin": PANEL_ID

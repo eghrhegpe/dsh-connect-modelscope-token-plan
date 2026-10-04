@@ -3,7 +3,8 @@
  * 有例外时先在两侧测试钉住再说）。
  *
  * 语义基线（与 SPIKE.md 一致）：
- * - 面板没有官方余额，一切「剩余」都是 quotaWindow.limit − 本地计数的推算值；
+ * - 面板头条是**官方魔粒余额**（balance，真实值）；本地计数只回答官方余额
+ *   答不了的问题（分布/趋势/429 事件流），一切「剩余」类数字都是推算值；
  * - 严格区分 null（没读到）与 0（确实为零）——usage-store 丢桶不得伪装成零用量；
  * - 快照路由 HTTP 恒 200，成败看 body（Snapshot | SnapshotFailure）。
  */
@@ -21,7 +22,7 @@ export interface QuotaWindow {
   remainingComputed: number | null;
 }
 
-/** 单模型本地用量。 */
+/** 单模型本地用量（今日口径：calls 与 tokens 都跨日清零，见 usage-store）。 */
 export interface PerModelUsage {
   modelId: string;
   calls: number;
@@ -96,10 +97,15 @@ export interface Snapshot {
   quotaError: { code: string } | null;
 }
 
+/**
+ * 失败快照。字段名是 `error`——与 routes/snapshot.ts 实际写入、client
+ * interpretSnapshot 实际读取一致（审核 2026-10-04：此前声明 `message` 与
+ * 两端实现漂移）。线格式由 test/routes.test.mjs 的 configError 分支钉住。
+ */
 export interface SnapshotFailure {
   ok: false;
   code: string;
-  message: string;
+  error: string;
 }
 
 export type SnapshotResponse = Snapshot | SnapshotFailure;

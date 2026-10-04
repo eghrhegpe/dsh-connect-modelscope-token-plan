@@ -1,6 +1,6 @@
 # dsh-connect-modelscope-token-plan
 
-把魔搭社区（modelscope.cn）**API-Inference 免费额度**的本地用量面板接入 DeepSeek Harness 的 Plugins 页（插件卡内联，三个 tab：额度 / 模型 / 接入），并可选把魔搭注册成 OpenAI 兼容 LLM provider。
+把魔搭社区（modelscope.cn）**API-Inference 免费额度**的本地用量面板接入 DeepSeek Harness 的 Plugins 页（插件卡内联，三个 tab：额度 / 模型 / 接入），并可选把魔搭注册成 OpenAI 兼容 LLM provider（v0.1 未实现，见 [docs/ROADMAP.md](docs/ROADMAP.md) M4）。
 
 姊妹插件：`dsh-connect-sensenova-token-plan`、`dsh-connect-agnes-token-plan`（同族结构，受控复制）。
 
@@ -29,6 +29,6 @@
 
 ## 诚实声明
 
-- 面板的「剩余次数」是**本地推算**，不是官方余额；只在「所有调用都经过本插件」的前提下准确。直连魔搭的其它客户端不计入。
+- 面板头条是**官方魔粒余额**（真实值）；本地计数（今日次数、单模型分布、token 数）只统计**经本插件的调用**——它回答的是分布/趋势/429 事件流，不是余额，直连魔搭的其它客户端不计入。次数口径的「推算剩余」已从面板移除（官方改魔粒计费后两单位并排是误导），`dailyQuotaTotal` 等常数仅为 M4 阈值提醒预留。
 - 额度常数来自社区公开信息，非官方数据；官方调整后需要手动更新配置。
 - 429 响应形状未实测（不值得烧额度去触发），解析按 OpenAI 惯例兼容，漂移时面板会给 `shapeWarnings`。

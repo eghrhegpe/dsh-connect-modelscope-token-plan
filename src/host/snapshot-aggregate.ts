@@ -99,7 +99,8 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
       error: models.ok ? null : models.error
     },
     shapeWarnings,
-    // v0.1 没有任何上游余额来源，quotaError 恒 null（wire.ts 语义）。
+    // quotaError 为 M4 预留（wire.ts 语义）；v0.1 的失败都走 shapeWarnings /
+    // balance.error 呈现，此字段恒 null。
     quotaError: null
   };
 }

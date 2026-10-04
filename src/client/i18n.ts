@@ -63,7 +63,7 @@ export const zh = {
   "events.rate_limit": "限频",
   "events.error": "错误",
 
-  "token.status": "状态：{present}（来源 {source}）",
+  "token.status": "状态：{present}（来源 {source}，校验 {valid}）",
   "token.save": "保存",
   "token.forget": "忘掉已保存",
   "token.placeholder": "粘贴 ms-… 访问令牌",
@@ -139,7 +139,7 @@ export const en: typeof zh = {
   "events.rate_limit": "Rate limit",
   "events.error": "Error",
 
-  "token.status": "Status: {present} (source {source})",
+  "token.status": "Status: {present} (source {source}, check {valid})",
   "token.save": "Save",
   "token.forget": "Forget saved",
   "token.placeholder": "Paste an ms-… access token",

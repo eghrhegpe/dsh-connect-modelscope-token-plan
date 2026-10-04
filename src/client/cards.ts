@@ -158,24 +158,32 @@ export function EventsList({ events, tt }: { events: QuotaEvent[]; tt: Tt }): un
   );
 }
 
-/** 令牌表单：保存 / 忘掉 + 状态行 + 外链。唯一持 state 的展示组件。 */
-export function TokenForm({ token, busy, error, onSave, onForget, tt }: {
+/** 令牌表单：保存 / 忘掉 / 验令牌 + 状态行 + 外链。唯一持 state 的展示组件。 */
+export function TokenForm({ token, busy, error, onSave, onForget, onVerify, verifyTitle, tt }: {
   token: TokenStatus | null;
   busy: boolean;
   error: string | null;
   onSave: (token: string) => void;
   onForget: () => void;
+  /** 验令牌（validity probe，零额度）；缺省 = 没有可用的 model id，不渲染按钮。 */
+  onVerify?: (() => void) | undefined;
+  /** 提示实际探的是哪个模型（validity 只关心鉴权，任意模型皆可）。 */
+  verifyTitle?: string | undefined;
   tt: Tt;
 }): unknown {
   const [value, setValue] = useState("");
   const source = token === null ? "none" : token.source;
   const sourceKey = (source === "credentials" ? "source.credentials" : source === "env" ? "source.env" : source === "memory" ? "source.memory" : "source.none") as Parameters<Tt>[0];
+  // TokenStatus.valid 恒 null（v0.1 不在快照里断言有效性）→ 显示「未校验」；
+  // 验令牌按钮的即时结果由调用方渲染在表单下方，不进这条状态行。
+  const validKey = (token !== null && token.valid === true ? "validity.yes" : "validity.no") as Parameters<Tt>[0];
   return h(
     "div",
     null,
     h("div", { style: S.quotaUsed }, format(tt("token.status"), {
       present: token !== null && token.present ? tt("present.yes") : tt("present.no"),
-      source: tt(sourceKey)
+      source: tt(sourceKey),
+      valid: tt(validKey)
     })),
     token !== null && token.ephemeral ? h("div", { style: S.formNote }, tt("token.ephemeral")) : null,
     h(
@@ -183,7 +191,8 @@ export function TokenForm({ token, busy, error, onSave, onForget, tt }: {
       { style: S.rosterTools },
       h("input", { style: S.input, type: "password", placeholder: tt("token.placeholder"), value, onChange: (event: unknown) => setValue(String((event as { target: { value: string } }).target.value ?? "")) }),
       h("button", { type: "button", style: S.primary, disabled: busy, onClick: () => { onSave(value); setValue(""); } }, tt("token.save")),
-      token !== null && token.present ? h("button", { type: "button", style: S.button, disabled: busy, onClick: onForget }, tt("token.forget")) : null
+      token !== null && token.present ? h("button", { type: "button", style: S.button, disabled: busy, onClick: onForget }, tt("token.forget")) : null,
+      onVerify !== undefined ? h("button", { type: "button", style: S.button, disabled: busy, onClick: onVerify, title: verifyTitle }, tt("probe.validity")) : null
     ),
     error !== null ? h("div", { style: S.formError, role: "alert" }, error) : null,
     h("div", { style: S.formNote }, tt("token.hint")),

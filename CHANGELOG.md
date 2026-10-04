@@ -13,4 +13,15 @@
 - `npm run build` 产物（lib/ + client.js）入库。
 - 测试五套件全绿（wire / config / usage-store / routes / panel），strict
   typecheck 过；真机冒烟：魔粒余额 143、模型目录 35、零漂移警告。
-- 待做：doctor 工具、e2e（真 Host + 假魔搭）、装机验证。
+- 待做：e2e（真 Host + 假魔搭）、装机验证、build-freshness 门禁。
+- 审核修复（2026-10-04）：
+  - `tools/doctor.mjs` 落地（+`src/host/doctor.ts`，六套件）：只读盘点
+    `$DSH_HOME/state` 下各 profile 的 usage.json（损坏 / 未知版本 → 症状）与
+    env 令牌在场性；绝不写盘、绝不打印令牌值。
+  - 快照失败线格式统一为 `{ok, code, error}`：wire.ts 的 `SnapshotFailure`
+    此前声明 `message`，与路由写入、client 读取漂移；routes 测试补钉。
+  - 单模型 tokens 改**今日口径**（`dayTokens`，跨日清零）：原「今日」行并排
+    历史累计是误导；v1 加性字段，旧载荷缺失按 0 起，STATE_VERSION 不变。
+  - README 诚实声明与魔粒现状对齐；面板补「验令牌」入口（目录样本首个模型，
+    目录不可读时诚实降级）与未配置令牌提示，四个死文案键全部接线；
+    `SnapshotFailure` 视图形状改名 `PanelFailure` 消除同名异形。

@@ -53,6 +53,7 @@ clock = t1;
 await store.recordCall({ modelId: "deepseek-ai/DeepSeek-V4.1-Flash", tokens: 5, at: t1 });
 const perModelNext = await store.perModelToday();
 assert.equal(perModelNext[0].calls, 1, "跨日后当日计数清零重计");
+assert.equal(perModelNext[0].tokens, 5, "跨日后当日 token 同步清零（今日口径，不再并排历史累计 42）");
 const trend = await store.trend(3);
 assert.deepEqual(trend.map((b) => b.dateKey), [localDateKey(new Date(2026, 9, 3)), localDateKey(new Date(2026, 9, 4)), localDateKey(new Date(2026, 9, 5))], "趋势以本地日历天对齐");
 assert.equal(trend[1].calls, 3);

@@ -5,7 +5,7 @@
  * @module dsh-connect-modelscope-token-plan/use-snapshot-polling
  */
 import { useEffect, useCallback, useRef, useState } from "./runtime.ts";
-import { errorOfStatus, interpretSnapshot, type SnapshotFailure } from "./snapshot.ts";
+import { errorOfStatus, interpretSnapshot, type PanelFailure } from "./snapshot.ts";
 import { statedCadenceMs, errorText } from "./format.ts";
 import { usePollingInterval } from "./use-polling-interval.ts";
 import { SNAPSHOT_PATH } from "./const.ts";
@@ -13,7 +13,7 @@ import type { Snapshot as SnapshotData } from "../shared/wire.ts";
 
 export function useSnapshotPolling(defaultCadenceMs = 30_000) {
   const [data, setData] = useState<SnapshotData | null>(null);
-  const [error, setError] = useState<SnapshotFailure | string | null>(null);
+  const [error, setError] = useState<PanelFailure | string | null>(null);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [updatedAt, setUpdatedAt] = useState(0);
   const [cadenceMs, setCadenceMs] = useState(defaultCadenceMs);

@@ -10,8 +10,12 @@ import type { zh } from "./i18n.ts";
 import type { Tt } from "./runtime.ts";
 import type { Snapshot, SnapshotResponse } from "../shared/wire.ts";
 
-/** 结构化失败：Host 除了数字以外说的话。 */
-export interface SnapshotFailure {
+/**
+ * 面板视图层的失败形状（与 wire.ts 的 `SnapshotFailure` 同名异形曾是漂移源，
+ * 审核后改名区分）：wire 线上失败携带 `error` 字段；本视图把它归一化为
+ * `message`（errorOfStatus 合成的 HTTP 失败没有线上的 error 可用）。
+ */
+export interface PanelFailure {
   message: unknown;
   code?: unknown;
 }
@@ -19,12 +23,12 @@ export interface SnapshotFailure {
 /** (data, error) 对：恰好一边非空。 */
 export interface SnapshotRead {
   data: Snapshot | null;
-  error: SnapshotFailure | string | null;
+  error: PanelFailure | string | null;
 }
 
 /** viewOf 的裁决：这张快照对面板意味着什么。 */
 export interface SnapshotView {
-  failure: SnapshotFailure | null;
+  failure: PanelFailure | null;
   needsSetup: boolean;
   /** 文案键（不是文本）——测试断言决策而不必拥有字典。 */
   guidanceKey: keyof typeof zh | null;
@@ -43,7 +47,7 @@ export function interpretSnapshot(body: unknown): SnapshotRead {
 }
 
 /** 非 2xx 响应的降级读法（无 body，状态码是唯一线索）。 */
-export function errorOfStatus(status: number): SnapshotFailure | string {
+export function errorOfStatus(status: number): PanelFailure | string {
   if (status === 401 || status === 403) return { message: `HTTP ${status}`, code: "auth_error" };
   return `HTTP ${status}`;
 }
@@ -67,10 +71,10 @@ export const FORM_EXCLUDED_CODES: ReadonlySet<string> = Object.freeze(
 /** 面板决策：这张快照意味着什么。纯函数，Node 套件驱动同一个函数。 */
 export function viewOf(
   data: Snapshot | null,
-  error: SnapshotFailure | string | null,
+  error: PanelFailure | string | null,
   tt: Tt
 ): SnapshotView {
-  const failure: SnapshotFailure | null = error === null || error === undefined
+  const failure: PanelFailure | null = error === null || error === undefined
     ? null
     : typeof error === "string" ? { message: error, code: null } : error;
   const needsSetup = data === null && !FORM_EXCLUDED_CODES.has((failure?.code ?? null) as string);

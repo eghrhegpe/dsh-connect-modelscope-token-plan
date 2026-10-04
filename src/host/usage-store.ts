@@ -48,8 +48,12 @@ export function localDateKey(now: Date): string {
 /** 单日桶。 */
 interface DayBucket { calls: number; tokens: number; }
 
-/** 单模型计数；`day` 是 dayCalls 的归属日（跨日自动清零的依据）。 */
-interface ModelCounter { calls: number; tokens: number | null; lastAt: string | null; day: string; dayCalls: number; }
+/**
+ * 单模型计数；`day` 是 dayCalls/dayTokens 的归属日（跨日自动清零的依据）。
+ * `tokens` 是历史累计（面板不看它，doctor/排查用）；对外口径（perModelToday）
+ * 一律走 dayTokens——「今日」行里并排历史累计是误导（审核 2026-10-04）。
+ */
+interface ModelCounter { calls: number; tokens: number | null; lastAt: string | null; day: string; dayCalls: number; dayTokens: number; }
 
 /** usage.json 的磁盘载荷。 */
 interface UsagePayload {
@@ -102,7 +106,9 @@ function parsePayload(raw: unknown): { payload: UsagePayload | null; anomaly: st
           tokens: typeof counter.tokens === "number" && Number.isFinite(counter.tokens) ? counter.tokens : null,
           lastAt: typeof counter.lastAt === "string" ? counter.lastAt : null,
           day: typeof counter.day === "string" ? counter.day : "",
-          dayCalls: typeof counter.dayCalls === "number" && Number.isFinite(counter.dayCalls) ? counter.dayCalls : 0
+          dayCalls: typeof counter.dayCalls === "number" && Number.isFinite(counter.dayCalls) ? counter.dayCalls : 0,
+          // v1 加性字段：旧载荷缺失按 0 起（与 dayCalls 同窗的今日 token 数）。
+          dayTokens: typeof counter.dayTokens === "number" && Number.isFinite(counter.dayTokens) ? counter.dayTokens : 0
         };
       }
     }
@@ -218,16 +224,18 @@ export function createFileUsageStore({ name, profile = null, trendDays = 14, max
         day.calls += 1;
         if (typeof tokens === "number" && Number.isFinite(tokens) && tokens > 0) day.tokens += tokens;
         payload.days[dayKey] = day;
-        const counter = payload.models[modelId] ?? { calls: 0, tokens: null, lastAt: null, day: dayKey, dayCalls: 0 };
+        const counter = payload.models[modelId] ?? { calls: 0, tokens: null, lastAt: null, day: dayKey, dayCalls: 0, dayTokens: 0 };
         if (counter.day !== dayKey) {
           // 跨日：总累计保留，当日计数清零（「今日单模型用量」的口径）。
           counter.day = dayKey;
           counter.dayCalls = 0;
+          counter.dayTokens = 0;
         }
         counter.calls += 1;
         counter.dayCalls += 1;
         if (typeof tokens === "number" && Number.isFinite(tokens) && tokens > 0) {
           counter.tokens = (counter.tokens ?? 0) + tokens;
+          counter.dayTokens += tokens;
         }
         counter.lastAt = at.toISOString();
         payload.models[modelId] = counter;
@@ -252,14 +260,14 @@ export function createFileUsageStore({ name, profile = null, trendDays = 14, max
       return day === null ? { dateKey: localDateKey(now()), calls: 0, tokens: 0 } : { ...day, dateKey: localDateKey(now()) };
     },
 
-    /** 今天的单模型计数（只含有记录的模型，dayCalls 口径）。 */
+    /** 今天的单模型计数（只含有记录的模型，dayCalls/dayTokens 口径，均跨日清零）。 */
     async perModelToday() {
       const payload = await cache.read();
       const todayKey = localDateKey(now());
       const out: Array<{ modelId: string; calls: number; tokens: number | null; lastAt: string | null }> = [];
       for (const [modelId, counter] of Object.entries(payload?.models ?? {})) {
         if (counter.day !== todayKey) continue;
-        out.push({ modelId, calls: counter.dayCalls, tokens: counter.tokens, lastAt: counter.lastAt });
+        out.push({ modelId, calls: counter.dayCalls, tokens: counter.dayTokens, lastAt: counter.lastAt });
       }
       out.sort((a, b) => b.calls - a.calls);
       return out;
@@ -303,4 +311,23 @@ export function createFileUsageStore({ name, profile = null, trendDays = 14, max
       };
     }
   };
+}
+
+/**
+ * doctor 的只读速览：不构造 store、不碰缓存，直接解析一份 usage.json 载荷，
+ * 回答「这份文件本构建还认不认、里面有多少天桶/事件」。整个载荷不认识时是
+ * `null`；认识但版本未知时 `versionKnown:false`（doctor 据此区分「损坏」与
+ * 「更新构建写的」两种提示）。解析规则与本 store 的 `parsePayload` 同源
+ * （KNOWN_VERSIONS 单一真源），doctor 不另立一套。
+ */
+export function describeUsagePayload(raw: unknown): { versionKnown: boolean; days: number; events: number } | null {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const source = raw as Record<string, unknown>;
+  const version = source.version;
+  if (typeof version !== "number") return null;
+  const days = source.days !== null && typeof source.days === "object" && !Array.isArray(source.days)
+    ? Object.keys(source.days as Record<string, unknown>).length
+    : 0;
+  const events = Array.isArray(source.events) ? source.events.length : 0;
+  return { versionKnown: KNOWN_VERSIONS.includes(version), days, events };
 }

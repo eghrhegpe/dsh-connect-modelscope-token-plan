@@ -239,6 +239,9 @@ assert.ok([SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, PROBE_PATH].every((p) => hand
   await broken.get(SNAPSHOT_PATH)(makeReq("GET"), res);
   assert.equal(res.body.ok, false);
   assert.equal(res.body.code, "config_error", "apiBase 非法 → 挂载期 configError → 快照短路");
+  // 失败线格式的钉子（wire.ts SnapshotFailure）：字段是 error 不是 message，
+  // client 的 interpretSnapshot 读的就是它。
+  assert.deepEqual(Object.keys(res.body).sort(), ["code", "error", "ok"], "SnapshotFailure 线格式 = {ok, code, error}");
 }
 
 // ── 卸载：effect 返回的清理函数真的摘路由 ──
