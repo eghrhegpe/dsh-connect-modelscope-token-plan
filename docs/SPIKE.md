@@ -8,6 +8,24 @@
 > 因此面板设计升级：**官方魔粒余额为主数据源**（真余额），本地计数降级为辅助
 > （经本插件的调用/token），原 §结论 1 只对「推理响应头」成立。魔粒的计费语义
 > （每次调用扣多少、24h/90d 有效期分层）官方未在端点中披露，待观察。
+>
+> **后记 2（拉取官方仓库后补齐，docs/REFERENCES.md）**：把 `modelscope_hub`
+> （官方 Python 客户端，内嵌 OpenAPI spec v1.1.0）等三个仓库拉进 `upstream/`
+> 全量盘点后确认/补齐：
+> - `/magicubes/*` 家族**只有 balance 一个端点**——官方 OpenAPI 无消费记录端点，
+>   消费明细只在网页 `https://modelscope.cn/magicube/usage?tab=consume`；
+> - `frozen_amount` 官方语义 = **预扣额度**（进行中任务未返回结果时暂扣），
+>   `total_balance` = 可用 + 预扣；
+> - OpenAPI 错误体是统一 `ErrorResponse`（带业务 `code`，如 `QuotaLimitExceed`），
+>   余额解析的错误分诊照此对齐（401 unauthorized / 403 forbidden）；
+> - 官方 OpenAPI 另有 `GET /models`、`GET /users/me`（面板账号名展示可作 M4）；
+> - 同类插件 `dsh-plugin-model-usage-meter` 的经验口径：**每日 250 魔豆/人/天**
+>   作额度环总长（非官方数据）；与「单模型 200/250/500 次/日」是两套口径，
+>   我们的配置常数只作参考线，两者都不冒充官方；
+> - 签到领魔粒 = 登录态**访问网页**触发（用户脚本实证），不是 API——token 体系
+>   做不了自动签到，M4 只做外链/提醒。
+> - 教训已写入 REFERENCES：**接平台先拉 OpenAPI/SDK 仓库进 upstream/ 盘点端点
+>   家族，再写代码**——纯试探漏掉了 /users/me、/models 与错误码家族。
 
 目的：在写第一行实现前，回答一个问题——**魔搭上游到底有没有任何额度/限流信号可供面板消费？** 这决定 v1 面板走「响应头派」还是「本地计数派」。
 

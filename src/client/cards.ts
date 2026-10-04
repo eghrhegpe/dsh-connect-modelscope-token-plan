@@ -8,7 +8,7 @@ import { count, format, isoTime } from "./format.ts";
 import { h, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
-import { MODELSCOPE_TOKEN_URL } from "./const.ts";
+import { MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL } from "./const.ts";
 import type { BalanceData, QuotaEvent, Snapshot, TrendBucket, TokenStatus } from "../shared/wire.ts";
 
 /** 可折叠 section 卡：全宽头部按钮 + 旋转 chevron；open/onToggle 由 props 进。 */
@@ -73,7 +73,9 @@ export function BalanceCard({ balance, tt }: { balance: BalanceData | null | unk
       row.fetchedAt !== null && row.fetchedAt !== undefined
         ? format(tt("balance.fetched"), { time: isoTime(row.fetchedAt) }) + " · "
         : "",
-      tt("balance.note")
+      tt("balance.note"),
+      " ",
+      h("a", { style: S.formNote, href: MODELSCOPE_USAGE_URL, target: "_blank", rel: "noreferrer" }, tt("balance.usagePage"))
     )
   );
 }

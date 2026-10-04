@@ -13,7 +13,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 
 //#endregion
 //#region src/client/const.ts
-	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, MODELSCOPE_TOKEN_URL;
+	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL;
 	var init_const = __esmMin((() => {
 		NS = "dsh-connect-modelscope-token-plan";
 		PANEL_ID = NS;
@@ -23,6 +23,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		TOKEN_FORGET_PATH = `/api/${NS}/token/forget`;
 		PROBE_PATH = `/api/${NS}/probe`;
 		MODELSCOPE_TOKEN_URL = "https://modelscope.cn/my/myaccesstoken";
+		MODELSCOPE_USAGE_URL = "https://modelscope.cn/magicube/usage?tab=consume";
 	}));
 
 //#endregion
@@ -58,7 +59,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"balance.total": "总额",
 			"balance.frozen": "冻结",
 			"balance.fetched": "读取于 {time}",
-			"balance.note": "魔粒是魔搭 API-Inference 的官方额度单位，此数字来自官方接口（openapi/v1/magicubes/balance），是真实余额。",
+			"balance.note": "魔粒是魔搭 API-Inference 的官方额度单位，此数字来自官方接口（openapi/v1/magicubes/balance），是真实余额。预扣 = 进行中任务未返回结果时的暂扣额度。",
+			"balance.usagePage": "官方用量明细（网页）→",
 			"balance.unavailable": "魔粒余额暂不可读：{error}",
 			"quota.dailyUsed": "今日本地调用",
 			"quota.dailyLimit": "参考上限（配置值）",
@@ -127,7 +129,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"balance.total": "Total",
 			"balance.frozen": "Frozen",
 			"balance.fetched": "read at {time}",
-			"balance.note": "Magicube is the official unit of ModelScope API-Inference quota; this number comes from the official endpoint (openapi/v1/magicubes/balance) and is the real balance.",
+			"balance.note": "Magicube is the official unit of ModelScope API-Inference quota; this number comes from the official endpoint (openapi/v1/magicubes/balance) and is the real balance. Frozen = held for in-flight tasks.",
+			"balance.usagePage": "Official usage details (web) →",
 			"balance.unavailable": "Magicube balance temporarily unreadable: {error}",
 			"quota.dailyUsed": "Local calls today",
 			"quota.dailyLimit": "Reference limit (configured)",
@@ -782,7 +785,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		} }, format(tt("balance.unavailable"), { error: row.error }));
 		if (row.available === null && row.total === null) return null;
 		const tile = (label, value) => h("div", { style: S.statCard }, h("div", { style: S.statValue }, typeof value === "number" && Number.isFinite(value) ? count(value) : "—"), h("div", { style: S.quotaLabel }, label));
-		return h("div", { style: S.card }, h("div", { style: S.statGrid }, tile(tt("balance.available"), row.available), tile(tt("balance.total"), row.total), tile(tt("balance.frozen"), row.frozen)), h("div", { style: S.trendLegend }, row.fetchedAt !== null && row.fetchedAt !== void 0 ? format(tt("balance.fetched"), { time: isoTime(row.fetchedAt) }) + " · " : "", tt("balance.note")));
+		return h("div", { style: S.card }, h("div", { style: S.statGrid }, tile(tt("balance.available"), row.available), tile(tt("balance.total"), row.total), tile(tt("balance.frozen"), row.frozen)), h("div", { style: S.trendLegend }, row.fetchedAt !== null && row.fetchedAt !== void 0 ? format(tt("balance.fetched"), { time: isoTime(row.fetchedAt) }) + " · " : "", tt("balance.note"), " ", h("a", {
+			style: S.formNote,
+			href: MODELSCOPE_USAGE_URL,
+			target: "_blank",
+			rel: "noreferrer"
+		}, tt("balance.usagePage"))));
 	}
 	/** 本地计数卡：今日调用 vs 参考上限的推算条 + 口径说明。 */
 	function LocalDailyCard({ snapshot, tt }) {

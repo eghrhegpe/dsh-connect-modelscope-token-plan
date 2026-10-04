@@ -48,6 +48,9 @@
 
 ## M4 — 可选增强（默认关）
 
-- `registerProvider`：OpenAI 兼容 provider 注册（`modelscope-token-plan`），复用姊妹插件 `provider-publish.ts` 形态；
+- `registerProvider`：OpenAI 兼容 provider 注册（`modelscope-token-plan`），复用姊妹插件 `provider-publish.ts` 形态；注册后本地计数即涵盖全部 DSH 魔搭调用；
 - 429 自愈接入（QUOTA 快速失败 vs RATE_LIMIT 退避）；
-- `doctor` 工具。
+- `doctor` 工具；e2e（真 Host + 假魔搭平台）进 CI 门禁；
+- **余额差值趋势**：usage-store 记录每日首末两次官方余额观察，日消耗 = 首减末——官方数据的日消耗曲线（OpenAPI 无记录端点，只能这样做，见 REFERENCES）；
+- `GET /users/me` 展示账号名（官方 OpenAPI 端点，端点家族盘点见 REFERENCES）；
+- 「每日签到领魔粒」提醒：签到是**网页行为**（登录态访问 magicube/usage 页触发，非 API），只能做面板外链 + 待办提醒，见 REFERENCES 的 userscripts 上游。

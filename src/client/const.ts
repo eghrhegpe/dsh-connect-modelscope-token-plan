@@ -26,3 +26,9 @@ export const PROBE_PATH = `/api/${NS}/probe`;
  * 打开它，绝不随凭据请求发出。
  */
 export const MODELSCOPE_TOKEN_URL = "https://modelscope.cn/my/myaccesstoken";
+
+/**
+ * 官方「魔粒用量明细」网页（消费记录只在这，OpenAPI 没有记录端点——
+ * 见 docs/REFERENCES.md 的 userscripts 上游）。纯公开 URL，仅外链。
+ */
+export const MODELSCOPE_USAGE_URL = "https://modelscope.cn/magicube/usage?tab=consume";

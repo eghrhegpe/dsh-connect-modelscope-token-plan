@@ -37,7 +37,8 @@ export const zh = {
   "balance.total": "总额",
   "balance.frozen": "冻结",
   "balance.fetched": "读取于 {time}",
-  "balance.note": "魔粒是魔搭 API-Inference 的官方额度单位，此数字来自官方接口（openapi/v1/magicubes/balance），是真实余额。",
+  "balance.note": "魔粒是魔搭 API-Inference 的官方额度单位，此数字来自官方接口（openapi/v1/magicubes/balance），是真实余额。预扣 = 进行中任务未返回结果时的暂扣额度。",
+  "balance.usagePage": "官方用量明细（网页）→",
   "balance.unavailable": "魔粒余额暂不可读：{error}",
 
   "quota.dailyUsed": "今日本地调用",
@@ -116,7 +117,8 @@ export const en: typeof zh = {
   "balance.total": "Total",
   "balance.frozen": "Frozen",
   "balance.fetched": "read at {time}",
-  "balance.note": "Magicube is the official unit of ModelScope API-Inference quota; this number comes from the official endpoint (openapi/v1/magicubes/balance) and is the real balance.",
+  "balance.note": "Magicube is the official unit of ModelScope API-Inference quota; this number comes from the official endpoint (openapi/v1/magicubes/balance) and is the real balance. Frozen = held for in-flight tasks.",
+  "balance.usagePage": "Official usage details (web) →",
   "balance.unavailable": "Magicube balance temporarily unreadable: {error}",
 
   "quota.dailyUsed": "Local calls today",
