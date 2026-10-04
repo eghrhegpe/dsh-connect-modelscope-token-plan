@@ -120,7 +120,10 @@ const IMAGE_GEN_NAME_PATTERN = /(wanx|qwen-image|cogview|flux|stable-diffusion|s
  * 失败。新增已确知的多模态模型时在此追加 id 即可。
  */
 const KNOWN_VISION_IDS = Object.freeze(new Set([
-  "deepseek-ai/DeepSeek-V4.1-Flash"
+  "deepseek-ai/DeepSeek-V4.1-Flash",
+  // 官方 OpenAI SDK 示例即以 image_url 调它（modelscope.cn 文档），名字无 vl/vision
+  // 但确实能吃图；catalog 不返回模态字段，名字启发也漏，故显式策展。
+  "Qwen/Qwen3.8-Flash-Next"
 ]));
 
 /**

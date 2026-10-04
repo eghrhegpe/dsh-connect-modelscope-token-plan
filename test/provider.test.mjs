@@ -41,6 +41,7 @@ import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_S
   assert.equal(isVisionModel(normalizeEntry({ id: "Qwen/Qwen3.5-35B" })), false, "纯文本模型名 → 非 vision");
   // 上游零模态元数据 + 名字无 vl/vision，只能靠策展清单兜底
   assert.equal(isVisionModel(normalizeEntry({ id: "deepseek-ai/DeepSeek-V4.1-Flash" })), true, "策展清单命中 → vision（名字无 vl 但能吃图）");
+  assert.equal(isVisionModel(normalizeEntry({ id: "Qwen/Qwen3.8-Flash-Next" })), true, "官方 SDK 示例证明能吃图 → vision（名字无 vl/vision）");
   assert.equal(isVisionModel(normalizeEntry({ id: "deepseek-ai/DeepSeek-V4-Pro" })), false, "未策展且名字无视觉 token → 非 vision");
 
   // chat：宽松方向，只排除明确生图模型
