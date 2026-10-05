@@ -156,7 +156,11 @@ assert.ok([SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, PROBE_PATH].every((p) => hand
   }
 }
 
-// ── probe：usage 成功记账；429 分诊；401 分诊 ──
+// ── probe：零额度鉴权探针；429 分诊；401 分诊 ──
+//
+// `kind:"usage"`（真调用、消耗额度、成功即 recordCall）已随「模型目录」试调
+// 按钮一并删除——真调用的计数生产者是 usage-observer.ts（见 usage-observer.test.mjs）。
+// 本段因此**不再断言任何本地用量增长**：probe 现在一个 token 都不记。
 {
   const saved = await call(handlers, TOKEN_PATH, makeReq("POST", { body: { token: "ms-0123456789abcdef0123456789abcdef" } }));
   assert.equal(saved.ok, true);
@@ -165,7 +169,8 @@ assert.ok([SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, PROBE_PATH].every((p) => hand
   currentFetch = async (url, init) => {
     lastBody = JSON.parse(String(init.body));
     if (lastBody.model === "ok/model") {
-      return new Response(JSON.stringify({ id: "x", usage: { prompt_tokens: 30, completion_tokens: 1, total_tokens: 31 } }), { status: 200, headers: { "content-type": "application/json" } });
+      // 真机实测的空壳补全形状：缺 messages 也返回 200。
+      return new Response(JSON.stringify({ id: "x", created: 0, usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }), { status: 200, headers: { "content-type": "application/json" } });
     }
     if (lastBody.model === "quota/model") {
       return new Response(JSON.stringify({ error: { message: "daily quota limit reached" } }), { status: 429, headers: { "retry-after": "60" } });
@@ -176,38 +181,68 @@ assert.ok([SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, PROBE_PATH].every((p) => hand
     throw new Error("unexpected probe target");
   };
   try {
-    const ok = await call(handlers, PROBE_PATH, makeReq("POST", { body: { modelId: "ok/model", kind: "usage" } }));
-    assert.equal(ok.ok, true);
-    assert.equal(ok.usage.totalTokens, 31);
-    assert.equal(lastBody.max_tokens, 1, "usage probe 只花 1 个 token");
+    // modelId 护栏：空串（与纯空白）必须在**发出任何请求之前**被 400 挡回。
+    // 这条由变异测试发现是盲区——把护栏改成 if (false) 时全套件仍全绿。
+    // 用裸 handler 调用：`call` 硬断言 200，而这里测的正是 400。
+    for (const bad of ["", "   "]) {
+      let fetched = false;
+      currentFetch = async () => { fetched = true; return new Response("{}", { status: 200 }); };
+      const res = makeRes();
+      await handlers.get(PROBE_PATH)(makeReq("POST", { body: { modelId: bad } }), res);
+      assert.equal(res.status, 400, `modelId ${JSON.stringify(bad)} → 400`);
+      assert.equal(res.body.ok, false);
+      assert.equal(fetched, false, "护栏在发请求之前就挡下了");
+    }
+
+    currentFetch = async (url, init) => {
+      lastBody = JSON.parse(String(init.body));
+      if (lastBody.model === "ok/model") {
+        return new Response(JSON.stringify({ id: "x", created: 0, usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (lastBody.model === "quota/model") {
+        return new Response(JSON.stringify({ error: { message: "daily quota limit reached" } }), { status: 429, headers: { "retry-after": "60" } });
+      }
+      if (lastBody.model === "bad/model") {
+        return new Response(JSON.stringify({ error: { message: "Authentication failed" } }), { status: 401 });
+      }
+      throw new Error("unexpected probe target");
+    };
+
+    const ok = await call(handlers, PROBE_PATH, makeReq("POST", { body: { modelId: "ok/model" } }));
+    assert.equal(ok.ok, true, "200 空壳 → 令牌好");
+    assert.equal(lastBody.messages, undefined, "鉴权探针故意缺 messages");
+    assert.equal(lastBody.max_tokens, undefined, "鉴权探针不请求生成，零额度");
+    assert.equal(ok.usage, undefined, "探针不回 usage（真调用的 token 由观察层取）");
 
     const snap = await call(handlers, SNAPSHOT_PATH, makeReq("GET"));
-    assert.equal(snap.quota.daily.usedLocal, 1, "probe 成功计入本地计数");
-    assert.equal(snap.quota.perModel[0].modelId, "ok/model");
+    assert.equal(snap.quota.daily.usedLocal, 0, "probe 成功不计入本地计数");
+    assert.equal(snap.quota.perModel.length, 0, "probe 不产生单模型用量");
 
-    const quota = await call(handlers, PROBE_PATH, makeReq("POST", { body: { modelId: "quota/model", kind: "usage" } }));
+    // 429 分诊：文案含 quota → quota_exceeded，进事件流。
+    const quota = await call(handlers, PROBE_PATH, makeReq("POST", { body: { modelId: "quota/model" } }));
     assert.equal(quota.ok, false);
     assert.equal(quota.code, "quota_exceeded", "429 文案含 quota → 分诊 quota_exceeded");
     assert.equal(quota.retryAfterMs, 60000, "Retry-After 解析");
 
     const snap2 = await call(handlers, SNAPSHOT_PATH, makeReq("GET"));
     assert.equal(snap2.events[0].kind, "quota", "429 入事件流");
-    assert.equal(snap2.quota.daily.usedLocal, 1, "429 的调用不计入成功计数");
+    assert.equal(snap2.quota.daily.usedLocal, 0, "429 也不计入用量");
 
-    const auth = await call(handlers, PROBE_PATH, makeReq("POST", { body: { modelId: "bad/model", kind: "validity" } }));
+    const auth = await call(handlers, PROBE_PATH, makeReq("POST", { body: { modelId: "bad/model" } }));
     assert.equal(auth.ok, false);
     assert.equal(auth.code, "auth_error", "401 → auth_error");
     const snap3 = await call(handlers, SNAPSHOT_PATH, makeReq("GET"));
     assert.ok(snap3.events.some((e) => e.kind === "error"), "401 probe 记 error 事件");
 
-    // validity 的 200 是「令牌好」（真机实测：缺 messages 返回 200 空壳），
-    // 不计用量、不记事件。
-    const validityOk = await call(handlers, PROBE_PATH, makeReq("POST", { body: { modelId: "ok/model", kind: "validity" } }));
-    assert.equal(validityOk.ok, true, "validity 200 → 令牌好");
-    assert.equal(validityOk.usage, null);
+    // 400 是「先鉴权后校验」的校验层拒绝 → 令牌仍然好。
+    currentFetch = async () => new Response(JSON.stringify({ error: { message: "messages is required" } }), { status: 400 });
+    const validation = await call(handlers, PROBE_PATH, makeReq("POST", { body: { modelId: "ok/model" } }));
+    assert.equal(validation.ok, true, "400 → 令牌好（鉴权早于校验）");
+    assert.equal(validation.status, 400);
+
     const snap4 = await call(handlers, SNAPSHOT_PATH, makeReq("GET"));
-    assert.equal(snap4.quota.daily.usedLocal, 1, "validity 不计入本地用量");
-    assert.equal(snap4.events.filter((e) => e.kind === "error" && e.modelId === "ok/model").length, 0, "validity 成功不记事件");
+    assert.equal(snap4.quota.daily.usedLocal, 0, "全程零用量");
+    assert.equal(snap4.events.filter((e) => e.kind === "error" && e.modelId === "ok/model").length, 0, "令牌好不记事件");
   } finally {
     currentFetch = NO_NETWORK;
   }

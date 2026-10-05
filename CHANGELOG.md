@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+### 第七轮：删除 probe 的 `kind:"usage"` 分支，并修好变异测试工具自己
+
+起因是第六轮遗留的一个「活的死代码」：`routes/probe.ts` 的 `kind:"usage"` 分支服务端
+仍在、客户端**永远发不出**。查完代码后的判断不是「死代码该删」，而是**形态本身是反的**：
+
+- 服务端的 `kind` 取值是 `body.kind === "validity" ? "validity" : "usage"`——**缺省即
+  usage**。于是任何裸 `POST {modelId}`（本机其他程序、忘记传参的脚本）都会触发一次
+  `max_tokens:1` 的**真实计费调用**并记进账本。面板只剩零额度探针之后，缺省不该指向
+  「花钱的那个」。
+- 它服务的 UI（模型目录逐行「试调」）已随面板收敛删除，`ProbeKind` / `ProbeSuccess.usage`
+  / `inference-client.probe()` 里整套 usage 分支（含 `usage.total_tokens` 解析）都只为它存在。
+- 真调用的 token 数由 `usage-observer.ts` 在 harness 流出口取，**不经过这里**。
+
+**删除**：`probe.ts` 的 kind 解析与 recordCall 调用、`inference-client.ts` 的 `ProbeKind`
+类型与 `ProbeSuccess.usage` 字段与 usage 分支、`client/const.ts` 的 stale 注释、
+`panel-page.ts` 的 `kind:"validity"`（客户端现在只传 `{modelId}`）。`recordCall`
+的写入侧从此只有 `usage-observer.ts` 一个（两处文件头注释同步改写）。
+
+`test/routes.test.mjs` 的 probe 段**重写**：删掉「usage 成功 → 本地计数 +1」一类断言
+（那是已删行为的断言），改为断言反向事实——成功**不计**用量、不带 `messages`/`max_tokens`、
+不回 `usage`；429 分诊、401 分诊、Retry-After 解析、事件流写入全部保留（分诊逻辑在
+validity 路径上同样执行）；新增 400「先鉴权后校验 → 令牌仍好」一条。
+
+#### 变异测试工具自己有两个缺陷，都是本轮才暴露的
+
+用 `tools/dev/mutate.mjs` 验证新断言时，它先报「目标不存在」，再**把 7 个变异全记成
+`KILLED (抓到)`**——而 detail 里每一行都是同一个错：
+
+- **`ROOT` 上溯级数错了**：第六轮把脚本从 `tools/` 移到 `tools/dev/` 时，没有同步改
+  `resolve(dirname(fileURLToPath(import.meta.url)), "..")`。**六个脚本全中**（`mutate` +
+  `cov-*` + `find-fake-gates`），全部改成上溯两级。
+- **`mutate.mjs` 把 `test/` 拼了两次**：`group.test` 一直是仓库相对路径
+  （README 里写的就是 `test/xxx.test.mjs`），而代码是 `join(ROOT, "test", t)` →
+  `test/test/xxx.test.mjs`。测试根本加载不了、进程非零退出，被下面「非超时即 KILLED」
+  一律记成**抓到了变异**。**这个缺陷在本次移动之前就存在**（`git show HEAD` 已如此），
+  意味着该项目**历史上每一次变异审计的报告都是假绿**——「杀死 N / 漏过 0」看起来完美，
+  实际一个变异都没跑起来。
+  - 修法有两层：按路径语义解析（含 `/` 当相对路径，裸文件名才补 `test/` 前缀）；**并且**
+    新增 `BROKEN (测试没跑起来)` 判定——匹配 `Cannot find module` / `ERR_MODULE_NOT_FOUND`
+    时不算「抓到」，汇总里单列，且在有值时打印「上面的『杀死』数与检出率都不可信」。
+    **门禁工具的失效必须是响的**，不能是静默的。
+  - 修好后重跑：最开始的 `probe 不再校验 modelId` 由 `STILL-GREEN (漏!)` 变为
+    `KILLED`——因为它是真的**盲区**：`test/routes.test.mjs` 从未测过空 modelId 的 400 护栏。
+    已补该用例（含「护栏在发请求之前就挡下」与纯空白串）。最终 **7 杀死 / 0 漏过 / 0 没跑起来**。
+
 ### 第六轮：文档门禁与断言有效性
 
 前五轮都在修**代码**；这一轮的问题是**文档在说谎，而没有东西会红**。审计逐条复现了
@@ -45,7 +90,7 @@
   | `README.md` 额度节 | 「额度常数…需手动更新配置」 | 明说这些数字**不参与任何计算**，面板不消费次数上限 |
   | `IMPLEMENTATION.md` / `SPIKE.md` / `REFERENCES.md` | 三处把已删的 `dailyQuotaTotal`/`dailyQuotaPerModel` 描述为现存配置 | 标注删除，SPIKE 那条加删除线标「已作废」 |
   | `src/host/usage-store.ts` 文件头 | 「魔搭没有余额查询接口」等**三重化石** | 重写为当前口径（官方给总额/本 store 给分布与事件流/写入侧是谁） |
-  | `src/host/usage-observer.ts` 文件头 | 「唯一调用者是 `routes/probe.ts`」 | 改为「常规生产者」并说明 probe 的 `kind:"usage"` 分支为何仍在 |
+  | `src/host/usage-observer.ts` 文件头 | 「唯一调用者是 `routes/probe.ts`」 | 改为「常规生产者」（该分支第六轮已删除，见下） |
 
 - **重组 `tools/`**：12 个无引用、无文档的临时脚本按「通用仪器 / 一次性探针」分流。
   - 保留 6 个通用仪器进 `tools/dev/`（`mutate.mjs` 变异测试、`find-fake-gates.mjs`

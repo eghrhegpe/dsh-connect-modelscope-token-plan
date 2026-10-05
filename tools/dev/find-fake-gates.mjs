@@ -10,7 +10,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const tests = readdirSync(join(ROOT, "test")).filter((f) => f.endsWith(".mjs")).sort();
 
 for (const t of tests) {

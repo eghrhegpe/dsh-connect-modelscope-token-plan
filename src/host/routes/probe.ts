@@ -1,12 +1,16 @@
 /**
- * probe 路由：面板「接入」tab 的「测试一次调用」，也是本地计数器的第一个
- * 数据源。
+ * probe 路由：面板「接入」tab 的「测试一次调用」。
  *
- * 两种形态（SPIKE.md §结论 5）：
- * - `kind:"usage"` —— 真调用（max_tokens=1），**消耗 1 次免费额度**；成功后
- *   recordCall 把这次调用记进当天天桶与单模型计数（tokens 取 usage）。
+ * 只剩一种形态（SPIKE.md §结论 5）：
  * - `kind:"validity"` —— 故意缺 messages 的请求，预期 401 先于 400，零额度
- *   鉴权探针（语义待真机回填）。只记事件，不记调用。
+ *   鉴权探针（语义已真机回填）。不记调用，只记事件。
+ *
+ * `kind:"usage"`（真调用、max_tokens=1、消耗 1 次免费额度）**已删除**：它只服务
+ * 已随面板收敛删掉的「模型目录」逐行试调按钮，且**不在 DSH 的调用路径上**——真
+ * 调用经 provider adapter，由 `usage-observer.ts` 在流出口记账。删它的另一个理由
+ * 是形态本身：服务端原有 `kind = body.kind === "validity" ? "validity" : "usage"`
+ * 的**缺省即 usage**，任何人 POST 一个 modelId 就会触发一次真实计费调用。面板只
+ * 剩零额度探针之后，缺省不该指向「花钱的那个」。
  *
  * 失败照常记账：429 分诊成 quota/rate_limit 事件（带 Retry-After），401 记
  * auth 事件——事件流是面板「额度」tab 的第三块。错误消息先脱敏（红线 1）。
@@ -33,22 +37,15 @@ export function registerProbeRoute(ctx: any, wiring: Pick<Wiring, "settings" | "
       const body = await readJsonBodyOr400(request, response);
       if (body === null) return;
       const modelId = typeof body.modelId === "string" ? body.modelId.trim() : "";
-      const kind = body.kind === "validity" ? "validity" : "usage";
       if (modelId === "") {
         writeJson(response, 400, { ok: false, error: "modelId is required" }, { "cache-control": "no-store" });
         return;
       }
       try {
-        const result = await inference.probe({ modelId, kind });
-        if (kind === "usage") {
-          await usageStore.recordCall({
-            modelId,
-            tokens: result.usage === null ? null : result.usage.totalTokens
-          });
-        }
-        // validity 成功（200/400 都算令牌好）不记调用也不记事件——它不是一次
-        // 用量，2026-10-04 实测它返回的是零 token 空壳（SPIKE.md）；是否耗一次
-        // 免费次数未证实，所以宁可不计。
+        const result = await inference.probe({ modelId });
+        // 成功（200/400 都算令牌好）不记调用也不记事件——它不是一次用量，
+        // 2026-10-04 实测它返回的是零 token 空壳（SPIKE.md）；是否耗一次免费
+        // 次数未证实，所以宁可不计。
         writeJson(response, 200, { ...result, tokenState: await wiring.tokenStore.state() }, { "cache-control": "no-store" });
       } catch (error) {
         const code = (error as { code?: unknown }).code;

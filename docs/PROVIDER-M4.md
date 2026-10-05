@@ -330,6 +330,9 @@ roster），失败给降级形状（`enabled:false, error, roster:[]`），**绝
 > 与免认证目录并排属于重复；usage probe 也只服务那张表，且根本不在 DSH 的调用
 > 路径上（真调用经 provider adapter）。**保留**的是零额度 validity probe
 > （`probe.validity`，接入 tab 的验令牌，`POST /probe` 路由不动）。
+> **再后记（第六轮）**：服务端那条 `kind:"usage"` 分支也删了——当时只删客户端，
+> 留下一条没有入口、却因「缺省即 usage」而会被裸 POST 触发真实计费的服务端路径。
+> 现在 `POST /probe` 只接受 `{modelId}`。
 > 目录表时代的整行染色（`trendRowFeatured`）同时降级为 roster 行上一枚
 > 「推荐」pill（`S.modelBadgeFeatured`，与「视觉」pill 同构）。细节见 CHANGELOG
 > 「0.1.0-M4+ — 面板收敛」。

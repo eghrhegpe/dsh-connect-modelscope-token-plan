@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const test = process.argv[2] ?? "panel.test.mjs";
 const match = process.argv[3] ?? "client.js";
 const R = join(ROOT, ".cov-fn-runner.mjs");

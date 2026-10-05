@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve, dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const toPosix = (p) => p.split(sep).join("/");
 
 /** 把 V8 的 count>0 ranges（可能互相嵌套）合并成不相交区间。 */

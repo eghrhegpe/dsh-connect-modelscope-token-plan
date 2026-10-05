@@ -6,9 +6,8 @@
  * 官方余额（真实值），本文件供的是分布 / 趋势 / 429 事件流。**不提供**「剩余次数」
  * 推算：次数口径的上限是社区快照，与魔粒并排是误导，那条推算已从面板删除。
  *
- * 写入侧是 `usage-observer.ts`（在 provider 流出口观测真实对话）。它也记
- * `routes/probe.ts` 的 `kind:"usage"` 试调——但面板已不再暴露该入口，所以实际上
- * 唯一的常规生产者是观察层。
+ * 写入侧**只有** `usage-observer.ts`（在 provider 流出口观测真实对话）。面板上
+ * 没有任何入口能直接记一笔用量——早先 probe 路由的 `kind:"usage"` 试调已删除。
  *
  * 持久化纪律（与姊妹插件同款）：`$DSH_HOME/state/[<profile>/]<name>/usage.json`
  * —— 按 profile 分段（它回答的是「这个 profile 的调用吃了多少额度」，与

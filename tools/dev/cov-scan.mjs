@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve, dirname, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const toPosix = (p) => p.split(sep).join("/");
 
 // ── 枚举被测源文件 ──

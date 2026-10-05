@@ -126,7 +126,7 @@ export function PanelPage({ tt, localeSubscribe }: {
     setVerifyNote(null);
     setVerifyError(null);
     try {
-      const body = await postJson(PROBE_PATH, { modelId, kind: "validity" });
+      const body = await postJson(PROBE_PATH, { modelId });
       if (body !== null && body.ok === true) {
         setVerifyNote(format(tt("probe.validOk"), { status: Number(body.status ?? 0) }));
       } else {

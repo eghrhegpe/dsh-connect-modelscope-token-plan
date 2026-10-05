@@ -1544,10 +1544,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			setVerifyNote(null);
 			setVerifyError(null);
 			try {
-				const body = await postJson(PROBE_PATH, {
-					modelId,
-					kind: "validity"
-				});
+				const body = await postJson(PROBE_PATH, { modelId });
 				if (body !== null && body.ok === true) setVerifyNote(format(tt("probe.validOk"), { status: Number(body.status ?? 0) }));
 				else setVerifyError(typeof body?.error === "string" ? body.error : "HTTP error");
 			} catch (reason) {

@@ -39,7 +39,8 @@
   ~~每行「试调」按钮~~ 与底部的「模型目录（免认证，不耗额度）」表已在 M4+
   的面板收敛里删除——roster 本身就是「接入后实际提供哪些模型」，免认证目录表
   与它并排只是重复；usage probe 只服务那张表，随之移除。零额度的 validity
-  probe（验令牌）留在「接入」tab。
+  probe（验令牌）留在「接入」tab。服务端的 `kind:"usage"` 分支当时留着，第六轮
+  才随「它是缺省值、会消耗额度」一并删除。
 
 ## M3 — 测试 + 装机验证（进行中）
 
@@ -78,6 +79,7 @@
   流出口，一次遍历拿到 token 与失败分类。在此之前面板三块（今日调用 / 分布 / 趋势 / 429
   事件流）**恒为 0 与空**——`recordCall` 唯一的生产者是 usage probe，而那个按钮已随目录表
   删除。**恒为 0 是合法状态，没有任何门禁会红**，靠 `tools/doctor.mjs` 盘点磁盘真相才抓到。
+  （第六轮补删了服务端残留的 `kind:"usage"` 分支，`recordCall` 的写入侧从此只有本模块。）
 - ✅ **能力分类器** `resolveModelCapability`：二值 vision 升级为七档能力路由，判定走详情
   端点 `Tasks[].Name`，`KNOWN_VISION_IDS` 14 条实测吃图模型兜底，全不认识则 `unknown`。
 - ✅ **发版链路**：`screenshots.json` 清单 + `files` 白名单补 `assets`；新增

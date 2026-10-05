@@ -18,7 +18,7 @@ export const MODELS_PATH = `/api/${NS}/models`;
 export const TOKEN_PATH = `/api/${NS}/token`;
 /** 令牌忘掉路由。 */
 export const TOKEN_FORGET_PATH = `/api/${NS}/token/forget`;
-/** probe 路由（usage / validity 两种形态）。 */
+/** probe 路由（零额度鉴权探针，只传 modelId）。 */
 export const PROBE_PATH = `/api/${NS}/probe`;
 /** 接入为 DSH 模型 provider 的开关/状态路由。 */
 export const PROVIDER_PATH = `/api/${NS}/provider`;
