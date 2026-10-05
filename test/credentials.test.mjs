@@ -157,4 +157,68 @@ for (let hexLen = 12; hexLen <= 80; hexLen += 4) {
   assert.equal((await persisted.state()).ephemeral, false, "落在凭据文件里的值不是 ephemeral");
 }
 
+// ── §6 收口不变量：任何进入 wire / 日志的错误文本都过了脱敏闸 ──
+//
+// 回归用例：聚合层（`snapshot-aggregate` 的 `soft()`）用裸 `errMsg(error)`，
+// 而那个字符串会一路流进 `shapeWarnings` / `balance.error` / `models.error`
+// （面板可见）与快照路由的响应体。它隐式依赖「下游每个 promise 都已自行脱敏」——
+// 一旦有任何一个遵守者，令牌直达面板。契约不该靠下游的自觉：收口处自己脱敏。
+// 同样漏掉脱敏的还有 `resolveSettings` 的 `configError`（进 ok:false 响应体）与
+// index.ts 的 teardown 警告（日志——红线 1 同时管日志与面板）。
+//
+// 判据是**静态**的：这两个文件里不允许出现「裸的 errMsg 进入 wire 字段或日志」，
+// 因为构造真实的泄漏路径需要上游回显，而离线套件刻意不联网。
+{
+  const { readFileSync: read } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { join } = await import("node:path");
+  const root = fileURLToPath(new URL("..", import.meta.url));
+
+  // soft() 的 error 字段必须脱敏。
+  const aggregate = read(join(root, "src/host/snapshot-aggregate.ts"), "utf8");
+  assert.ok(
+    /error:\s*redactSecrets\(errMsg\(error\)\)/.test(aggregate),
+    "soft() 的 error 字段必须 redactSecrets(errMsg(...))"
+  );
+  assert.ok(
+    !/error:\s*errMsg\(error\)/.test(aggregate),
+    "soft() 不得把裸 errMsg 放进 wire 字段"
+  );
+
+  // configError 进 ok:false 响应体，同样必须脱敏。
+  const hostConfig = read(join(root, "src/host/host-config.ts"), "utf8");
+  assert.ok(
+    /configError:\s*redactSecrets\(errMsg\(error\)\)/.test(hostConfig),
+    "configError 进响应体，必须脱敏"
+  );
+
+  // teardown 的警告进日志，必须脱敏。
+  const hostIndex = read(join(root, "src/host/index.ts"), "utf8");
+  assert.ok(
+    /route unregister failed: \$\{redactSecrets\(errMsg\(error\)\)\}/.test(hostIndex),
+    "路由注销失败的警告进日志，必须脱敏"
+  );
+
+  // 全仓扫一遍：Host 侧任何 logger.* 或 wire 字段里都不该出现裸 errMsg。
+  const { globSync } = await import("node:fs");
+  const files = globSync(join(root, "src/host/**/*.ts"));
+  const offenders = [];
+  for (const f of files) {
+    const text = read(f, "utf8");
+    for (const line of text.split("\n")) {
+      const usesErrMsg = /\berrMsg\(/.test(line);
+      if (!usesErrMsg) continue;
+      // 脱敏过、或只是把 errMsg 存进局部变量再由别处脱敏，都不算违规。
+      if (/redactSecrets\(|degrade\(/.test(line)) continue;
+      if (/^\s*(const|let|export const)\s+\w+\s*=\s*errMsg\(/.test(line)) continue;
+      // errMsg 自己的定义/实现（签名里的 `value: unknown`）不是出口。
+      if (/^\s*(export\s+)?function errMsg\(/.test(line)) continue;
+      // 参数传递（把 errMsg 的结果交给别处处理）不算——收口处会自己脱敏。
+      if (/^\s*(return\s+)?[a-zA-Z_]\w*\(/.test(line) && !/[:=]/.test(line.split("errMsg")[0])) continue;
+      offenders.push(`${f.split(/[\\/]/).pop()}: ${line.trim()}`);
+    }
+  }
+  assert.deepEqual(offenders, [], "Host 侧不该有裸 errMsg 进入 wire 字段或日志");
+}
+
 console.log("credentials.test.mjs: all checks passed");

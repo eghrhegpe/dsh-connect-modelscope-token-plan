@@ -9,7 +9,7 @@
  * 算「剩余次数」。真要加阈值提醒时，那应该是读官方余额的差值，不是这两个数。
  * @module dsh-connect-modelscope-token-plan/host-config
  */
-import { str, obj, num, errMsg } from "./util.ts";
+import { str, obj, num, errMsg, redactSecrets } from "./util.ts";
 
 /**
  * 本插件所有可寻址面的唯一 slug：/api 路由前缀、状态目录名、凭据记录命名
@@ -139,7 +139,7 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         registerProvider: false,
         allowedHosts: new Set(CONFIG_DEFAULTS.admittedHosts)
       },
-      configError: errMsg(error)
+      configError: redactSecrets(errMsg(error))
     };
   }
 }

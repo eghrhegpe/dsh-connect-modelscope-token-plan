@@ -25,7 +25,7 @@ import { createProviderPublisher } from "./provider-publish.ts";
 import { profileSegment } from "./state-store.ts";
 import { registerRoutes } from "./routes.ts";
 import { resolveSettings, inject, name } from "./host-config.ts";
-import { errMsg } from "./util.ts";
+import { errMsg, redactSecrets } from "./util.ts";
 import type { HostDeps } from "./types.ts";
 
 /**
@@ -150,7 +150,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
         try {
           off?.();
         } catch (error) {
-          ctx.logger?.warn?.(`${name}: route unregister failed: ${errMsg(error)}`);
+          ctx.logger?.warn?.(`${name}: route unregister failed: ${redactSecrets(errMsg(error))}`);
         }
       }
     };

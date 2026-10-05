@@ -15,11 +15,22 @@ import { PLUGIN_VERSION, name } from "./host-config.ts";
 import { CODE } from "./codes.ts";
 import { rosterWithAvailability, resolveAllowedList } from "./llm-models.ts";
 import { resolveSwitchEnabled, switchSource } from "./switch-precedence.ts";
-import { errMsg } from "./util.ts";
+import { errMsg, redactSecrets } from "./util.ts";
 import type { Snapshot } from "../shared/wire.ts";
 import type { Wiring } from "./types.ts";
 
-/** 软失败包装：成功给 value，失败给 {error, code}——从不 reject。 */
+/**
+ * 软失败包装：成功给 value，失败给 {error, code}——从不 reject。
+ *
+ * **`error` 在这里脱敏，这是本模块唯一的安全收口。** 这个字符串会一路流进
+ * `shapeWarnings`、`balance.error`、`models.error`（面板可见）与快照路由的响应体，
+ * 所以「下游每个 promise 都已自行脱敏」这个假设一旦有任何一个遵守者，令牌就直达
+ * 面板。契约不该靠下游的自觉：**收口处自己脱敏**，下游脱敏是纵深防御而不是前提。
+ *
+ * 代价是重复脱敏（上游多已脱敏过一次）——`redactSecrets` 是幂等的（已替换成
+ * `ms-[REDACTED]` 的内容再过一次仍是它），这点开销换掉「凭据可能外泄」这个尾部
+ * 风险划算。
+ */
 async function soft<T>(promise: Promise<T>): Promise<{ ok: true; value: T } | { ok: false; error: string; code: string }> {
   try {
     return { ok: true, value: await promise };
@@ -27,7 +38,7 @@ async function soft<T>(promise: Promise<T>): Promise<{ ok: true; value: T } | { 
     const code = (error as { code?: unknown }).code;
     return {
       ok: false,
-      error: errMsg(error),
+      error: redactSecrets(errMsg(error)),
       code: typeof code === "string" ? code : CODE.INTERNAL_ERROR
     };
   }
