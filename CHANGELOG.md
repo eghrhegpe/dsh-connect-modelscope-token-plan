@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### 第十轮：面板假文案与它的盲区
+
+第九轮在 README 与 `src/host/ms-auth.ts` 里更正了「环境变量为回退」这个反了的
+说法，但**面板上这句话的原件没改**——用户照 README 的指引操作仍被界面误导：
+`src/client/i18n.ts` 的 `token.hint`（zh 与 en 两侧）都还写着「环境变量为回退」。
+
+**改动**：`token.hint` 两侧改写为说清真话——保存即生效（写入凭据服务、不依赖
+重启）；`MODELSCOPE_API_KEY` 只在 DSH 启动时读一次，且**优先级高于**面板保存值，
+设了 env 就别再用面板存。`token.ephemeral`（只在无凭据服务的 Host 上渲染，那时
+建议 env 是对的）与 `source.env`（一个标签）不改。
+
+**门禁补洞**：`test/docs.test.mjs` 的 §3 文件清单原本只扫 `docs/`、README、
+`src/host/*.ts`——**恰好漏掉唯一直接面向用户的面**。把 `src/client/*.ts` 纳入扫描，
+并新增 §7：任何用户可见行同时出现「环境变量/MODELSCOPE_API_KEY」与
+「回退/fallback」类措辞、又没交代真实优先级 → fail。**§7 上线即抓到第九轮自己
+漏改的第二处同源假话（README.md:25「环境变量作回退」）**——§3 抓不到它是因为
+词表只钉 `dailyQuota*`；同源错误出现在另一个文件、用了另一套措辞，只有面向
+「claim 类型」而非「具体 key」的门禁能拦住。变异验证：把旧假文案塞回
+`i18n.ts:92` → §7 精确红在该行；恢复 → 全绿。
+
 ### 第九轮：真机探测证伪 `reasoning_effort` 的 400 理由，改述为实测障碍
 
 起因是用户报告「Windows 环境变量改了插件不认」，查证过程中顺带把

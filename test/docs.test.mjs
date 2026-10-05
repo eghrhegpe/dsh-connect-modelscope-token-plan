@@ -71,7 +71,11 @@ const read = (rel) => readFileSync(join(root, rel), "utf8");
     "README.md",
     "cordis.patch.yml",
     ...readdirSync(join(root, "docs")).filter((f) => f.endsWith(".md")).map((f) => `docs/${f}`),
-    ...readdirSync(join(root, "src", "host")).filter((f) => f.endsWith(".ts")).map((f) => `src/host/${f}`)
+    ...readdirSync(join(root, "src", "host")).filter((f) => f.endsWith(".ts")).map((f) => `src/host/${f}`),
+    // 用户可见文案也是「文档」：面板上的一句假话比 docs 里的一句更伤，
+    // 因为它就在用户眼前。第九轮就是靠面板文案把 env 说成「回退」发现的
+    // ——而当时这份清单里没有 i18n.ts，门禁恰好漏掉了唯一直接面向用户的面。
+    ...readdirSync(join(root, "src", "client")).filter((f) => f.endsWith(".ts")).map((f) => `src/client/${f}`)
   ];
   for (const file of files) {
     const lines = read(file).split(/\r?\n/);
@@ -208,6 +212,42 @@ const read = (rel) => readFileSync(join(root, rel), "utf8");
       assert.fail(
         `${file}:${i + 1} 声称 .github / CI 不存在，而 .github/workflows/gate.yml 就在版本库里：\n` +
           `    ${line.trim()}`
+      );
+    }
+  }
+}
+
+// ── §7 凭据分层：不许把环境变量说成「回退」 ────────────────────────────────
+//
+// 实测事实（2026-10-05，用户报告触发）：DSH 凭据服务的分层里，**启动时的环境快照
+// 压过存储文件**（`dsh-credentials-local/lib/index.js:429` 的 `inherited(ref)` 用
+// `launchEnvironmentOf(ctx).getFrom(ref, ["process"])`，读的是启动时冻结的快照）。
+// 所以「环境变量是回退」是**反的**：面板保存的值赢不过环境里的值。
+//
+// 这条错误的实际伤害：用户改了 Windows 环境变量，面板显示「未配置·来源 无」，
+// 而面板上那句提示告诉他「环境变量为回退」——两边都没说清「快照在启动时冻结」。
+// 判据是机械的：环境变量与「回退/fallback」不得出现在同一句用户可见文案里。
+{
+  // 用户可见面：client 的全部字符串（i18n 是主战场）+ README 的诚实声明。
+  const surfaces = [
+    ...readdirSync(join(root, "src", "client")).filter((f) => f.endsWith(".ts")).map((f) => `src/client/${f}`),
+    "README.md"
+  ];
+  // 只有明确在讲「读取顺序/优先级」的句子才算违规；单纯提「环境变量」这个词是对的
+  // （比如 token.ephemeral 在「没有凭据服务」时建议用环境变量，那是正确的）。
+  const FALLBACK_CLAIM = /回退|fallback|优先.*凭据服务|credentials service first/i;
+  const ENV_WORD = /环境变量|MODELSCOPE_API_KEY|environment variable/i;
+  const files = surfaces.filter((f) => existsSync(join(root, f)));
+  assert.ok(files.length > 0, "应当至少扫到一个用户可见面");
+  for (const file of files) {
+    for (const [i, line] of read(file).split(/\r?\n/).entries()) {
+      if (!ENV_WORD.test(line) || !FALLBACK_CLAIM.test(line)) continue;
+      // 允许已经交代了真实优先级的写法（明确说 env 优先级更高 / 启动时读一次）。
+      if (/优先级高|启动时读|ranks ABOVE|read once/i.test(line)) continue;
+      assert.fail(
+        `${file}:${i + 1} 把环境变量说成「回退/fallback」，但 DSH 的分层里环境快照优先级**高于**存储文件：\n` +
+          `    ${line.trim()}\n` +
+          `（改成明说「只在启动时读一次，且优先级高于此处保存的值」。）`
       );
     }
   }
