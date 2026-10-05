@@ -2,6 +2,58 @@
 
 ## [Unreleased]
 
+### 第八轮：读 peer 源码核实「重分类→重试」链路，更正「少记」的错误声明
+
+起因是评「代码功能本身是否优秀」时，发现两处承重声明互相矛盾：
+
+- `src/host/llm-retry.ts` 文件头称，重分类把误判的 QUOTA 拉回 `RATE_LIMIT`
+  **"so they reach this policy"**（即重分类让限频进入重试策略）；
+- `docs/IMPLEMENTATION.md` 称 "peer 的重试**在同一条流内部**重发，观察器只看到一条流"。
+
+若后者成立，则重分类发生在流出口、而重试在流内部，**重分类对重试完全无效**——那会把
+本插件最有价值的设计变成一句空话；同时 `llm-retry.ts` 的注释就在误导读者。两者必有一错。
+`test/peer-contract.test.mjs` 需要运行时 peer、在离线门禁之外，故此前无人判定。
+
+**读 peer 源码核实（`@deepseek-ai/dsh-llm-retry` / `dsh-agent-loop` / `dsh-llm` /
+`dsh-llm-pi-ai`，均取本机 `~/.dsh/profiles/node_modules`）**，链路如下：
+
+1. `dsh-agent-loop/lib/index.js:1116-1134` —— 流被**完整消费完**后，读 `live.finish`；
+   若 `kind === "error" | "aborted"`，以 `failure: finish.failure` 派发
+   `agent/request-error` 瀑布。`live` 是 `AssistantStreamAttempt`，`push(chunk)`
+   （`:396`）逐块消费**调用方拿到的流**——即经 `reclassifyStream` 包装后的流。
+   **故 `finish.failure.code` 是重分类之后的 code。**
+2. `dsh-llm-retry/lib/index.js:175` —— `recover()` 挂在同一个 `agent/request-error` 上；
+   `:160` 判据是 `!policy.retryableCodes.includes(failure.code) → return next()`。
+3. `dsh-llm/lib/index.js:181-183` 的 `isQuotaExceededError` 五条正则**没有一条**匹配
+   `rate limit`；而 `dsh-llm-pi-ai:1376-1387` 的 `classifyPiAiError` **先查 quota 后查
+   rate**。故魔搭那句 `"quota_exceeded_error"`（实为 rpm 语义）永远被判成 `QUOTA`，
+   而 `QUOTA` 被 `retryableCodes()` 刻意排除。
+
+**结论：`llm-retry.ts` 是对的，「同一条流内部重发」是错的。** 重试不在流内部，它产生
+**新的流**。这条链也顺带证实了 `llm-error-fix.ts` 的存在理由：**重分类不是事后分类，
+它是让限频够得着自愈路径的抢救层**——改写必须发生在 agent-loop 消费流之前，所以观察层
+套在重分类层**之外**的顺序不可反。
+
+**更正四处**（同一错误声明的传播范围）：`docs/IMPLEMENTATION.md`（记账口径段重写为
+「按流计次」并附完整链路）、`README.md:54`「诚实声明」、`cordis.patch.yml`（操作者改配置时
+唯一在手边的文档）、`src/host/usage-observer.ts` 文件头。另修
+`src/host/llm-error-fix.ts:48` 把 RATE_LIMIT 的重试误归给 "peer retryPolicy **默认**"——
+重试由本 provider **显式**的 `buildRetryPolicyConfig()` 提供，peer 默认并不含本 provider
+的调参。CHANGELOG 第五轮那条历史条目保留原文并加删除线，注明第八轮更正。
+
+**偏差方向的实质变化**：原声明「少记」（宁可少记也不虚增）在新事实下不成立——**每次
+重试各记一次 call**。按「魔搭按次数计费」的口径这**反而是对的**（每次重发都真打了一次
+上游），但它是多记而非少记，必须改写。
+
+**新增承重契约测试**（`test/retry.test.mjs`，本插件 429 自愈价值的唯一接缝，此前零覆盖）：
+`error-fix.test.mjs` 钉「改写后的 code 是什么」、`retry.test.mjs` 钉「可重试码有哪些」，
+但**「改写后的 code ∈ 可重试码」这一步没人测**——若有人把 RATE_LIMIT 移出 retryableCodes
+或改掉重分类的目标码，两侧测试都会继续全绿，而线上表现为「限频永远快失败、退避从不
+发生」。补两段：①rpm 体经 `reclassifyFinish` 改写出的 `RATE_LIMIT` 必须落在
+`retryableCodes()` 内、且等于 `QUOTA_CODES.rateLimit`；②真耗尽体不得被纠正、且 `QUOTA`
+必须留在可重试码之外。**变异测试验证**（`tools/dev/mutate.mjs`）：移出 RATE_LIMIT、
+塞入 QUOTA、改掉目标码字面量、关掉 rpm 纠正——四个变异全部 KILLED，且各由对应断言命中。
+
 ### 第七轮：删除 probe 的 `kind:"usage"` 分支，并修好变异测试工具自己
 
 起因是第六轮遗留的一个「活的死代码」：`routes/probe.ts` 的 `kind:"usage"` 分支服务端
@@ -249,8 +301,9 @@ validity 路径上同样执行）；新增 400「先鉴权后校验 → 令牌�
 - **修配置面漂移（会误导用户的那一处）**：`cordis.patch.yml` 仍写着「本地计数只覆盖
   probe、不覆盖 provider 接入后的对话推理调用」——该说法在 `usage-observer` 落地时就
   已作废，而这份文件正是操作者改配置时唯一在手边的文档。改为准确描述：计数经流出口
-  观察器覆盖**全部 DSH 魔搭调用**，并写明已知偏差方向是**少记**（peer 的重试在同一条
-  流内部重发）。
+  观察器覆盖**全部 DSH 魔搭调用**，并写明偏差方向是**按流计次**（重试由流消费完后的
+  `agent/request-error` 瀑布决定，每次重试各记一次）。~~少记（peer 的重试在同一条流
+  内部重发）~~ 这一说法于第八轮读 peer 源码后更正——见文件末尾「第八轮」。
 - **新增产物新鲜度门禁 `test/build-gate.mjs`**：`lib/` 与根 `client.js` 是故意入库的
   产物（`github:` 安装源不跑 prepack），此前 `.gitignore` 里「后续接入」的 build-gate
   并不存在——**改了`src/` 忘build，市场装到旧代码，而工作树干净、测试与typecheck 全绿，

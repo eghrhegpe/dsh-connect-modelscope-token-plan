@@ -46,8 +46,10 @@
         # 魔搭调用**，不只反映面板自身的探针。直连魔搭的其它客户端仍不计入
         # （本插件看不见它们），消耗总量以官方魔粒余额为准。
         #
-        # 已知偏差方向是**少记**：peer 的重试在同一条流内部重发，观察器只看到
-        # 一条流。详见 src/host/usage-observer.ts 文件头与 README「诚实声明」。
+        # 偏差方向是**按流计次**：重试不在流内部发生，而是流被消费完后由
+        # agent/request-error 瀑布决定重发，因而每次重试各记一次（按「魔搭按
+        # 次数计费」的口径这反而是对的）。详见 src/host/usage-observer.ts 文件头
+        # 与 README「诚实声明」。
         registerProvider: false
         # 追加可信 Host 名（默认 localhost / 127.0.0.1 / ::1，只增不替）。
         # allowedHosts: []

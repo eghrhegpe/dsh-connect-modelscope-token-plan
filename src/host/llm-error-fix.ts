@@ -45,7 +45,7 @@ export const CODE = Object.freeze({
    * `QUOTA_EXCEEDED_CODE`），列在此处纯为协议对齐与防御；本层不纠正它。
    */
   ACCOUNT_QUOTA: "ACCOUNT_QUOTA",
-  /** 瞬时限频（peer retryPolicy 默认重试，本层把误判体拉回这里）。 */
+  /** 瞬时限频：本层把误判体拉回这里，由本 provider 自己的显式 retryPolicy 退避重试。 */
   RATE_LIMIT: "RATE_LIMIT"
 });
 

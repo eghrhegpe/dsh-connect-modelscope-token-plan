@@ -35,4 +35,62 @@ import { buildRetryPolicyConfig, retryableCodes, QUOTA_CODES } from "../src/host
   assert.ok(cfg.backoff.maxDelayMs >= cfg.backoff.initialDelayMs, "退避上限 ≥ 初退");
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// 承重契约：重分类改写出的 code，必须真的落在本策略的 retryableCodes 里。
+//
+// 这是本插件全部 429 自愈价值的**唯一接缝**，而它此前没有任何测试覆盖：
+// `error-fix.test.mjs` 钉「改写后的 code 是什么」，本文件钉「可重试码有哪些」，
+// 但「改写后的 code ∈ 可重试码」这一步没人测。若哪天有人把 RATE_LIMIT 移出
+// retryableCodes、或把重分类的目标码改成别的字符串，两侧各自的测试都会继续
+// 全绿，而线上表现为「限频永远快失败、退避重试从不发生」。
+//
+// 链路依据（2026-10-05 读 peer 源码核实）：
+//   dsh-agent-loop/lib/index.js:1116-1134 —— 流被消费完后读 `live.finish`，
+//     以 `failure: finish.failure` 派发 `agent/request-error` 瀑布；
+//   dsh-llm-retry/lib/index.js:160 —— `retryableCodes.includes(failure.code)`。
+// 故流出口改写出的 code 就是重试判据本身。
+// ─────────────────────────────────────────────────────────────────────────
+
+// 1. 一个被 peer 判成 QUOTA、但实为 rpm 限频的魔搭错误体，经重分类后必须可重试。
+{
+  const { shouldReclassifyQuotaToRate, reclassifyFinish } = await import("../src/host/llm-error-fix.ts");
+  const { CODE } = await import("../src/host/llm-error-fix.ts");
+  const motorBike = {
+    message: '{"message":"rpm exhausted","type":"quota_exceeded_error","code":"8"}',
+    code: "QUOTA"
+  };
+  assert.equal(
+    shouldReclassifyQuotaToRate(motorBike),
+    true,
+    "rpm exhausted 体应被纠正为限频（魔搭把速率上限复用 quota_exceeded_error 这个名字）"
+  );
+  const finish = reclassifyFinish({
+    type: "finish",
+    reason: { kind: "error", failure: motorBike }
+  });
+  const rewritten = finish.reason.failure.code;
+  assert.equal(rewritten, "RATE_LIMIT", "改写结果就是 peer 的 RATE_LIMIT 字面量");
+  assert.ok(
+    retryableCodes().includes(rewritten),
+    `重分类后的 code ${rewritten} 必须在本策略的 retryableCodes 内，否则自愈路径断在这里`
+  );
+  assert.equal(rewritten, QUOTA_CODES.rateLimit, "改写目标与本模块的 rateLimit 码字面量一致");
+  // 同时确认它确实**不是**被排除的那个码（否则本用例会被上面的 includes 掩盖）。
+  assert.ok(!retryableCodes().includes(QUOTA_CODES.quota), "QUOTA 仍不在可重试码内");
+}
+
+// 2. 真配额耗尽**不得**被拉进可重试码：改写应为 false，且原 code 不可重试。
+{
+  const { shouldReclassifyQuotaToRate } = await import("../src/host/llm-error-fix.ts");
+  const exhausted = {
+    message: '{"message":"balance exhausted","type":"quota_exceeded_error"}',
+    code: "QUOTA"
+  };
+  assert.equal(shouldReclassifyQuotaToRate(exhausted), false, "真耗尽不纠正（重试只会延长冷却窗）");
+  assert.ok(
+    !retryableCodes().includes(QUOTA_CODES.quota),
+    "真耗尽的 QUOTA 必须落在可重试码之外——快失败并让面板说明原因"
+  );
+}
+
 console.log("retry.test.mjs: all checks passed");

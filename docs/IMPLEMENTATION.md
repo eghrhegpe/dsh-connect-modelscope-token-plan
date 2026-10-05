@@ -93,8 +93,29 @@ deps 增加 `usage?: UsageSinks` 并透传给工厂 → `index.ts` 把上面那�
 
 **记账口径**：每次流结束记一次 call（正常/用户中断/内层抛错都走同一个 `finally`），**含
 失败**——魔搭按次数计费，限频掉的请求同样是一次上游调用；token 上游没给时是 `null` 而非0。
-写 sinks 的任何失败（同步抛与异步拒）都在 `safe()` 里吞掉：**观测失败不是对话失败**。已知
-偏差方向是**少记**（peer 的重试在同一条流内部重发，观察器只看到一条流）——宁可少记也不虚增。
+写 sinks 的任何失败（同步抛与异步拒）都在 `safe()` 里吞掉：**观测失败不是对话失败**。
+
+**偏差方向是「按流计次」，重试会各记一次**（2026-10-05 读 peer 源码更正，此前本节写作「少
+记」并把重试描述成「在同一条流内部重发」——**那是错的**）。真实链路在
+`dsh-agent-loop/lib/index.js:1116-1134`：流被完整消费后，agent-loop 读 `live.finish`，以
+`failure: finish.failure` 派发 `agent/request-error` 瀑布，`dsh-llm-retry` 在其中依
+`retryableCodes.includes(failure.code)` 决定是否 `continue` **重新发起一次请求**。所以：
+
+- 重试**不在流内部**，它产生**新的流**；观察层套在流出口上，于是**每次重试各记一次 call**。
+  一次用户请求在 8 次重试后可能记 8 次——按「魔搭按次数计费」的口径这甚至是**正确的**
+  （每次重发都真打了一次上游），但它**不是**「少记」，与本节原先的声明相反。
+- 只有 `EMPTY_RESPONSE` 那类「一条流内部由 peer 自行重发」的情形才会漏记，而 peer 的重试
+  动作发生在 `dsh-llm-retry`、并非流内部，故该情形不存在。
+- `tokens` 为 `null` 这一条不受影响：限频掉的流没有 usage chunk，累计值取最后一个。
+
+**为何重分类必须套在流上**（同一链路顺带证实）：`finish.failure.code` 被 agent-loop 原样
+送进 `agent/request-error`，正是 `dsh-llm-retry` 的判据。魔搭把每分钟速率上限复用
+`quota_exceeded_error` 这个名字，而 `dsh-llm` 的 `isQuotaExceededError` 先于
+`classifyPiAiError` 的 `rate.?limit` 分支命中，故 peer 只会给出 `QUOTA`——而 `QUOTA` 被
+`retryableCodes()` 刻意排除。`reclassifyStream` 在流出口把 code 改写成 `RATE_LIMIT`，重试
+才够得着这个自愈路径：**重分类不是事后分类，它是让限频进入重试策略的抢救层**。改写必须发
+生在 agent-loop 消费流之前，因此观察层套在重分类层**之外**的顺序不可反（反了事件流与重试
+都会照 `QUOTA` 走）。
 
 ---
 
