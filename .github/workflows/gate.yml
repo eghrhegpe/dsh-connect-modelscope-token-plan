@@ -1,0 +1,46 @@
+# 离线门禁：类型检查 + 16 套件测试。
+#
+# 为什么这个 CI 只做这些：本仓库的测试全部是**离线**的（裸node + strip-types，
+# 不 import 运行时 peer），所以整套跑完在 CI 上只要几秒——没有理由不跑。
+# 真机 / e2e 冒烟（真 Host + 假魔搭平台）需要本地环境，不在这里，见
+# docs/ROADMAP.md 的 backlog。
+#
+# build-gate 在 `npm test` 尾部：它重新构建到临时目录并与入库的lib/ + client.js
+# 逐字节比对。在 CI 上这一步尤其重要——入库产物走`github:` 安装源时不跑
+# prepack，产物与源码不同源就是市场装到旧代码，而本地若产物是入库的，CI 是
+# 唯一能抓到「提交了忘build」的地方。
+# `on` 必须加引号：YAML 1.1 会把裸 on 解析成布尔 true，GitHub Actions 的
+# schema 要求字符串键，写成裸 on 的工作流不报错但**永远不触发**。
+"on":
+  push:
+    branches: [main]
+  pull_request:
+  # 手动触发：换 Node 大版本时用（engines 是 ^22.19.0 || >=24）。
+  workflow_dispatch:
+
+jobs:
+  gate:
+    name: typecheck + offline tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # lockfile 不入库（.gitignore 明确排除），所以是 `npm ci` 不成立的老场景。
+      # 门禁的判据是「测试 + typecheck + build-gate 全绿」，不是依赖树可重现。
+      - run: npm install --no-audit --no-fund
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: offline test suites
+        run: npm test
+
+      # build-gate 已在 npm test 里，但把「产物确实与源码同源」单独显式跑一遍，
+      # 失败时 GitHub 的检查名直接说明问题，不必翻日志找是哪一套件红的。
+      - name: artifact freshness (build-gate)
+        run: node test/build-gate.mjs

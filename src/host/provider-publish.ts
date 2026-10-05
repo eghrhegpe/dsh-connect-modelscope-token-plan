@@ -3,12 +3,11 @@
  *
  * 三条承重语义，每条都被一条必须继续绿的测试钉住：
  *   - publish 队列把每一次 publish 排到所有在途 publish 之后，慢 publish 不能被
- *     快 publish 覆盖（PITFALLS §18）；
+ *     快 publish 覆盖（队列语义见 `publish-core.ts` 的 `createPublishQueue`）；
  *   - `disposed` 闸拦住 dispose 之后才到的 publish，不让它注册进一个已经撤下本
  *     插件的 Host；
- *   - 单点 `registerPair`（带 factory-await + shape 检查，PITFALLS §19）被 publish
- *     与 rollback 两条路共用；失败时**恢复旧对**，坏 publish 不会把已在服务的模型
- *     也拉下来。
+ *   - 单点 `registerPair`（带 factory-await + shape 检查）被 publish 与 rollback
+ *     两条路共用；失败时**恢复旧对**，坏 publish 不会把已在服务的模型也拉下来。
  *
  * 与姊妹插件的差异**只有**：工厂导出名 `"createModelScopeAdapter"`、`registerPair`
  * 用的 `LLM_PROVIDER_ID`/`LLM_DISPLAY_NAME`、`warnBuildFailure` 的 label
@@ -160,8 +159,8 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
   /**
    * 把一个构建好的适配器交给 llm 服务，并把它的 release 函数记到 `target` 上。
    *
-   * 函数体是共享的 `registerProviderPair`（PITFALLS §19）——两个 publisher、两条
-   * 路径共用一份；这个包装只补上「这行是给哪个 provider 的」。
+   * 函数体是共享的 `registerProviderPair`——所有 publisher、两条路径共用一份；
+   * 这个包装只补上「这行是给哪个 provider 的」。
    * @param {object} llm - 注册服务。
    * @param {{providerIds: string[], adapter: unknown}} built - 要注册的东西。
    * @param {object} target - release 函数要记到哪（`state`）。
@@ -196,7 +195,7 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
     // 打开时正好从这些字段重新 publish，所以用户的允许清单编辑与最后一次拉到的
     // 目录**必须**熬过关闭期。把 `previous*` 还回去会静默丢掉两者——开关关闭期间
     // 做的保存，会在开关重新打开时消失。`swapRegistration` 的 `onRollback` 会还
-    // 它们，但只对注册真的抛了的路径（PITFALLS §19）——那种失败必须让先前在服务的
+    // 它们，但只对注册真的抛了的路径——那种失败必须让先前在服务的
     // 对继续服务，这是与「开关关着」不同的承诺。
     state.entries = Array.isArray(entries) ? entries : [];
     state.enabledIds = Array.isArray(enabledIds) ? enabledIds : [];

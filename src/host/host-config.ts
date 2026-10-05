@@ -1,9 +1,12 @@
 /**
- * 配置契约与 Host 信任围栏（与姊妹插件同构；auth 覆盖块不存在——魔搭只有
- * 一把静态令牌，没有可配置的登录流）。
+ * 配置默认值。`CONFIG_DEFAULTS` 与 `cordis.patch.yml` 由 test/config.test.mjs
+ * 双向钉住，代码与文档不会静默漂移。
  *
- * `CONFIG_DEFAULTS` 与 `cordis.patch.yml` 由 test/config.test.mjs 双向钉住，
- * 代码与文档不会静默漂移。
+ * 这里**没有**额度常数（社区快照的「每日 N 次 / 单模型 N 次」）：官方改用
+ * 「魔粒」计费后，面板头条是官方魔粒余额，次数口径的推算条已删除（见 README
+ * 「三条事实」第2 条），而本插件的独家数据是分布 / 趋势 / 429 事件流——没有
+ * 「上限」可与之相比。留着两个无人消费的常数只会在有人读配置时以为面板会拿它
+ * 算「剩余次数」。真要加阈值提醒时，那应该是读官方余额的差值，不是这两个数。
  * @module dsh-connect-modelscope-token-plan/host-config
  */
 import { str, obj, num, errMsg } from "./util.ts";
@@ -25,19 +28,15 @@ export const inject = ["webServer"];
 export const PLUGIN_VERSION = "0.1.0";
 
 /**
- * 额度常数的漂移史只进配置不进代码（README「三条事实」）：官方调整时改
- * patch 行即可，改完重装/重载生效。默认值是 2026-10 的社区快照
- * （约 2000/天、单模型约 500/天），非官方数据。
+ * 默认值。刻意不含额度常数——理由见本文件头。
+ * 面板头条是官方魔粒余额，次数口径的推算已在面板收敛时删除，这里若留着
+ * dailyQuotaTotal 之类的社区快照，只会成为「看起来能算剩余次数」的假线索。
  */
 export const CONFIG_DEFAULTS = Object.freeze({
-  /** OpenAI 兼容推理源站（模型目录 + probe）。 */
+  /** OpenAI 兼容推理源站（模型目录 + probe + provider 直连）。 */
   apiBase: "https://api-inference.modelscope.cn/v1",
   /** 站点源站，只用于面板外链（访问令牌页 / 文档）。 */
   siteBase: "https://modelscope.cn",
-  /** 每日调用额度常数（次数口径，社区快照；面板已不展示，M4 阈值提醒预留）。 */
-  dailyQuotaTotal: 2000,
-  /** 单模型每日上限常数（次数口径，同上）。 */
-  dailyQuotaPerModel: 500,
   /** 本地趋势保留天数（usage-store 天桶数量；超出即修剪）。 */
   trendDays: 14,
   /** Host 侧对 /v1/models 的缓存秒数。 */
@@ -48,7 +47,7 @@ export const CONFIG_DEFAULTS = Object.freeze({
   inferenceTimeoutMs: 30_000,
   /** 事件流保留条数（429/错误事件的环形上限）。 */
   maxEvents: 50,
-  /** provider 注册占位（v0.1 未实现，字段先钉住形状）。 */
+  /** provider 注册的 patch 默认值（面板保存值优先于它）。 */
   registerProvider: false,
   /** Host 应答的默认主机名；操作者的列表是「只增不替」。 */
   admittedHosts: ["localhost", "127.0.0.1", "[::1]", "::1"]
@@ -80,8 +79,6 @@ function assertHttpUrl(value: string, field: string): void {
 export interface ResolvedSettings {
   apiBase: string;
   siteBase: string;
-  dailyQuotaTotal: number;
-  dailyQuotaPerModel: number;
   trendDays: number;
   cacheSeconds: number;
   pollSeconds: number;
@@ -108,8 +105,6 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
       settings: {
         apiBase,
         siteBase,
-        dailyQuotaTotal: clampInt(source.dailyQuotaTotal, CONFIG_DEFAULTS.dailyQuotaTotal, 1),
-        dailyQuotaPerModel: clampInt(source.dailyQuotaPerModel, CONFIG_DEFAULTS.dailyQuotaPerModel, 1),
         trendDays: clampInt(source.trendDays, CONFIG_DEFAULTS.trendDays, 1, 365),
         cacheSeconds: clampInt(source.cacheSeconds, CONFIG_DEFAULTS.cacheSeconds, 5),
         pollSeconds: clampInt(source.pollSeconds, CONFIG_DEFAULTS.pollSeconds, 5),
@@ -127,8 +122,6 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
       settings: {
         apiBase: CONFIG_DEFAULTS.apiBase,
         siteBase: CONFIG_DEFAULTS.siteBase,
-        dailyQuotaTotal: CONFIG_DEFAULTS.dailyQuotaTotal,
-        dailyQuotaPerModel: CONFIG_DEFAULTS.dailyQuotaPerModel,
         trendDays: CONFIG_DEFAULTS.trendDays,
         cacheSeconds: CONFIG_DEFAULTS.cacheSeconds,
         pollSeconds: CONFIG_DEFAULTS.pollSeconds,

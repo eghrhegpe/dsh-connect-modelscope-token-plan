@@ -18,8 +18,19 @@ const patch = readFileSync(new URL("../cordis.patch.yml", import.meta.url), "utf
 assert.ok(patch.includes(`- id: ${name}`), "cordis.patch.yml 的 - id: 必须等于 slug");
 assert.ok(patch.includes(`name: ${name}`), "cordis.patch.yml 的 name: 必须等于 slug");
 
-// §3 patch 行里的额度常数与 CONFIG_DEFAULTS 一致（字段在两边都出现时才可比）。
-for (const key of ["dailyQuotaTotal", "dailyQuotaPerModel", "trendDays", "cacheSeconds", "pollSeconds", "inferenceTimeoutMs", "apiBase", "siteBase"]) {
+// §3 patch 行里的配置项与 CONFIG_DEFAULTS 一致（字段在两边都出现时才可比）。
+// 不含 dailyQuotaTotal / dailyQuotaPerModel：官方改魔粒计费后次数口径的推算已
+// 从面板删除，两个社区快照常数随之删掉（见 cordis.patch.yml 与 host-config.ts
+// 文件头）。这里显式钉住「它们不回来」，否则删掉容易、加回来无声。
+for (const key of ["dailyQuotaTotal", "dailyQuotaPerModel"]) {
+  assert.equal(key in CONFIG_DEFAULTS, false, `${key} 已删除，不该回到 CONFIG_DEFAULTS`);
+  // 只看**配置项行**（`key:` 顶格），不看注释——注释里可以解释这两个名字为何消失。
+  assert.ok(
+    !new RegExp(String.raw`^\s*${key}\s*:`, "m").test(patch),
+    `cordis.patch.yml 不该再有 ${key} 配置项（面板不消费它）`
+  );
+}
+for (const key of ["trendDays", "cacheSeconds", "pollSeconds", "inferenceTimeoutMs", "apiBase", "siteBase"]) {
   const patchValue = patch.match(new RegExp(String(key) + String.raw`:\s*([^#\n]+)`));
   assert.ok(patchValue, `cordis.patch.yml 缺少 ${key}（配置面与默认值必须同场）`);
   const literal = String(patchValue[1]).trim().replace(/^["']|["']$/g, "");
@@ -34,13 +45,13 @@ assert.equal(clampInt(2.9, 5, 1), 2);
 assert.equal(clampInt(99, 5, 1, 30), 30);
 
 // §5 resolveSettings：正常路径与兜底路径同构。
-const good = resolveSettings({ pollSeconds: 7, dailyQuotaTotal: 1000 });
+const good = resolveSettings({ pollSeconds: 7, trendDays: 21 });
 assert.equal(good.configError, null);
 assert.equal(good.settings.pollSeconds, 7);
-assert.equal(good.settings.dailyQuotaTotal, 1000);
+assert.equal(good.settings.trendDays, 21);
 assert.ok(good.settings.allowedHosts.has("localhost"));
-const bad = resolveSettings({ dailyQuotaTotal: -5 });
-assert.equal(bad.settings.dailyQuotaTotal, CONFIG_DEFAULTS.dailyQuotaTotal, "非法值回退默认");
+const bad = resolveSettings({ trendDays: -5 });
+assert.equal(bad.settings.trendDays, CONFIG_DEFAULTS.trendDays, "非法值回退默认");
 assert.equal(bad.settings.registerProvider, false, "registerProvider 是严格布尔");
 
 // §6 allowedHosts 只增不替。

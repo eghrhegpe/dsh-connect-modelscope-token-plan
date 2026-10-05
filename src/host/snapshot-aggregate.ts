@@ -124,7 +124,6 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
   })());
 
   const usedLocal = daily.ok ? daily.value.calls : 0;
-  const dailyLimit = settings.dailyQuotaTotal;
 
   return {
     ok: true,
@@ -140,12 +139,9 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
       ? { available: balance.value.available, total: balance.value.total, frozen: balance.value.frozen, fetchedAt: balance.value.fetchedAt, error: null }
       : { available: null, total: null, frozen: null, fetchedAt: null, error: tokenPresent ? balance.error : null },
     quota: {
-      daily: {
-        limit: dailyLimit,
-        usedLocal,
-        remainingComputed: Math.max(0, dailyLimit - usedLocal)
-      },
-      perModelLimit: settings.dailyQuotaPerModel,
+      // 只有本地次数，没有「上限」也没有「剩余」：官方改魔粒计费后，次数口径的
+      // 推算是误导（README「三条事实」第 2 条）。头条数字是上面的 balance。
+      daily: { usedLocal },
       perModel: perModel.ok ? perModel.value : [],
       countingNote: "local-counting"
     },

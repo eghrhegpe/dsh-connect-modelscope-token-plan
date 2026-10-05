@@ -2,22 +2,27 @@
  * The shared polling loop: one interval, paused while the tab is hidden, with
  * an error back-off.
  *
- * Why this module exists: the quota tab and the Raccoon tab each grew their own
- * copy of "set an interval, run `load`, clear it on unmount", and then they
- * drifted in exactly the way duplicated logic always does — the quota copy
- * learned to stop while `document.visibilityState === "hidden"`, the Raccoon
- * copy never did. A user who left the Raccoon tab open in a background window
- * kept it hammering `/api/<ns>/raccoon` every 60 s (every 2 s mid-scan) while
- * the quota tab beside it had gone quiet, and README's "polling stops when the
- * panel is closed" was only true of one of the two. Neither loop had a back-off
- * either: while the Host was down both retried at full cadence until the panel
- * closed. This module is the one definition, so the next tab inherits both
- * behaviours instead of re-deciding them.
+ * Why this module exists: a polling loop is the kind of thing every panel grows
+ * its own copy of — "set an interval, run `load`, clear it on unmount" — and the
+ * copies drift in exactly the way duplicated logic always does. The failure mode
+ * this module closes is concrete and worth naming, because both halves are
+ * silent:
  *
- * Two things it deliberately does NOT own: the request itself (each tab has its
+ *   - A copy that never learned to stop while `document.visibilityState ===
+ *     "hidden"`. A user who left that tab open in a background window kept it
+ *     hammering its route at full cadence, and "polling stops when the panel is
+ *     closed" was only ever true of the tab that happened to implement it.
+ *   - A copy with no back-off. While the Host was down both retried at full
+ *     cadence until the panel closed — the failure case is exactly the one where
+ *     nothing is listening.
+ *
+ * So this module owns both behaviours in one definition, and the next tab
+ * inherits them instead of re-deciding them.
+ *
+ * Two things it deliberately does NOT own: the request itself (the caller has its
  * own generation guard and AbortController) and the "should I even poll" answer
- * (the Raccoon tab must not poll before it is switched on). The caller passes
- * `enabled` and a stable `run`.
+ * (a tab that is switched off must not poll). The caller passes `enabled` and a
+ * stable `run`.
  *
  * @module dsh-connect-modelscope-token-plan/use-polling-interval
  */
@@ -28,9 +33,8 @@ import { useEffect, useRef } from "./runtime.ts";
  *
  * The Host owns the healthy cadence; it does not own this one, because it never
  * sees the failure — a panel whose Host is down is exactly the case where there
- * is no answer to state a cadence in. 60 s is the same floor the Raccoon poll
- * already used in its healthy state, so a failure never polls FASTER than the
- * steady state it is backing off from.
+ * is no answer to state a cadence in. 60 s is a floor chosen so a failure never
+ * polls FASTER than the steady state it is backing off from.
  */
 export const ERROR_BACKOFF_MS = 60_000;
 

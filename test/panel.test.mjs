@@ -43,7 +43,7 @@ for (const code of panel.tables.FORM_EXCLUDED_CODES) {
 }
 
 // §3 interpretSnapshot / viewOf 决策。
-const okBody = { ok: true, name: "dsh-connect-modelscope-token-plan", now: "2026-10-04T00:00:00Z", pollSeconds: 30, cacheSeconds: 60, token: { present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false }, balance: { available: 143, total: 143, frozen: 0, fetchedAt: null, error: null }, quota: { daily: { limit: 2000, usedLocal: 0, remainingComputed: 2000 }, perModelLimit: 500, perModel: [], countingNote: "local-counting" }, events: [], trend: { days: 14, buckets: [] }, models: { available: true, count: 35, sample: [], error: null }, shapeWarnings: [], quotaError: null };
+const okBody = { ok: true, name: "dsh-connect-modelscope-token-plan", now: "2026-10-04T00:00:00Z", pollSeconds: 30, cacheSeconds: 60, token: { present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false }, balance: { available: 143, total: 143, frozen: 0, fetchedAt: null, error: null }, quota: { daily: { usedLocal: 0 }, perModel: [], countingNote: "local-counting" }, events: [], trend: { days: 14, buckets: [] }, models: { available: true, count: 35, sample: [], error: null }, shapeWarnings: [], quotaError: null };
 const read = panel.helpers.interpretSnapshot
   ? null // helpers 不含 interpretSnapshot；真身在 panel 顶层
   : null;

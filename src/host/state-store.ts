@@ -162,7 +162,7 @@ export function readOptionalService(ctx: { get?: (n: string) => unknown; reflect
  * Per-profile state directory: `$DSH_HOME/state/<profile>/<name>`.
  *
  * Which states use this and which keep {@link stateDir} is a deliberate split,
- * not an inconsistency — see PITFALLS §23. Briefly: the three switch-shaped
+ * not an inconsistency. Briefly: the three switch-shaped
  * states (catalog / provider / draw) answer "what does THIS profile want", so
  * two profiles must not overwrite each other; the throttle answers "how long
  * did the upstream tell US to wait" and the credentials grant answers "who are
@@ -229,7 +229,7 @@ export async function writeStateFile(file: string, payload: string, { temporary 
 /**
  * How long a parsed state file may be reused without going back to disk.
  *
- * Two Host processes share one state directory (see PITFALLS §22), so this is
+ * Two Host processes share one state directory, so this is
  * the upper bound on "how stale this process's view can be" — long enough to
  * keep one poll self-consistent, short enough that a change made anywhere else
  * is picked up on the next tick rather than after a restart.
@@ -238,8 +238,8 @@ export const STATE_READ_TTL_MS = 1000;
 
 /**
  * 状态文件的短生命周期读缓存 —— 把 catalog / provider / draw 三个 store
- * 各自手写的「近期读过就不再读盘」收敛到这里（§22：两个 Host 进程共享同一
- * 个状态目录，缓存期就是「另一个进程的写入多久可见」的上界）。
+ * 各自手写的「近期读过就不再读盘」收敛到这里（两个 Host 进程共享同一个状态
+ * 目录，缓存期就是「另一个进程的写入多久可见」的上界）。
  *
  * 为什么要有 TTL 而不是不缓存：每次轮询都重读一遍小 JSON 本身不贵，但快照
  * 聚合在一次请求内会多次问同一个 store（目录条目、允许清单、开关），缓存让
@@ -253,7 +253,7 @@ export const STATE_READ_TTL_MS = 1000;
  * peer-free，与其余原语同纪律（不 import Host peer、离线可测）。时钟与 TTL
  * 都可注入，便于测试把缓存推进过期。
  *
- * `inheritFrom` 是 §23 的一次性迁移缝：按 profile 分段后，本 profile 的新文件
+ * `inheritFrom` 是一次性迁移缝：按 profile 分段后，本 profile 的新文件
  * 一开始并不存在，而旧版把值放在**所有 profile 共享**的目录里。给了它以后，
  * 读穿透发现自己的记录缺失时会去旧路径取一次、回填、再返回——**只尝试一次**
  * （`adopted` 标志），所以它不会变成每个 TTL 周期都多读一个文件。

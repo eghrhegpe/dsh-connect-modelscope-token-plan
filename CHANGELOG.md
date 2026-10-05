@@ -1,5 +1,29 @@
 # Changelog
 
+## [Unreleased]
+
+发布前的漂移收口与门禁补强（0.1.0 已在市场可装，故这批改动单独记一条）：
+
+- **修配置面漂移（会误导用户的那一处）**：`cordis.patch.yml` 仍写着「本地计数只覆盖
+  probe、不覆盖 provider 接入后的对话推理调用」——该说法在 `usage-observer` 落地时就
+  已作废，而这份文件正是操作者改配置时唯一在手边的文档。改为准确描述：计数经流出口
+  观察器覆盖**全部 DSH 魔搭调用**，并写明已知偏差方向是**少记**（peer 的重试在同一条
+  流内部重发）。
+- **新增产物新鲜度门禁 `test/build-gate.mjs`**：`lib/` 与根 `client.js` 是故意入库的
+  产物（`github:` 安装源不跑 prepack），此前 `.gitignore` 里「后续接入」的 build-gate
+  并不存在——**改了`src/` 忘build，市场装到旧代码，而工作树干净、测试与typecheck 全绿，
+  没有任何东西会红**。判据是**内容哈希不是 mtime**（clone / 解压都会重写时间戳）：重新
+  构建到系统临时目录，与入库产物逐字节比对，且**只读工作树**。已挂进 `npm test` 尾部。
+- **删死配置 `dailyQuotaTotal` / `dailyQuotaPerModel`**：面板早已移除次数口径的推算条，
+  「M4 阈值提醒预留」的前提（M4）已落地且阈值提醒不存在。客户端对两者零消费，故连同
+  wire 的 `quota.daily.limit` / `remainingComputed` / `quota.perModelLimit` 一并收窄为
+  `quota.daily.usedLocal` 单字段。`test/config.test.mjs` 显式钉死「它们不回来」。
+- **清悬空引用**：源码里 20+ 处引用本仓库不存在的 `PITFALLS §NN` / `docs/IMPROVEMENTS.md`、
+  以及一个本仓库没有的 Raccoon 插件的 bug 史。**保留知识、删掉死指针**——坑是什么仍写
+  在注释里，只是不再指向查不到的编号。
+- **新增 CI**（`.github/workflows/gate.yml`）：typecheck + 16 套件离线门禁。CI 是唯一能
+  抓到「提交了忘 build」的地方（本地若产物是入库的，差异只存在于提交内容里）。
+
 ## [0.1.0] — 2026-10-05
 
 **首个发布版。**把魔搭社区（modelscope.cn）API-Inference 免费额度的本地用量面板接入

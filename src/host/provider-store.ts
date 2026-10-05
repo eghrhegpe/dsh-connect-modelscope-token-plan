@@ -73,9 +73,9 @@ export const KNOWN_PROVIDER_VERSIONS: readonly number[] = [1];
 
 /**
  * The directory this plugin's state lives in — per-profile when the Host names
- * one, shared otherwise (PITFALLS §23). Unlike the THROTTLE, which is
- * deliberately shared across profiles, this answers "does THIS profile want the
- * provider registered" and must not be overwritten by the other profile's Host.
+ * one, shared otherwise. Unlike the THROTTLE, which is deliberately shared
+ * across profiles, this answers "does THIS profile want the provider registered"
+ * and must not be overwritten by the other profile's Host.
  * @param {string|null} [profile] - the profile name; `null` means shared.
  * @returns {string} the directory.
  */
@@ -134,14 +134,13 @@ export function createFileProviderStore(options: StoreOptions = {}) {
    * Write one payload atomically to this file.
    *
    * The single writer for every caller (save / saveEnabledIds / forget / the
-   * §23 legacy adoption) — several copies of this is exactly the drift this
+   * legacy adoption path) — several copies of this is exactly the drift this
    * module keeps getting bitten by.
    *
    * ADR-006 write-side guard: never overwrite a state file this build cannot
    * read. An unknown NUMERIC version means a NEWER build wrote it; clobbering
    * it destroys data we cannot even see. So the write is refused with a
-   * `degrade` signal, not a silent no-op — the PITFALLS §37 discipline: swallow
-   * the failure, not the reason.
+   * `degrade` signal, not a silent no-op — swallow the failure, not the reason.
    * @param {object} body - the JSON body to persist.
    * @returns {Promise<string|null>} the refusal reason when the write was
    *   refused (already `degrade`-logged), or `null` when it landed — the caller

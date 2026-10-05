@@ -93,7 +93,8 @@ export async function retryBounded({ attempts, delayMs, run }: {
 
 /**
  * Await 一个 OPTIONAL 的 store 调用：值缺失与 promise 拒绝都读作 fallback。
- * 注意守卫要套在**值**上而不是调用结果上（见 sensenova util.ts 的 PITFALLS §33）。
+ * 注意守卫要套在**值**上（`Promise.resolve(value).catch(...)`）而不是调用结果上
+ * ——`try { await value } catch` 漏掉「value 本身是 undefined」这条。
  */
 export function optional<T, F = null>(value: T | Promise<T> | null | undefined, fallback: F = null as F): Promise<T | F> {
   return Promise.resolve(value).catch(() => fallback) as Promise<T | F>;

@@ -23,8 +23,13 @@ build/
 # lib/ 与根 client.js 是**受版本管理的产物**（与姊妹插件 sensenova/agnes 同款
 # 决策，ADR-005）：DSH 市场的 `github:` 安装源走 pnpm git-dep，不跑 prepack——
 # lib/ 不入库则 GitHub 直装的包没有宿主入口（lib/index.js），卡片直接失效。
-# 策略：改 src/ 后跑 `npm run build`，把 lib/、client.js 与源码一起提交；
-# test/build-gate.mjs（后续接入）负责新鲜度门禁。
+# 策略：改 src/ 后跑 `npm run build`，把 lib/、client.js 与源码一起提交。
+# test/build-gate.mjs 是这条纪律的门禁：重新构建到临时目录与入库产物逐字节
+# 比对（内容哈希，不是 mtime——clone/解压都会重写时间戳）。它挂在 npm test 尾部。
+
+# build-gate 跑完即删的临时构建配置（防御性忽略：万一中途被强杀，残留物不该
+# 进版本库也不该让人困惑）。
+.build-gate.config.mjs
 
 # 编辑器与系统
 .DS_Store

@@ -80,7 +80,7 @@ assert.ok([SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, PROBE_PATH].every((p) => hand
   assert.equal(body.name, name);
   assert.equal(body.token.present, false);
   assert.equal(body.token.source, "none");
-  assert.deepEqual(body.quota.daily, { limit: 2000, usedLocal: 0, remainingComputed: 2000 });
+  assert.deepEqual(body.quota.daily, { usedLocal: 0 }, "quota.daily 只有本地次数：无 limit / remainingComputed");
   assert.equal(body.quota.countingNote, "local-counting");
   assert.deepEqual(body.events, []);
   assert.equal(body.trend.buckets.length, 14, "趋势默认 14 天");
@@ -184,7 +184,6 @@ assert.ok([SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, PROBE_PATH].every((p) => hand
     const snap = await call(handlers, SNAPSHOT_PATH, makeReq("GET"));
     assert.equal(snap.quota.daily.usedLocal, 1, "probe 成功计入本地计数");
     assert.equal(snap.quota.perModel[0].modelId, "ok/model");
-    assert.equal(snap.quota.daily.remainingComputed, 1999);
 
     const quota = await call(handlers, PROBE_PATH, makeReq("POST", { body: { modelId: "quota/model", kind: "usage" } }));
     assert.equal(quota.ok, false);

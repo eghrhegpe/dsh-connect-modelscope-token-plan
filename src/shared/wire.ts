@@ -12,14 +12,17 @@
 export const PLUGIN_ID = "dsh-connect-modelscope-token-plan";
 export const SNAPSHOT_VERSION = 1;
 
-/** 一个额度窗口的本地推算。limit 来自配置（非官方常数）。 */
-export interface QuotaWindow {
-  /** 配置的额度常数（如每日 2000）。 */
-  limit: number;
-  /** 本地计数（仅经本插件的调用）。 */
+/**
+ * 今日本地调用数（仅经本插件的调用，含失败与用户中断）。
+ *
+ * 刻意**只有**这一个数：官方改「魔粒」计费后，面板头条是官方余额，次数口径的
+ * 「剩余 / 参考上限」推算条已删除（两个单位并排是误导）。所以这里没有 `limit`，
+ * 也没有 `limit − used` 的 `remainingComputed`——`limit` 曾经是社区快照的
+ * 「每日 N 次」，非官方数据，留着会让人以为面板能算「还剩几次」。
+ */
+export interface DailyUsage {
+  /** 今日调用次数（本地口径）。 */
   usedLocal: number;
-  /** limit − usedLocal；usedLocal > limit 时为 0（不出现负数展示）。 */
-  remainingComputed: number | null;
 }
 
 /** 单模型本地用量（今日口径：calls 与 tokens 都跨日清零，见 usage-store）。 */
@@ -136,8 +139,7 @@ export interface Snapshot {
   /** 官方魔粒余额——面板的头条数字。 */
   balance: BalanceData;
   quota: {
-    daily: QuotaWindow;
-    perModelLimit: number;
+    daily: DailyUsage;
     perModel: PerModelUsage[];
     /** 固定文案键：面板渲染「本地推算」说明用，i18n 在 client 侧做。 */
     countingNote: "local-counting";

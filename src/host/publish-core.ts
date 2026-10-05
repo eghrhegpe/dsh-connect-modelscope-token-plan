@@ -5,11 +5,10 @@
  * The publisher (`provider-publish.ts` for the ModelScope provider) runs the
  * same control plane: a publish queue, a `disposed` gate, and a single-point
  * pair registration that doubles as the rollback path. Those three are
- * load-bearing and pinned by tests (PITFALLS §18 for the queue, §19 for the
- * register shape) — and the rollback is the worst place to discover a
- * divergence, because it only runs once something has already failed. When
- * they were written twice, keeping them in sync relied on comments in one file
- * pointing at the other; here there is one copy.
+ * load-bearing and pinned by tests — and the rollback is the worst place to
+ * discover a divergence, because it only runs once something has already failed.
+ * When they were written twice, keeping them in sync relied on comments in one
+ * file pointing at the other; here there is one copy.
  *
  * What is deliberately NOT shared: the publish GATE and the state shape. The
  * ModelScope side decides from "switch on?" plus a persisted catalog and an
@@ -35,12 +34,11 @@ export const ADAPTERS_UPDATED_EVENT = "llm/adapters-updated";
  * The state fields EVERY publisher shares — the part `publish-core` itself
  * reads (`createPairReleaser`, `registerProviderPair`, `unregister`).
  *
- * Declared here, not per publisher (docs/IMPROVEMENTS.md §8): the two
- * publishers' inline literals each pinned `error: null` to the type `null` and
- * `built: null`/`releaseAdapter: null` likewise, so assigning a real error
- * string or release function was a type error in both. The domain fields
- * (`entries`/`enabledIds` vs `rows`/`signature`) stay on each publisher's own
- * interface — the split publish-core.ts's header calls out.
+ * Declared here, not per publisher: the publishers' inline literals each pinned
+ * `error: null` to the type `null` and `built: null`/`releaseAdapter: null`
+ * likewise, so assigning a real error string or release function was a type
+ * error in both. The domain fields (`entries`/`enabledIds` vs `rows`/`signature`)
+ * stay on each publisher's own interface — the split this header calls out.
  */
 export interface PublisherStateBase {
   /** Whether an `llm` service answering `registerAdapter` is present. */
@@ -70,7 +68,7 @@ export const BAD_FACTORY_SHAPE_ERROR = "the adapter factory did not return { ada
  * and a switch flip or a logout can land on top of either. Two publishes
  * interleaving means the SLOWER one wins: it releases the pair the faster one
  * registered and then registers its own, so the Host serves a stale (possibly
- * empty) set while the snapshot reports the fresh one (PITFALLS §18).
+ * empty) set while the snapshot reports the fresh one.
  *
  * The chain is the same shape `token-store.ts` uses for `getToken`: no lock
  * object, and a rejected link never poisons the ones behind it.
@@ -141,8 +139,7 @@ export function createPairReleaser(state: PublisherStateBase) {
  * pair, and two copies drift: a change to the directory row made in one place
  * and not the other leaves the ROLLBACK registering a provider the publish
  * path would never have built — and a rollback only runs once something has
- * already gone wrong, which is the worst possible moment to find out
- * (PITFALLS §19).
+ * already gone wrong, which is the worst possible moment to find out.
  *
  * The releases are written straight onto `target` rather than returned: if the
  * directory call throws AFTER the adapter was registered, the adapter's
@@ -273,7 +270,6 @@ export function resolveRegistrationService({ state, getLlm, release }: { state: 
  * `state.built` is cleared along with it, and that matters: a stale `built`
  * survives into the NEXT publish as its rollback target, so a later failed
  * publish would re-register an adapter whose release has already been called.
- * (The Raccoon publisher's "no credential" branch used to leave it standing.)
  * @param {object} job
  * @param {object} job.state - the publisher state.
  * @param {() => void} job.release - the publisher's releaser.
@@ -293,12 +289,12 @@ export function unregister({ state, release, error = null }: { state: PublisherS
  * Swap the registered pair: take down the old one, register the new one, and
  * restore the OLD one if the new registration throws.
  *
- * This is the other half of PITFALLS §19, and the reason it is shared: the
- * rollback is the path that only runs once something has already gone wrong.
- * A registration that fails AFTER the old pair was released must put the
- * previous one back, or a bad publish takes down models that were already
- * serving. Written twice, the two copies drift; written once, a fix to the
- * rollback reaches both upstreams.
+ * This is the other half of the single-point `registerPair` discipline, and the
+ * reason it is shared: the rollback is the path that only runs once something
+ * has already gone wrong. A registration that fails AFTER the old pair was
+ * released must put the previous one back, or a bad publish takes down models
+ * that were already serving. Written twice, the copies drift; written once, a fix
+ * to the rollback reaches every publisher.
  *
  * @param {object} job
  * @param {object} job.llm - the registration service.

@@ -9,10 +9,10 @@
  *     `panel === null ? "config" : "panel"`;
  *   - the model preference: `panel ?? config` plus the same source probe.
  *
- * A fourth dialect existed where no config default exists at all (the Raccoon
- * switch — a profile without a saved value falls to `off` with no fallback),
- * which is exactly the shape this module does NOT serve: that one has no
- * config default to adjudicate against, so it is the caller's plain read.
+ * A fourth dialect existed where no config default exists at all (a switch that
+ * is purely panel-owned — a profile without a saved value falls to `off` with no
+ * fallback), which is exactly the shape this module does NOT serve: that one has
+ * no config default to adjudicate against, so it is the caller's plain read.
  *
  * This module is peer-free and deliberately tiny: the whole point is that a
  * switch can never again invent its own precedence dialect, and the source

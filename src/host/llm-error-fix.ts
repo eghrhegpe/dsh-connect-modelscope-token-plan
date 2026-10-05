@@ -120,7 +120,7 @@ export function extractStructuredType(message: string): string | null {
   // `match[1]` reads as `string | undefined` under `noUncheckedIndexedAccess`,
   // but group 1 always participates in this pattern, so it is never absent when
   // the regex matched. The `?? null` states that against the declared return
-  // type rather than widening it (docs/IMPROVEMENTS.md §8).
+  // type rather than widening it to `string | undefined`.
   return match ? (match[1] ?? null) : null;
 }
 
