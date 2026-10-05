@@ -21,6 +21,21 @@ import { dirname, join } from "node:path";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(join(root, rel), "utf8");
 
+// 递归枚举某目录下的 .ts——第十一轮的教训：probe.ts 住在 src/host/routes/，
+// 而各 § 的清单只 readdirSync 顶层目录，**子目录整个不在射程内**。
+const tsFiles = (dir) => {
+  const out = [];
+  const walk = (d) => {
+    for (const e of readdirSync(join(root, d), { withFileTypes: true })) {
+      const rel = `${d}/${e.name}`;
+      if (e.isDirectory()) walk(rel);
+      else if (e.name.endsWith(".ts")) out.push(rel);
+    }
+  };
+  walk(dir);
+  return out;
+};
+
 // ── §1 文档地图：README 里链到的每个仓库内文件都必须存在 ────────────────
 //
 // 只查**仓库内**相对链接（`](docs/x.md)`、`](assets/x.png)` 等）；`http(s)://`
@@ -71,11 +86,11 @@ const read = (rel) => readFileSync(join(root, rel), "utf8");
     "README.md",
     "cordis.patch.yml",
     ...readdirSync(join(root, "docs")).filter((f) => f.endsWith(".md")).map((f) => `docs/${f}`),
-    ...readdirSync(join(root, "src", "host")).filter((f) => f.endsWith(".ts")).map((f) => `src/host/${f}`),
+    ...tsFiles("src/host"),
     // 用户可见文案也是「文档」：面板上的一句假话比 docs 里的一句更伤，
     // 因为它就在用户眼前。第九轮就是靠面板文案把 env 说成「回退」发现的
     // ——而当时这份清单里没有 i18n.ts，门禁恰好漏掉了唯一直接面向用户的面。
-    ...readdirSync(join(root, "src", "client")).filter((f) => f.endsWith(".ts")).map((f) => `src/client/${f}`)
+    ...tsFiles("src/client")
   ];
   for (const file of files) {
     const lines = read(file).split(/\r?\n/);
@@ -230,7 +245,7 @@ const read = (rel) => readFileSync(join(root, rel), "utf8");
 {
   // 用户可见面：client 的全部字符串（i18n 是主战场）+ README 的诚实声明。
   const surfaces = [
-    ...readdirSync(join(root, "src", "client")).filter((f) => f.endsWith(".ts")).map((f) => `src/client/${f}`),
+    ...tsFiles("src/client"),
     "README.md"
   ];
   // 只有明确在讲「读取顺序/优先级」的句子才算违规；单纯提「环境变量」这个词是对的
@@ -248,6 +263,44 @@ const read = (rel) => readFileSync(join(root, rel), "utf8");
         `${file}:${i + 1} 把环境变量说成「回退/fallback」，但 DSH 的分层里环境快照优先级**高于**存储文件：\n` +
           `    ${line.trim()}\n` +
           `（改成明说「只在启动时读一次，且优先级高于此处保存的值」。）`
+      );
+    }
+  }
+}
+
+// ── §8 已回填的验证不许仍挂「待验证」 ──────────────────────────────────────
+//
+// claim 类型（承 §7 的教训——按类型建，不按 key 枚举）：SPIKE.md 是真机验证的
+// 登记处；凡是「尚待真机验证 / 验证后落地」这类**预告**，一旦对应结论已回填，
+// 预告本身就成了过时描述。第十一轮就是被这条抓现行：probe 的「401 先于 400」
+// 早在 2026-10-04 被真机推翻（实测缺 messages 返回 200 空壳），而 ms-auth.ts、
+// probe.ts、ROADMAP.md 三处仍写着旧预期或「尚待验证」。
+// 判据是机械的：预告语不得独立存活——同段必须有回填/推翻/历史标注。
+{
+  const PENDING_CLAIM = /尚待真机验证|验证后落地|待真机回填/;
+  // 同族 claim：探针的预期响应形状也是「预测→回填」的产物。「预期 401 先于 400」
+  // 被真机推翻后，裸写这个预期同样算过时描述（§8 两种写法一起抓）。
+  const SHAPE_CLAIM = /401\s*先于\s*400|400\s*先于\s*401/;
+  // 安全标注必须**在预告行自身**：变异测试证明段落级窗口形同虚设——一段 60 行的
+  // JSDoc 里任何角落有个「回填」字样就全段放行，孤立的旧预期照样绿。
+  const PENDING_SAFE = /真机回填|已于 2026|已回填|已落地|更正|~~|推翻|历史/;
+  const SHAPE_SAFE = /早先|曾|~~|推翻|证伪/;
+  const files = [
+    "README.md",
+    "cordis.patch.yml",
+    ...readdirSync(join(root, "docs")).filter((f) => f.endsWith(".md") && f !== "SPIKE.md").map((f) => `docs/${f}`),
+    ...tsFiles("src/host"),
+    ...tsFiles("src/client")
+  ];
+  for (const file of files) {
+    for (const [i, line] of read(file).split(/\r?\n/).entries()) {
+      const isPending = PENDING_CLAIM.test(line);
+      const isShape = !isPending && SHAPE_CLAIM.test(line);
+      if (!isPending && !isShape) continue;
+      assert.ok(
+        (isPending ? PENDING_SAFE : SHAPE_SAFE).test(line),
+        `${file}:${i + 1} 挂着已被真机推翻/回填的旧预告，同行没有历史标注——` +
+          `要么改为回填后的事实，要么加「早先…已被真机推翻」类标注：\n    ${line.trim()}`
       );
     }
   }

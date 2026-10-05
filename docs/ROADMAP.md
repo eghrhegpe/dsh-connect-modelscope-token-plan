@@ -14,7 +14,7 @@
 |---|---|---|
 | `src/host/index.ts` | thin router：注册路由 + 挂载/卸载副作用；只强依赖 `webServer` | `index.ts` |
 | `src/host/host-config.ts` | CONFIG_DEFAULTS / resolveSettings / isAdmitted 信任围栏 | `host-config.ts` |
-| `src/host/ms-auth.ts` | 令牌读取：凭据服务 `MODELSCOPE_API_KEY` 引用（kind `api-key`）→ env 回退；零额度有效性探针（400-vs-401，验证后落地） | `token-store/*` 的极简替代 |
+| `src/host/ms-auth.ts` | 令牌读取：凭据服务 `MODELSCOPE_API_KEY` 引用（kind `api-key`）→ 内存 → 环境（模块自身读序；注意 service.resolve 存在时环境快照经凭据服务**压过**面板保存值，见 README 坑与 ms-auth 文件头）；零额度有效性探针（已真机回填：401/403=坏、200/400=好） | `token-store/*` 的极简替代 |
 | `src/host/inference-client.ts` | `/v1/models`（免认证，带缓存+单飞）、429/401/400 分诊 | `console-client.ts` + `coalesced-fetch.ts` |
 | `src/host/usage-store.ts` | 本地计数：天桶（`trendDays`）、每模型计数、429 事件流；原子写 0600，profile 分段 | `state-store.ts` + `throttle-store.ts` |
 | `src/host/snapshot-aggregate.ts` | 软失败聚合：每个源 `soft()` 包裹，严格区分 null 与 0 | `snapshot-aggregate.ts` |
