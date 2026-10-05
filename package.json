@@ -3,6 +3,11 @@
   "displayName": "DSH Connect ModelScope Token Plan",
   "icon": "./icon.svg",
   "version": "0.1.0",
+  "homepage": "https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan",
+  "bugs": {
+    "url": "https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan/issues"
+  },
+  "author": "eghrhegpe",
   "description": "ModelScope (modelscope.cn) connect bundle for the Harness Web UI: a local-usage quota panel for the free API-Inference tier (daily call budget, per-model caps, 429 events, local trend) plus optional provider registration that brings ModelScope models into DSH conversation.",
   "keywords": [
     "dsh-plugin",
