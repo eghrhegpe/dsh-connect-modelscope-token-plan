@@ -1,0 +1,33 @@
+# Submission draft for awesome-dsh-plugin.
+#
+# Copy this file to `data/plugins/eghrhegpe__dsh-connect-modelscope-token-plan.yml` in a fork
+# of awesome-dsh-plugin/awesome-dsh-plugin and open a PR that adds only it. Do not edit that
+# repository's READMEs — both are generated from data/plugins/. Do not add an `npm:` field
+# (market CI rejects it); do not add screenshots here (the market reads this repo's root
+# screenshots.json instead).
+#
+# The description is read as a claim and checked against the code line by line, so every noun
+# below is one the source actually has:
+#   "official Magicube balance" — src/host/inference-client.ts:220 fetchBalance(), hitting
+#     GET {siteBase}/openapi/v1/magicubes/balance and reading {total_balance, available_balance,
+#     frozen_amount}. This is the only figure on the card that comes from ModelScope;
+#     src/host/usage-store.ts:6 says so explicitly.
+#   "for calls made through this plugin" — src/host/usage-observer.ts:9 is the only producer of
+#     the local counters; it hooks DSH's model-call lifecycle, so direct-to-ModelScope clients do
+#     not show up. README:53 carries the same qualifier.
+#   "per-model counts, a daily trend" — src/client/cards.ts:86 LocalCallCard and
+#     src/client/cards.ts:132 TrendBars.
+#   "429 rate-limit and error event list" — src/client/cards.ts:152 EventsList, kind classified
+#     in src/host/codes.ts:52 (quota vs rate_limit by response body text).
+#   "default-off switch" — README:57; the panel's 模型 tab toggle flips registerProvider and the
+#     saved value wins over cordis.patch.yml's default.
+#   "registers ModelScope models as a DSH LLM provider" — src/host/provider-publish.ts and
+#     src/host/llm-adapter.ts.
+#   "model picker" — src/host/llm-models.ts:564 rosterWithAvailability supplies the picker's
+#     offer.
+url: https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan
+name: eghrhegpe/dsh-connect-modelscope-token-plan
+category: usage
+description:
+  en: 'Shows ModelScope API-Inference free-tier usage as a plugin card on the DSH Plugins page: the official Magicube balance plus, for calls made through this plugin, per-model counts, a daily trend, and a 429 rate-limit and error event list. A default-off switch registers ModelScope models as a DSH LLM provider so they appear in the model picker.'
+  zh: '在 DSH 的 Plugins 页以插件卡显示魔搭 API-Inference 免费额度的使用情况：官方魔粒余额，加上经本插件的调用按模型的次数、按日趋势、429 限频与错误事件列表。另有一个默认关闭的开关，把魔搭模型注册为 DSH 的 LLM 提供方，注册后出现在模型选择器中。'
