@@ -251,8 +251,9 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
     },
 
     /**
-     * 一次 probe 调用：故意缺 messages 的请求，预期 401（令牌坏）先于 400
-     * （请求坏）返回，**零额度**鉴权探针（语义已真机回填，SPIKE.md）。
+     * 一次 probe 调用：故意缺 messages 的请求（**零额度**鉴权探针，语义已真机
+     * 回填，SPIKE.md）。魔搭**不先校验 messages**——缺 messages 返回 200（空壳）
+     * 而非 400，故判定规则是 401/403 = 令牌坏、200/400 = 令牌好、429 = 限频中。
      *
      * 失败抛 pluginError；调用方（probe 路由）负责把它记进事件流。
      */
@@ -265,7 +266,8 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
         throw pluginError(CODE.AUTH_ERROR, "no ModelScope token configured — set MODELSCOPE_API_KEY or save one in the panel");
       }
       const startedAt = Date.now();
-      // 故意不带 messages：鉴权先于校验时返回 401，否则 400。
+      // 故意不带 messages：魔搭**不先校验 messages**，缺 messages 返回 200（空壳）
+      // 而非 400，故 401/403 = 令牌坏、其余（含 200 空壳与 400 校验层拒绝）= 令牌好。
       const payload: Record<string, unknown> = { model: modelId, stream: false };
       const response = await fetchWithTimeout(settings.apiBase + "/chat/completions", {
         method: "POST",
