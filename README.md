@@ -6,6 +6,18 @@
 
 **状态：M4 已落地（provider 注册 + 面板「接入为 DSH 模型」），离线测试与 typecheck/build 全绿。**
 
+## 面板长什么样
+
+三个 tab：**额度 / 模型 / 接入**。
+
+**「额度」tab**——头条是官方魔粒余额（真实值），下面接本地调用分布：
+
+![「额度」tab：魔粒余额与本地调用](assets/tab-account-and-usage.png)
+
+**「模型」tab**——一行一个魔搭模型，可勾选启用；开关打开即把魔搭注册为 DSH provider：
+
+![「模型」tab：接入为DSH 模型与模型清单](assets/tab-model-list.png)
+
 ## 三条事实（写代码前先认清）
 
 1. **官方有「魔粒」余额端点**：`GET {siteBase}/openapi/v1/magicubes/balance`（Bearer 访问令牌，匿名 401），返回 `{success, data:{total_balance, available_balance, frozen_amount}}`（2026-10-04 实测，见 [docs/SPIKE.md](docs/SPIKE.md)）。推理响应本身仍不带任何额度头。

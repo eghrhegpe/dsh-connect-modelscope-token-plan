@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.1.0-M4+（未发布）— 备：把截图接进发版链路，并为「图裂」上两道门禁
+
+- **病灶**：`assets/` 下三张截图是**未跟踪状态**（`git status` 里长期挂着 `?? assets/`），
+  且 `package.json` 的 `files` 白名单只有 `lib / client.js / icon.svg / locale /
+  cordis.patch.yml / README.md / CHANGELOG.md / LICENSE`——**没有 `assets`，也没有
+  `screenshots.json`**（后者根本不存在）。三者叠加，市场投稿指南里那条
+  「截图通过插件仓库自己的 `screenshots.json` 声明」对本仓**完全落空**：清单不存在，
+  市场页只能回退去抓 README 里的图，而README 一张图都没引用。
+  姊妹插件 agnes 2026-10-01 已经在这件事上栽过一次——`assets/` 与 git 都换了新名，
+  唯独`screenshots.json` 还指着两个已不存在的文件，工作树干净、构建通过、其余检查
+  全绿，**没有任何东西在报错**，而市场按这份清单取图，推上去就是图裂。本仓那时连清单
+  都没有，属于同一个病的更早阶段：不是清单指空，是清单压根不存在。
+- **修法**：① 新建 `screenshots.json`，声明两张 tab 截图（额度/ 模型）；
+  ② `files` 白名单补`assets` 与 `screenshots.json`；③ 两张图在 README 的
+  「面板长什么样」一节里上图，`assets/` 与清单同一次提交（改名就必须同步清单）；
+  ④ 新增 `test/release.test.mjs`（已接入 `npm test`，现 15 套件）。
+- **门禁为什么是两条而不是一条**：姊妹仓把它拆成 `docs.test.mjs` 的 `SCREENSHOTS`
+  与 `package.test.mjs` 的 files覆盖检查，本仓合成一个套件但保留两段判据——「图在磁盘
+  上」与「图在npm 包里」是两个独立事实。事故当日那种「磁盘有、清单有、包里没有」的情况
+  只查磁盘是抓不到的：装到用户机器上的包缺图，而本地一切正常。逆检查也补了：
+  `assets/` 存在而 `files` 不含它时直接报红。
+- **门禁自己验过会红**：把清单改成指向 `assets/does-not-exist.png` 后跑，`exit=1` 且
+  报「清单指空，市场按它取图必然裂」；恢复后重新全绿。`npm pack --dry-run
+  --ignore-scripts` 确认包内 16 个文件里含三张图与 `screenshots.json`
+  （`prepack` 的 tsdown 构建日志会混进 stdout，解析 `--json` 时需加
+  `--ignore-scripts`绕开）。
+- **`icon-preview.png` 不进清单**：它是卡片头部的 icon + 标题条示意，不是面板 tab 截图，
+  市场按`screenshots.json` 取图时是给「AppStore 式大图」用的；混进去等于用一张装饰图
+  占掉一个图位。仍随包发布（README 与卡片都用得上）。
+
 ## 0.1.0-M4+（未发布）— 修：本地计数层在接入 provider 之后没有任何生产者
 
 - **病灶**：`usageStore.recordCall` 全仓只有 `routes/probe.ts` 一处调用，且只在
