@@ -31,7 +31,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          # 不要加 `cache: npm`：它要求工作区里有 package-lock.json，而本仓库的锁文件被
+          # .gitignore 明确排除。2026-10-05 第一次远程运行就死在这里——setup-node 直接报
+          # "Dependencies lock file is not found"，还没轮到 npm install。缓存那点收益换不来。
 
       # lockfile 不入库（.gitignore 明确排除），所以是 `npm ci` 不成立的老场景。
       # 门禁的判据是「测试 + typecheck + build-gate 全绿」，不是依赖树可重现。
