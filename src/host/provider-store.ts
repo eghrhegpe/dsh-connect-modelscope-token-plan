@@ -190,36 +190,62 @@ export function createFileProviderStore(options: StoreOptions = {}) {
    * @param {object} patch - `{ enabled?, enabledIds? }` to persist.
    * @returns {Promise<string|null>} the write refusal reason, or `null`.
    */
-  const patchPayload = async (patch: { enabled?: boolean | null; enabledIds?: string[] | null }) => {
-    const current = await parsePayload();
-    /** `undefined` keeps the stored key; `null` clears it (key absent). */
-    const body: Record<string, unknown> = { version: PROVIDER_VERSION };
-    const enabled = patch.enabled === undefined ? current.enabled : patch.enabled;
-    if (enabled !== null) body.enabled = enabled;
-    const enabledIds = patch.enabledIds === undefined ? current.enabledIds : patch.enabledIds;
-    if (enabledIds !== null) body.enabledIds = enabledIds;
-    body.updatedAt = new Date().toISOString();
-    return writePayload(body);
+  /**
+   * 读-改-写**整段排队**：两个并发patch 不能互相覆盖。
+   *
+   * 这个 store 以前完全没有写串行化（对比 `usage-store.ts` 的 `writeChain`），于是
+   * 面板开关POST 与 roster POST —— 两个独立请求，外加 `index.ts` 轮询同时在调
+   * `enabledIds()` —— 会各自读到同一个 `current`，后写的赢。实测：先存清单，再并发
+   * `save(true)` + `saveEnabledIds([...])`，其中一次保存被**整个丢掉**（用户勾了
+   * 模型又开了开关，两次点击只活下来一次）。
+   *
+   * 文件头说「两个字段必须作为一个载荷读写，否则开关会覆盖清单」——设计意图是对的，
+   * 但那只防住了「**不同字段**互相覆盖」；缺了串行化，**同字段**与「两次都基于同一
+   * 快照」的互相覆盖照样发生。链的形状与 `usage-store` 一致，且必须把
+   * `writePayload` 的版本拒绝语义一起搬进临界区（否则拒绝判断会落在锁外）。
+   *
+   * 链吞掉自己的失败继续走：一次只读 Home 上的写失败不该毒化后续所有保存。
+   */
+  let writeChain: Promise<string | null> = Promise.resolve(null);
+
+  const patchPayload = (patch: { enabled?: boolean | null; enabledIds?: string[] | null }): Promise<string | null> => {
+    const run = writeChain.then(async () => {
+      const current = await parsePayload();
+      /** `undefined` keeps the stored key; `null` clears it (key absent). */
+      const body: Record<string, unknown> = { version: PROVIDER_VERSION };
+      const enabled = patch.enabled === undefined ? current.enabled : patch.enabled;
+      if (enabled !== null) body.enabled = enabled;
+      const enabledIds = patch.enabledIds === undefined ? current.enabledIds : patch.enabledIds;
+      if (enabledIds !== null) body.enabledIds = enabledIds;
+      body.updatedAt = new Date().toISOString();
+      return writePayload(body);
+    });
+    writeChain = run.catch(() => null);
+    return run;
   };
 
   // Short-TTL read cache over the WHOLE payload: "someone else edited this
   // file" must become visible here within a tick, not after a restart, but one
   // poll must not re-read the file for every question it asks.
+  //
+  // legacy 回填是**读路径内**触发的写，所以它也走 `writeChain`：否则它与并发的
+  // `patchPayload` 竞争——用户刚保存的清单会被旧布局的继承值盖掉（而继承只发生
+  // 一次，所以那次覆盖是永久的）。
   const cache = createStateReadCache<ProviderPayload>(async () => {
     const own = await parsePayload();
     if (own.enabled !== null || own.enabledIds !== null || legacyFile === null) return own;
     const legacy = await parsePayloadFrom(legacyFile);
     if (legacy.enabled === null && legacy.enabledIds === null) return own;
-    try {
-      await writePayload({
-        version: PROVIDER_VERSION,
-        ...(legacy.enabled === null ? {} : { enabled: legacy.enabled }),
-        ...(legacy.enabledIds === null ? {} : { enabledIds: legacy.enabledIds }),
-        updatedAt: new Date().toISOString()
-      });
-    } catch {
-      // Read-only Home, or another process won the race.
-    }
+    const inherited = {
+      version: PROVIDER_VERSION,
+      ...(legacy.enabled === null ? {} : { enabled: legacy.enabled }),
+      ...(legacy.enabledIds === null ? {} : { enabledIds: legacy.enabledIds }),
+      updatedAt: new Date().toISOString()
+    };
+    await writeChain.then(
+      () => writePayload(inherited).then(() => undefined, () => undefined),
+      () => writePayload(inherited).then(() => undefined, () => undefined)
+    );
     return legacy;
   }, { ttlMs });
   const read = () => cache.read();

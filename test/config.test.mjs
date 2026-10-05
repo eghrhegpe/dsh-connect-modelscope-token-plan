@@ -54,6 +54,21 @@ const bad = resolveSettings({ trendDays: -5 });
 assert.equal(bad.settings.trendDays, CONFIG_DEFAULTS.trendDays, "非法值回退默认");
 assert.equal(bad.settings.registerProvider, false, "registerProvider 是严格布尔");
 
+// §5b 喂给定时器与超时的三个值必须有上界。
+//
+// 回归用例：这三个字段曾只传 min 不传 max（clampInt 的 max 默认 Infinity）。
+// pollSeconds × 1000 超过 2^31-1 ms 时 Node 把 setInterval 延时**钳到 1ms**
+// （TimeoutOverflowWarning）——插件变成每毫秒打一次魔搭目录，顺手把单飞缓存
+// 也打穿（缓存 TTL 60s，而请求每 1ms 一次）。inferenceTimeoutMs 同理会让每次
+// 上游请求立刻超时。实测 pollSeconds=3000000 → _idleTimeout=1。
+assert.equal(resolveSettings({ pollSeconds: 3_000_000 }).settings.pollSeconds, 3_600, "pollSeconds 超上界 → 拉回 1 小时");
+assert.equal(resolveSettings({ pollSeconds: Number.MAX_SAFE_INTEGER }).settings.pollSeconds, 3_600, "pollSeconds 极大值同样被夹");
+assert.equal(resolveSettings({ inferenceTimeoutMs: 3_000_000_000 }).settings.inferenceTimeoutMs, 600_000, "超时的上界");
+assert.equal(resolveSettings({ cacheSeconds: 999_999 }).settings.cacheSeconds, 600, "缓存秒数的上界");
+// 上界之内不该被改动（别把合法配置也夹掉）。
+assert.equal(resolveSettings({ pollSeconds: 3_600 }).settings.pollSeconds, 3_600, "上界本身是合法的");
+assert.equal(resolveSettings({ pollSeconds: 5 }).settings.pollSeconds, 5, "下界之上不改动");
+
 // §6 allowedHosts 只增不替。
 const widened = resolveSettings({ allowedHosts: ["MyHost.Example"] });
 assert.ok(widened.settings.allowedHosts.has("myhost.example"), "追加的 host 名转小写收进集合");

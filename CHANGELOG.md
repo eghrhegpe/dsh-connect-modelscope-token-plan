@@ -4,6 +4,44 @@
 
 两轮：先是发布前的漂移收口与门禁补强，再是一轮由双路深审挖出的**数据安全与红线修复**。
 
+### 第三轮：状态机与配置边界
+
+派代理专门核实三个「需要真peer 才能判定」的疑点——它在DSH 发行版里找到了
+`@deepseek-ai/dsh-llm@0.1.7-rc.2` 的**本机真实源码**，把三个疑点从推断升级为读代码判定。
+
+- **修 dispose × 在途 publish 竞态（僵尸 provider 泄漏）**：`publishProviderOnce` 只在
+  **入口**查一次 `queue.isDisposed()`，而注册发生在最后一个 await 之后（动态 import
+  是最宽的窗口）。teardown 落在这段窗口里时闸门不重跑，于是 `registerAdapter` 把适配器
+  注册进一个**已撤下本插件的 Host**，而 teardown 早已跑完、release 永不调用（全仓只有
+  一个 `.release()` 调用点）。泄漏的对持有 `tokenStore` 与整个 Cordis `ctx` 的闭包 →
+  **僵尸 provider**：picker 里那个 provider 还在、还能路由，而面板路由已注销，用户没有
+  界面能关掉它。
+  peer 源码证实 fiber 兜底救不了：`registerAdapter` 用的是 **llm 服务自己的**
+  `ctx.effect`（`.bind(this)` 到 llm 服务），插件卸载不会 dispose 它。
+  修法：在 `swapRegistration` 前补第二次闸门检查——从那里到 `registerAdapter` 之间
+  **没有任何 await**，单线程下无法插入 teardown，两种时序都正确。
+- **给 provider-store 加写串行化（并发丢数据）**：这个 store 曾**完全没有写串行化**
+  （`usage-store` 有 `writeChain`，这里没有），而 `patchPayload` 是读-改-写。面板开关
+  POST 与 roster POST 是两个独立请求，各自读到同一个 `current`，后写的赢——实测用户勾了
+  模型又开了开关，两次点击只活下来一次。文件头说「两个字段必须作为一个载荷读写」防住了
+  「不同字段互相覆盖」，但缺串行化后「两次都基于同一快照」的互相覆盖照样发生。现在整段
+  读-改-写排队，`writePayload` 的版本拒绝语义一起搬进临界区。**legacy 继承回填**（读路径
+  内触发的写）也走同一条链，否则它会覆盖用户刚保存的清单，且因只发生一次而永久生效。
+- **给三个时长配置补上界**：`cacheSeconds` / `pollSeconds` / `inferenceTimeoutMs` 的
+  `clampInt` 只传了 min（max 默认 `Infinity`）。`pollSeconds × 1000` 超过 2^31-1 ms 时
+  Node 把 `setInterval` 延时**钳到 1ms**（实测 pollSeconds=3000000 → `_idleTimeout=1`），
+  插件变成每毫秒打一次魔搭目录并打穿单飞缓存；`inferenceTimeoutMs` 同理让每次请求立刻超时。
+  现在按语义夹到轮询 1 小时 / 缓存 10 分钟 / 超时 10 分钟。
+- **新增 `test/provider-publish.test.mjs`**：`provider-publish.ts` 此前**零测试覆盖**
+  （ROADMAP 声称 `test/provider.test.mjs` 测「publish 三条语义」，实际上没有）——零覆盖
+  正是这个 P0 能藏住的原因。新套件覆盖 dispose 闸门（含 await 窗口竞态）、publish 队列
+  串行性、回滚恢复旧对、空转守卫（指标是 `registerAdapter` 次数而非工厂次数——守卫在工厂
+  之后，被跳过的 publish 也跑过工厂）、签名的确定性。
+- **核实并排除两条疑点**（避免误改）：`{...handle}` 展开丢私有字段**不是问题**——peer
+  的 `prepareCall` 返回 plain object literal（源码 `:1827-1833`），无原型方法无私有字段；
+  `resolveRegistrationService` 漏清 `state.built` **不构成 bug**——重新注册旧适配器是安全的
+  （无 DUPLICATE_ADAPTER、A 上无注册域状态、新 release 有记录），只是语义不一致。
+
 ### 第二轮：深审挖出的真问题（每条都有复现证据，不是推断）
 
 - **修 usage-store 版本守卫（数据静默销毁）**：守卫检查写在 `enqueue` 开头，而
@@ -77,7 +115,7 @@
 - **清悬空引用**：源码里 20+ 处引用本仓库不存在的 `PITFALLS §NN` / `docs/IMPROVEMENTS.md`、
   以及一个本仓库没有的 Raccoon 插件的 bug 史。**保留知识、删掉死指针**——坑是什么仍写
   在注释里，只是不再指向查不到的编号。
-- **新增 CI**（`.github/workflows/gate.yml`）：typecheck + 18 套件离线门禁。CI 是唯一能
+- **新增 CI**（`.github/workflows/gate.yml`）：typecheck + 19 套件离线门禁。CI 是唯一能
   抓到「提交了忘 build」的地方。`on` 加了引号（裸 `on` 被 YAML 1.1 解析成布尔 true，
   工作流不报错但永不触发）。
 

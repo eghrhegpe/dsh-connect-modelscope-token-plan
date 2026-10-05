@@ -106,9 +106,18 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         apiBase,
         siteBase,
         trendDays: clampInt(source.trendDays, CONFIG_DEFAULTS.trendDays, 1, 365),
-        cacheSeconds: clampInt(source.cacheSeconds, CONFIG_DEFAULTS.cacheSeconds, 5),
-        pollSeconds: clampInt(source.pollSeconds, CONFIG_DEFAULTS.pollSeconds, 5),
-        inferenceTimeoutMs: clampInt(source.inferenceTimeoutMs, CONFIG_DEFAULTS.inferenceTimeoutMs, 1_000),
+        // 三个时长都必须有上界。`clampInt` 的 max 默认 Infinity，而这三个值直接
+        // 喂给定时器与超时：
+        //   · pollSeconds × 1000 交给 setInterval，超过 2^31-1 ms 时 Node 把延时
+        //     **钳到 1ms**（TimeoutOverflowWarning）——插件变成每毫秒打一次魔搭
+        //     目录，顺手把单飞缓存也打穿（缓存 TTL 60s，请求每 1ms 一次）。
+        //     实测 pollSeconds=3000000 → _idleTimeout=1。
+        //   · inferenceTimeoutMs 同理：3e9 会让每一次上游请求**立刻**超时。
+        //   · cacheSeconds 无定时器，但同样要有界（缓存半永久 = 配置写错却看不出来）。
+        // 上界按语义取：轮询 1 小时、缓存 10 分钟、单请求超时 10 分钟。
+        cacheSeconds: clampInt(source.cacheSeconds, CONFIG_DEFAULTS.cacheSeconds, 5, 600),
+        pollSeconds: clampInt(source.pollSeconds, CONFIG_DEFAULTS.pollSeconds, 5, 3_600),
+        inferenceTimeoutMs: clampInt(source.inferenceTimeoutMs, CONFIG_DEFAULTS.inferenceTimeoutMs, 1_000, 600_000),
         maxEvents: clampInt(source.maxEvents, CONFIG_DEFAULTS.maxEvents, 1, 1_000),
         registerProvider: source.registerProvider === true,
         // 允许主机名：默认集只增不替（typo 不能把面板锁在外面）。

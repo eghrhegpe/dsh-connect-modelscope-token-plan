@@ -261,6 +261,26 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
         state.quotaSignature === quotaSignatureOf(state.unavailableIds)) {
       return { ok: true, skipped: true };
     }
+    // ── 闸门第二次检查（承重，见下）──
+    //
+    // :188 那次检查只覆盖到第一个 await，而注册发生在**最后一次** await 之后
+    // （effectivePanelSwitch → resolveAdapterFactory（首次是动态 import，最宽的窗口）
+    // → createModelScopeAdapter → swapRegistration）。teardown 落在这段窗口里时，
+    // 闸门不会重跑，于是 registerAdapter 把适配器注册进一个**已经把本插件撤下的
+    // Host**，而 teardown 早就跑完、release 永不调用——泄漏的对持有 tokenStore 与
+    // 整个 Cordis ctx 的闭包，形成僵尸 provider：picker 里那个 provider 还在、还能
+    // 路由，而面板路由已注销，用户没有界面能关掉它。
+    //
+    // 为什么 peer 的 fiber 兜底救不了：`registerAdapter` 用的是 **llm 服务自己的**
+    // `ctx.effect`（peer 源码里 `.bind(this)` 到 llm 服务），插件卸载不会dispose它，
+    // 宿主注册表永久持有该 adapter。
+    //
+    // 为什么这个位置严密：从这里到 `registerAdapter` 之间**没有任何 await**
+    // （swapRegistration 内部全是同步调用），单线程下无法插入 teardown。若teardown
+    // 发生在本次检查**之后**，它执行 release() 时能看到新写入的 releaseAdapter 并摘
+    // 掉——两种时序都正确。检查刻意留在本文件（publisher）而**不**放进
+    // `swapRegistration`：那是 publish-core 的共享骨头，不该知道 disposed 的概念。
+    if (queue.isDisposed()) return { ok: false, skipped: true };
     // swap（连同背后的 rollback）是共享机制：失败的重新注册必须恢复先前在服务的对。
     // 在这边被恢复的是目录身份——entries、允许清单与额度耗尽集合（不能还指着一个
     // 我们没能发布的集合）。

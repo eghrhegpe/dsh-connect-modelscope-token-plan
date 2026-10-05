@@ -238,7 +238,6 @@ import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_S
   assert.equal(await store.enabled(), null);
   assert.equal((await store.enabledIds()).length, 0);
   assert.equal(await store.isSet(), false);
-
   // 损坏文件 → 读作未设置（不抛）
   const brokenDir = mkdtempSync(join(tmpdir(), "ms-provider-store-broken-"));
   writeFileSync(join(brokenDir, "provider.json"), "not json{{");
@@ -246,6 +245,30 @@ import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_S
   assert.equal(await broken.enabled(), null, "损坏文件读作未设置");
   assert.equal(await broken.isSet(), false);
 
+  // §8b 并发保存不得互相覆盖（写串行化回归）。
+  //
+  // 回归用例：这个 store 曾**完全没有写串行化**（usage-store 有 writeChain，这里
+  // 没有），于是面板开关 POST 与 roster POST —— 两个独立请求——各自读到同一个
+  // `current`，后写的赢，前一次的改动被整个丢掉。实测修复前：先存清单，再并发
+  // `save(true)` + `saveEnabledIds([...])`，磁盘上只剩其中一次。
+  //
+  // 断言打在**磁盘**上（同§8 的理由：内存断言会被 cache.remember 喂成假的）。
+  {
+    const raceDir = mkdtempSync(join(tmpdir(), "ms-provider-race-"));
+    const race = createFileProviderStore({ dir: raceDir });
+    const diskOf = () => JSON.parse(readFileSync(join(raceDir, "provider.json"), "utf8"));
+    await race.saveEnabledIds(["keep/One"]);
+    await Promise.all([
+      race.save(true),
+      race.saveEnabledIds(["keep/One", "keep/Two"])
+    ]);
+    assert.equal(diskOf().enabled, true, "并发下开关必须落盘");
+    assert.deepEqual(
+      diskOf().enabledIds,
+      ["keep/One", "keep/Two"],
+      "并发下清单必须落盘，且不被另一次保存整个丢掉"
+    );
+  }
   // ADR-006 写侧守卫：新版本文件拒绝覆盖
   const futureDir = mkdtempSync(join(tmpdir(), "ms-provider-store-future-"));
   writeFileSync(join(futureDir, "provider.json"), JSON.stringify({ version: 99, enabled: true }));
