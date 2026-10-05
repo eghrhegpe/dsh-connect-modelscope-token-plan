@@ -21,7 +21,10 @@ build/
 *.tsbuildinfo
 
 # lib/ 与根 client.js 是**受版本管理的产物**（与姊妹插件 sensenova/agnes 同款
-# 决策，ADR-005）：DSH 市场的 `github:` 安装源走 pnpm git-dep，不跑 prepack——
+# 决策，ADR-005）：DSH 市场用 pnpm 安装，而 pnpm 对 git 依赖**一律拒绝执行构建
+# 脚本**（ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED，解法是把包名加进 allowBuilds
+# 白名单——装插件的用户没有这个入口）。所以「把 prepack 换成 prepare、安装时
+# 自构建」是死路：npm 在 git 安装时确实会跑 prepare（已实测），pnpm 不会。
 # lib/ 不入库则 GitHub 直装的包没有宿主入口（lib/index.js），卡片直接失效。
 # 策略：改 src/ 后跑 `npm run build`，把 lib/、client.js 与源码一起提交。
 # test/build-gate.mjs 是这条纪律的门禁：重新构建到临时目录与入库产物逐字节

@@ -20,12 +20,13 @@
 3. **额度信号不存在于推理响应**：本地计数只统计**经本插件的调用**。provider
    注册后，DSH 的全部魔搭调用都经过本插件注册的适配器，因此本地计数**覆盖全部
    DSH 魔搭调用**（这是注册 provider 的第二个收益，第一个是把模型带进模型选择器）。
+   该结论自 `src/host/usage-observer.ts` 接上流出口后才成立，**当前以该文件为准**
+   （M4 当时不成立，见下更正块）。
 
    > **更正（M4+，2026-10-05）**：上面这个结论**在 M4 当时是错的**——M4 的适配器
    > 路径并没有挂计数钩子，本地计数实际只反映探针用量。`usage-observer.ts` 接上
    > 流出口之后该结论才成立（见 [IMPLEMENTATION.md](IMPLEMENTATION.md)「本地计数层
-   > 无生产者」与 [ROADMAP.md](ROADMAP.md) M4+）。此处保留原文是契约的历史记录，
-   > **当前实现以 `src/host/usage-observer.ts` 为准**。
+   > 无生产者」与 [ROADMAP.md](ROADMAP.md) M4+）。此处保留原文是契约的历史记录。
 
 ## 1. Provider 身份（单一真源：`src/host/llm-models.ts`）
 
@@ -140,33 +141,34 @@ export function summarizeCatalog(entries: unknown): { modelCount: number; vision
 
 ## 4. 关于 `reasoning: false`（重要，别随手改成 true）
 
-魔搭 API-Inference 是**多模型代理**，是否吃 `reasoning_effort` 取决于背后
-那个具体模型；本插件无法离线得知每个 id 的档位表（sensenova 那份是拿真令牌
-逐模型探测 200/400 才钉出来的，见其 `PROBED_EFFORT`）。保守默认：
-
-- `reasoning: false` → 不发 `reasoning_effort`，模型用自己的默认；
-- `thinkingLevelMap` **不设** → picker 不给思考强度选择器。
-
-**更正（第九轮，2026-10-05，真机实测）**：上面「发错档位会整条请求 400」是**推测，且已被证伪**。
-实测（`ZhipuAI/GLM-4.7-Flash`，`POST /v1/chat/completions`）：
-
-| 请求 | 结果 |
-|---|---|
-| 不带 `reasoning_effort` | 200（可能返回空壳，见下） |
-| `reasoning_effort: "low"` | 200（真响应带 `reasoning_content`；复测同一请求变成空壳 200） |
-| `reasoning_effort: "bogus"` | **200**——参数名被接受，**值不被校验** |
-
-结论：魔搭对 `reasoning_effort` **既不校验、也不保证生效**（拼错的值同样 200，说明很可能静默忽略）。
-所以真正的障碍**不是**「错发会 400」，而是两条更硬的：
+**现行理由（2026-10-05 真机实测，取代 M4 的推测）**：魔搭对 `reasoning_effort`
+**既不校验、也不保证生效**——拼错的值 `"bogus"` 同样返回 200，说明很可能被静默
+忽略。所以真正的障碍**不是**「错发会 400」，而是两条更硬的：
 
 1. **无法区分「参数生效」与「参数被静默忽略」**——两者都是 200；
 2. **该端点在真响应与空壳 200 之间摇摆**（空壳形如
    `{"created":0,"choices":null,"usage":{全 0}}`，正是 validity 探针见到的那种形状）。
    在不稳定信道上做 A/B 探测得出的档位表不可信。
 
-`reasoning: false` **保持不动**（它本来也是无操作：模型不在 pi-ai 安装目录里，
-`base === undefined`，`dsh-llm-pi-ai` 的 `resolveModelReasoning` 会兜底成 `false`）。
-但理由从「宁可不选，不可错发」改为上面两条实测事实。**文档里必须把这条写成已知限制**。
+保守默认（`reasoning: false` **保持不动**）：
+
+- `reasoning: false` → 不发 `reasoning_effort`，模型用自己的默认；
+- `thinkingLevelMap` **不设** → picker 不给思考强度选择器。
+
+它是无操作：模型不在 pi-ai 安装目录里，`base === undefined`，`dsh-llm-pi-ai` 的
+`resolveModelReasoning` 会兜底成 `false`。**文档里必须把这条写成已知限制。**
+
+> **历史记录（M4 原文，400 理由已被证伪）**：M4 的推测是「发错档位会整条请求
+> 400」，依据是魔搭 API-Inference 是**多模型代理**，是否吃 `reasoning_effort`
+> 取决于背后那个具体模型，本插件无法离线得知每个 id 的档位表（sensenova 那份是
+> 拿真令牌逐模型探测 200/400 才钉出来的，见其 `PROBED_EFFORT`）。2026-10-05 真机
+> 验证（`ZhipuAI/GLM-4.7-Flash`，`POST /v1/chat/completions`）推翻该理由：
+>
+> | 请求 | 结果 |
+> |---|---|
+> | 不带 `reasoning_effort` | 200（可能返回空壳，见上） |
+> | `reasoning_effort: "low"` | 200（真响应带 `reasoning_content`；复测同一请求变成空壳 200） |
+> | `reasoning_effort: "bogus"` | **200**——参数名被接受，**值不被校验** |
 
 ## 5. 适配器（`src/host/llm-adapter-core.ts` 照抄、`src/host/llm-adapter.ts` 新建）
 

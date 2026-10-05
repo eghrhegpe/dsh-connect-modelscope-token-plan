@@ -1,29 +1,13 @@
 /**
- * The single adjudicator for "panel-saved value vs config default" across
- * every opt-in switch.
+ * 所有 opt-in 开关共用的唯一裁决：「面板保存值 vs 配置默认值」。
  *
- * Historically the rule was hand-copied at three call sites (the provider
- * route, the models route, the draw route) in two look-alike dialects:
+ * 规则只有一条：**面板保存值赢，否则配置默认值说了算**。来源标签（`panel` /
+ * `config`）随答案一起返回，面板才能说出是谁在管。规则收在一处，是为了让开关
+ * 再也无法各自发明一套优先级方言；`test/switch-precedence.test.mjs` 钉死这个
+ * 方言，照抄形状的新调用方会被它标成异类。
  *
- *   - the boolean switch: `(panel ?? config) === true` plus
- *     `panel === null ? "config" : "panel"`;
- *   - the model preference: `panel ?? config` plus the same source probe.
- *
- * A fourth dialect existed where no config default exists at all (a switch that
- * is purely panel-owned — a profile without a saved value falls to `off` with no
- * fallback), which is exactly the shape this module does NOT serve: that one has
- * no config default to adjudicate against, so it is the caller's plain read.
- *
- * This module is peer-free and deliberately tiny: the whole point is that a
- * switch can never again invent its own precedence dialect, and the source
- * label (`panel` / `config`) always rides with the answer so the panel can
- * say which side is in charge. `test/switch-precedence.test.mjs` pins the
- * dialect so a new caller copying the shape is the odd one out.
- *
- * 注：本模块自带的 `test/switch-precedence.test.mjs` 钉死纯函数行为；部分旧注释里
- * 提到的 `test/peer-contract.test.mjs`（钉死真 peer 的 classifyPiAiError /
- * resolveRetryPolicy 协议）依赖未 vendored 进本仓库的运行时 peer，不在 `npm test`
- * 离线门禁内。
+ * 不服务「纯面板拥有、无配置默认值」的开关——那种没有可裁决的配置默认值，
+ * 调用方直接读即可。peer-free，纯函数。
  *
  * @module dsh-connect-modelscope-token-plan/switch-precedence
  */

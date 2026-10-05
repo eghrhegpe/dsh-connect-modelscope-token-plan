@@ -4,9 +4,10 @@
 // ## 为什么这道门禁必须存在（不是洁癖）
 //
 // 本插件的 `lib/` 与根 `client.js` 是**故意入库**的产物（见 .gitignore 与
-// tsdown.config.mjs 的注释）：DSH 市场的 `github:` 安装源走 git-dep，**不跑
-// prepack**。所以 `npm run prepack` 里那句 `npm run build` 在最主要的安装路径上
-// 根本不执行——lib/ 不入库则装出来的包没有 `main` 入口，卡片直接失效；反过来，
+// tsdown.config.mjs 的注释）：DSH 市场用 pnpm 安装，而 **pnpm 对 git 依赖一律拒绝
+// 执行构建脚本**（`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`）。所以 `prepack` /
+// `prepare` 里那句 `npm run build` 在最主要的安装路径上根本不执行——lib/ 不入库则
+// 装出来的包没有 `main` 入口，卡片直接失效；反过来，
 // **改了 src/ 忘了 build，市场装出来的包跑的是旧代码，而工作树干净、测试全绿、
 // typecheck 全绿，没有任何东西会红。** 这是入库产物模式唯一的、也是致命的
 // 失效模式：一个门禁都不响的 bug。
@@ -143,12 +144,32 @@ function extractNeverBundleLiteral(source) {
 }
 
 /**
+ * 从 tsdown.config.mjs 里取出 **host 条目**的 `outputOptions` 字面量。
+ *
+ * 与 {@link extractNeverBundleLiteral} 同一个理由：产物命名方案是**判定基准**，
+ * 手抄一份会在配置漂移时静默比错东西——门禁会报「入库有/新构建无」，而真因是
+ * 两边命名方案不一致，读起来像是「改了 src 忘 build」，白烧一轮排查。
+ *
+ * 只认**host 条目**的那一个 outputOptions：它就是紧跟 `deps: { neverBundle:
+ * [...NEVER_BUNDLE] }` 的那个（client 条目的 outputOptions 后面跟的是 `clean`）。
+ * @param {string} source - tsdown.config.mjs 全文。
+ * @returns {string|null} 形如 `"entryFileNames": "index.js",\n  "chunkFileNames": "[name].js"`；取不到返回 null。
+ */
+function extractHostOutputOptionsLiteral(source) {
+  const match = source.match(
+    /outputOptions:\s*\{([\s\S]*?)\}\s*,\s*deps:\s*\{\s*neverBundle:\s*\[\.\.\.NEVER_BUNDLE\]\s*\}/
+  );
+  return match === null ? null : match[1].trim();
+}
+
+/**
  * 临时构建配置的内容：仓库配置的镜像，只把 outDir 改道到 staging。
  * @param {string} staging - POSIX 形式的 staging 绝对路径。
  * @param {string} neverBundle - NEVER_BUNDLE 字面量片段。
+ * @param {string} hostOutputOptions - host 条目的 outputOptions 字面量片段。
  * @returns {string} 配置文件源码。
  */
-function gateConfig(staging, neverBundle) {
+function gateConfig(staging, neverBundle, hostOutputOptions) {
   return `const defineConfig = (entries) => entries;
 const NEVER_BUNDLE = [${neverBundle}];
 const STAGING = ${JSON.stringify(staging)};
@@ -166,6 +187,9 @@ export default defineConfig([
     sourcemap: false,
     dts: false,
     outExtensions: () => ({ js: ".js" }),
+    outputOptions: {
+      ${hostOutputOptions}
+    },
     deps: { neverBundle: [...NEVER_BUNDLE] }
   },
   {
@@ -203,15 +227,21 @@ if (missing.length === 0) {
   // 撞上父级 package.json 而报 "Invalid package config"。staging 只用来放产物。
   const gateConfigPath = join(ROOT, ".build-gate.config.mjs");
   try {
-    const neverBundle = extractNeverBundleLiteral(
-      readFileSync(join(ROOT, "tsdown.config.mjs"), "utf8")
-    );
+    const configSource = readFileSync(join(ROOT, "tsdown.config.mjs"), "utf8");
+    const neverBundle = extractNeverBundleLiteral(configSource);
     if (neverBundle === null) {
       throw new Error(
         "tsdown.config.mjs 里读不出 NEVER_BUNDLE 字面量——构建配置改了形状，本门禁需同步维护"
       );
     }
-    writeFileSync(gateConfigPath, gateConfig(toPosix(staging), neverBundle), "utf8");
+    const hostOutputOptions = extractHostOutputOptionsLiteral(configSource);
+    if (hostOutputOptions === null) {
+      throw new Error(
+        "tsdown.config.mjs 里读不出 host 条目的 outputOptions 字面量——产物命名方案是本门禁的" +
+        "判定基准，读不到就等于不知道要比哪些文件名。构建配置改了形状，本门禁需同步维护。"
+      );
+    }
+    writeFileSync(gateConfigPath, gateConfig(toPosix(staging), neverBundle, hostOutputOptions), "utf8");
 
     execFileSync(
       process.execPath,

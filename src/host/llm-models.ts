@@ -17,9 +17,11 @@
  *    「平台没说」的诚实处理；别猜数字填。
  * 3. `reasoning: false` + **不设** `thinkingLevelMap`。魔搭 API-Inference 是
  *    多模型代理，是否吃 `reasoning_effort` 取决于背后那个具体模型，本插件
- *    无法离线得知每个 id 的档位表（sensenova 那份是拿真令牌逐模型探测 200/400
- *    才钉出来的）。「宁可不选，不可错发」：发错档位会整条请求 400，比不发
- *    差得多。M4 之后的迭代（探测出档位表）再按模型开启。
+ *    无法离线得知每个 id 的档位表（sensenova 那份是拿真令牌逐模型探测才
+ *    钉出来的）。真实障碍**不是**「发错档位会整条请求 400」——该理由于
+ *    2026-10-05 被真机证伪（`"bogus"` 同样 200，值不被校验）——而是无法区分
+ *    「参数生效」与「被静默忽略」（两者都 200），且该端点会在真响应与空壳 200
+ *    之间摇摆，档位表做不出来。理由与实测见 PROVIDER-M4.md §4。
  *
  * @module dsh-connect-modelscope-token-plan/llm-models
  */
@@ -402,8 +404,8 @@ export function toPiDescriptor(entry: CatalogEntry, options: { providerId?: stri
     // 吃图是自动的：目录的模态字段决定，用户不用逐模型配置。
     input: vision ? ["text", "image"] : ["text"],
     // §4：魔搭是多模型代理，吃不吃 reasoning_effort 取决于背后那个模型；保守
-    // 默认 false（不发 reasoning_effort，模型用自己的默认），且不设 thinkingLevelMap
-    // （picker 不提供思考强度选择器）。「宁可不选，不可错发」。
+    // 默认 false（不发该参数，模型用自己的默认），且不设 thinkingLevelMap
+    // （picker 不提供思考强度选择器）。档位表不可行——理由见 §4。
     reasoning: false,
     cost: { ...NO_COST },
     contextWindow: contextWindowOf(entry),

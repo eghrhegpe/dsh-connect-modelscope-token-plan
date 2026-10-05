@@ -23,4 +23,4 @@ M0–M4+ 全部落地，当前版本 0.2.0：
 - **余额差值趋势**：usage-store 记录每日首末两次官方余额观察，日消耗 = 首减末——OpenAPI 无记录端点，只能这样做（见 [REFERENCES.md](REFERENCES.md)）；
 - `GET /users/me` 展示账号名（官方 OpenAPI 端点，端点家族盘点见 [REFERENCES.md](REFERENCES.md)）；
 - 「每日签到领魔粒」提醒：签到是**网页行为**（登录态访问 magicube/usage 页触发，非 API），只能做面板外链 + 待办提醒（见 [REFERENCES.md](REFERENCES.md) 的 userscripts 上游）；
-- ~~按模型探测 `reasoning_effort` 档位表后，再按模型开启思考~~——**已探测，判定不可行**（2026-10-05 真机）：魔搭对 `reasoning_effort` 既不校验值（`"bogus"` 也 200）也不保证生效，且端点会在真响应与空壳 200 之间摇摆，无法区分「生效」与「静默忽略」，档位表做不出来。理由详见 [PROVIDER-M4.md](PROVIDER-M4.md) §4 的更正块。`reasoning: false` 保持。
+- ~~按模型探测 `reasoning_effort` 档位表后，再按模型开启思考~~——**已探测，判定不可行**（2026-10-05 真机）：魔搭对 `reasoning_effort` 既不校验值（`"bogus"` 也 200）也不保证生效，且端点会在真响应与空壳 200 之间摇摆，无法区分「生效」与「静默忽略」，档位表做不出来。理由详见 [PROVIDER-M4.md](PROVIDER-M4.md) §4（现行理由与历史记录）。`reasoning: false` 保持。
