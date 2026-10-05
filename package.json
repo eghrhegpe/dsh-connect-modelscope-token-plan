@@ -34,7 +34,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "build:client": "tsdown -c tsdown.config.mjs",
     "duplicate-check": "jscpd src --min-tokens 70 --reporters console-full",
-    "test": "node test/wire.test.mjs && node test/config.test.mjs && node test/usage-store.test.mjs && node test/routes.test.mjs && node test/provider.test.mjs && node test/inference-vision.test.mjs && node test/provider-routes.test.mjs && node test/panel.test.mjs && node test/doctor.test.mjs && node test/catalog.test.mjs",
+    "test": "node test/wire.test.mjs && node test/config.test.mjs && node test/usage-store.test.mjs && node test/routes.test.mjs && node test/provider.test.mjs && node test/inference-vision.test.mjs && node test/provider-routes.test.mjs && node test/panel.test.mjs && node test/doctor.test.mjs && node test/catalog.test.mjs && node test/switch-precedence.test.mjs && node test/retry.test.mjs && node test/error-fix.test.mjs",
     "doctor": "node tools/doctor.mjs",
     "doctor:json": "node tools/doctor.mjs --json",
     "build": "tsdown -c tsdown.config.mjs",

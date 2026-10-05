@@ -20,6 +20,11 @@
  * say which side is in charge. `test/switch-precedence.test.mjs` pins the
  * dialect so a new caller copying the shape is the odd one out.
  *
+ * 注：本模块自带的 `test/switch-precedence.test.mjs` 钉死纯函数行为；部分旧注释里
+ * 提到的 `test/peer-contract.test.mjs`（钉死真 peer 的 classifyPiAiError /
+ * resolveRetryPolicy 协议）依赖未 vendored 进本仓库的运行时 peer，不在 `npm test`
+ * 离线门禁内。
+ *
  * @module dsh-connect-modelscope-token-plan/switch-precedence
  */
 

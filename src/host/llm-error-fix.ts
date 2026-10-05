@@ -4,7 +4,8 @@
  * 根因（对照 peer 源码 `@deepseek-ai/dsh-llm-pi-ai` 的 `classifyPiAiError`
  * 与 `@deepseek-ai/dsh-llm` 的 `isQuotaExceededError`，二者均为**非行号锚**
  * 的稳定符号；其判定顺序与措辞命中面由 `test/peer-contract.test.mjs` 在
- * 真 peer 可达时钉死）：
+ * 真 peer 可达时钉死——该契约测试依赖未 vendored 进本仓库的运行时 peer，不在
+ * `npm test` 离线门禁内，本模块自身的纠正判定由 `test/error-fix.test.mjs` 钉死）：
  *   `classifyPiAiError` **先**跑 `isQuotaExceededError`（命中面极宽：`out of
  *   ... budget`、`balance/credits exhausted` 等），**后**才跑纯限频分支
  *   （`\b429\b|rate.?limit`）。凡是魔搭 429 体里带上一两个 “budget/credits/

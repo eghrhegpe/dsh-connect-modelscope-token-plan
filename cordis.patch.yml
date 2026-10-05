@@ -35,7 +35,12 @@
         # 把魔搭注册成 DSH 的 LLM provider（id `modelscope-token-plan`，直连
         # apiBase，OpenAI 兼容）。默认关（opt-in，与姊妹插件一致）；面板「模型」
         # tab 的「接入为 DSH 模型」开关可随时翻转，面板保存值优先于这里的默认。
-        # 注册后魔搭模型进入 DSH 模型选择器，本地计数同时覆盖全部 DSH 魔搭调用。
+        # 注册后魔搭模型进入 DSH 模型选择器。
+        #
+        # ⚠️ 计数范围：本插件的本地计数（usage-store）只覆盖**探测（probe）**调用，
+        # 不覆盖 provider 接入后的对话推理调用——那条路径走 pi-ai 的模型服务，本插件
+        # 没有在适配器里挂计数钩子（见 docs/PROVIDER-M4.md 的计数范围说明）。面板
+        # 「配额」tab 的本地计数因此只反映 probe 用量，provider 对话用量不在其中。
         registerProvider: false
         # 追加可信 Host 名（默认 localhost / 127.0.0.1 / ::1，只增不替）。
         # allowedHosts: []

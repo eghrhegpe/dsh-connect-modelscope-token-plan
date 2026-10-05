@@ -14,7 +14,7 @@
  * @module dsh-connect-modelscope-token-plan/routes/provider
  */
 import { PROVIDER_PATH } from "./paths.ts";
-import { HIDE_ALL_MODELS, rosterWithAvailability } from "../llm-models.ts";
+import { rosterWithAvailability, resolveAllowedList } from "../llm-models.ts";
 import { resolveSwitchEnabled, switchSource } from "../switch-precedence.ts";
 import { optional } from "../util.ts";
 import { writeJson, refuseMethod, withOrigin, readJsonBodyOr400, readJsonBody, redactedError, MAX_JSON_BODY_BYTES } from "./http.ts";
@@ -72,17 +72,17 @@ async function readEnabledIds(store: ProviderRouteWiring["providerStore"], publi
 }
 
 /**
- * `allowed` 的分类：空清单 = 不过滤（"all"），恰好哨兵 = 全隐藏（"none"），
- * 否则严格白名单（"list"）。
+ * `allowed` 的分类：委托给 `llm-models.ts` 的单一口径
+ * {@link resolveAllowedList}（fix D：快照与 provider 路由以前各写一套分类，会漂移）。
  *
- * `HIDE_ALL_MODELS` 是哨兵：空清单语义是「不过滤」，不能当「隐藏全部」用。
+ * 旧版 `allowedOf` 只认「恰好哨兵」为 `"none"`，`["__hide_all__","other"]` 会被错判成
+ * `"list"`；统一到 `resolveAllowedList` 后，含哨兵即 `"none"`，与 `filterByEnabled` /
+ * `isModelEnabled` 口径一致。
  * @param {string[]} enabledIds - 允许清单。
  * @returns {"all"|"none"|"list"}
  */
 function allowedOf(enabledIds: string[]): "all" | "none" | "list" {
-  if (enabledIds.length === 0) return "all";
-  if (enabledIds.length === 1 && enabledIds[0] === HIDE_ALL_MODELS) return "none";
-  return "list";
+  return resolveAllowedList(enabledIds);
 }
 
 /**
@@ -108,6 +108,7 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
     const roster = rosterWithAvailability(entries, []);
     const allowed = allowedOf(enabledIds);
     const modelCount = roster.length;
+    const allowSet = new Set(enabledIds);
     return {
       ok: true,
       enabled: resolveSwitchEnabled(panelSwitch, settings.registerProvider),
@@ -116,7 +117,13 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
       registered: publisher.state.registered === true,
       error: typeof publisher.state.error === "string" ? publisher.state.error : null,
       modelCount,
-      enabledCount: allowed === "all" ? modelCount : allowed === "none" ? 0 : enabledIds.length,
+      // 启用数：all = roster 全部；none = 0；list = roster 中真正命中的条数（按
+      // allowSet 过滤，过期的 id 不再虚增计数，与 snapshot-aggregate 口径一致）。
+      enabledCount: allowed === "all"
+        ? modelCount
+        : allowed === "none"
+          ? 0
+          : roster.filter((row) => allowSet.has(row.id)).length,
       allowed,
       enabledIds,
       roster,

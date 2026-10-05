@@ -81,6 +81,10 @@ export function retryableCodes() {
  * accepts (`mode: "normal"` → `{ mode, maxRetries, retryableCodes, backoff }`).
  * We pin it explicitly rather than passing `undefined` so a future change to
  * the peer's default policy cannot silently alter this provider's behaviour.
+ * This module's shape is pinned by `test/retry.test.mjs`; the live peer's
+ * `resolveRetryPolicy` contract is covered by `test/peer-contract.test.mjs`,
+ * which needs the runtime peer (not vendored here) and is outside the offline
+ * `npm test` gate.
  *
  * Tuned for ModelScope's daytime rate ceiling (rpm/tpm), which the peer mislabels
  * as `QUOTA` — `llm-error-fix.ts` pulls those back to `RATE_LIMIT` so they

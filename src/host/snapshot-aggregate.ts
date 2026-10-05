@@ -12,7 +12,7 @@
  * @module dsh-connect-modelscope-token-plan/snapshot-aggregate
  */
 import { PLUGIN_VERSION, name } from "./host-config.ts";
-import { rosterWithAvailability, HIDE_ALL_MODELS } from "./llm-models.ts";
+import { rosterWithAvailability, resolveAllowedList } from "./llm-models.ts";
 import { resolveSwitchEnabled, switchSource } from "./switch-precedence.ts";
 import { errMsg } from "./util.ts";
 import type { Snapshot } from "../shared/wire.ts";
@@ -30,19 +30,6 @@ async function soft<T>(promise: Promise<T>): Promise<{ ok: true; value: T } | { 
       code: typeof code === "string" ? code : "internal_error"
     };
   }
-}
-
-/**
- * 把允许清单读成 M4 的三态语义（§11 的 `allowed`）。
- *
- * 空清单 = 不过滤（`all`）；哨兵 `HIDE_ALL_MODELS` = 什么都不提供（`none`）；
- * 其余非空清单 = 严格白名单（`list`）。空清单已经占用了「不过滤」，所以「什么都不
- * 提供」必须有第二种拼写——这正是 `HIDE_ALL_MODELS` 存在的原因。
- */
-function resolveAllowed(enabledIds: string[]): "all" | "none" | "list" {
-  if (enabledIds.includes(HIDE_ALL_MODELS)) return "none";
-  if (enabledIds.length > 0) return "list";
-  return "all";
 }
 
 /**
@@ -109,8 +96,13 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     const enabled = resolveSwitchEnabled(panel, settings.registerProvider);
     const source = switchSource(panel);
     const roster = rosterWithAvailability(modelEntries, []);
-    const enabledIds = Array.isArray(publisher.state.enabledIds) ? publisher.state.enabledIds : [];
-    const allowed = resolveAllowed(enabledIds);
+    // 允许清单是落盘的（provider-store，按 profile 分段）；优先从持久层读，否则回退到
+    // 内存里 publisher.state 最近一次 publish 用的那份（fix A/E）。重启后内存那份清空，
+    // 落盘读能保住用户的清单不丢。
+    const stored = await providerStore.enabledIds().catch(() => null);
+    const enabledIds = Array.isArray(stored) ? stored
+      : (Array.isArray(publisher.state.enabledIds) ? publisher.state.enabledIds : []);
+    const allowed = resolveAllowedList(enabledIds);
     const allowSet = new Set(enabledIds);
     const enabledCount = allowed === "all"
       ? roster.length

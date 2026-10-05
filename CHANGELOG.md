@@ -1,5 +1,95 @@
 # Changelog
 
+## 0.1.0-M4+（未发布）— 修：重启丢清单、轮询空转失效、计数与分类口径漂移
+
+- **重启后允许清单静默丢失（fix A / fix C）**：`index.ts` 的目录轮询原本读
+  `publisher.state.enabledIds`（纯内存，重启即空）当允许清单，而 `provider-store`
+  其实**已落盘**该清单。改为 `runPoll()`：拉目录后从 `providerStore.enabledIds()`
+  读落盘清单（读不到回退内存），再 `publish`；挂载时立即 `runPoll()` 取代原来的空
+  `publish([], [], [])` seed，使重启的 Host 用用户保存的清单注册而非空清单。
+- **轮询签名空转从未接线（fix B）**：`provider-publish.ts` 注释声称「按
+  `catalogSignature` 比对，未变则空转」，但 `publishProviderOnce` 从不做比较——于是
+  每 30s 轮询都完整摘下再挂上同一个 provider 对，期间在途请求可能被打断。现补上：
+  - `catalogSignature` 扩展到覆盖 `name` / `contextWindow` / `maxOutputLength`（任一属性
+    翻了也会触发重建，与 descriptor 形状一致）；
+  - 注册 / 注销两条路径都在「offer 与失败状态都没变」时返回 `{ok:true, skipped:true}`
+    空转；并在每次成功 `publish` 后调用 `syncSignaturesAfterPublish(state)` 同步基准。
+- **`allowed` 三态分类两处口径漂移（fix D）**：`snapshot-aggregate.ts` 用
+  `includes(HIDE_ALL_MODELS)→"none"`，`routes/provider.ts` 用 `length===1 && [0]===sentinel
+  →"none"`——`["__hide_all__","other"]` 会被后者错判成 `"list"`。抽出唯一口径
+  `resolveAllowedList(enabledIds)`（空=`"all"` / 含哨兵=`"none"` / 其余=`"list"`）放
+  `llm-models.ts`，两处统一调用；`filterByEnabled` / `isModelEnabled` 也按哨兵=「什么都不
+  提供」对齐。
+- **`enabledCount` 两处算法不一致（fix D 续）**：`routes/provider.ts` 用
+  `enabledIds.length`（含过期/哨兵 id 虚增计数），`snapshot-aggregate.ts` 用
+  `roster∩allowSet`。现两处都按「roster 中真正命中的条数」计（`"all"`=roster 全量、
+  `"none"`=0、`"list"`=命中数）。
+- **快照读取持久清单（fix E）**：`snapshot-aggregate.ts` 原从内存
+  `publisher.state.enabledIds` 读清单，与 fix A 同样的重启丢失问题；改为优先
+  `providerStore.enabledIds()`、回退内存。
+- **`cordis.patch.yml` 计数范围写错（fix G）**：原文称注册 provider 后「本地计数同时覆盖
+  全部 DSH 魔搭调用」，但适配器路径没有挂计数钩子（grep 确认 `recordCall` 只在 probe /
+  usage-store），本地计数只反映探测用量。已更正注释，避免误导。
+- **幽灵测试引用（fix F）**：`switch-precedence.ts` / `llm-retry.ts` / `llm-error-fix.ts`
+  注释引用的 `test/peer-contract.test.mjs` 依赖未 vendored 进仓库的运行时 peer。改为说明
+  该契约测试在 `npm test` 离线门禁之外，并补上三个**纯函数**离线套件钉死本模块自身行为：
+  `test/switch-precedence.test.mjs`、`test/retry.test.mjs`、`test/error-fix.test.mjs`（已
+  接入 `package.json` 的 test 脚本，现共 13 套件）。
+- 根因：上述重启丢清单 + 空转失效均源于 M4 单次提交 `8c9dc53` 内 doc/code 漂移——
+  `docs/PROVIDER-M4.md` 写明「开关/清单落盘在 provider-store」，但 `index.ts` 轮询从未
+  迁移去读落盘值；签名比对在文档与设计意图里存在，实现却漏接。
+- 全量 `npm test`（13 套件）、`npm run typecheck`、`npm run build` 全绿。
+
+## 0.1.0-M4+（未发布）— 修：开关值写不进磁盘、保存开关会抹掉清单
+
+- **`provider-store.ts` 的 `patchPayload` 去掉 `mergeEnabled` 参数**（两个 bug 同源）。
+  该参数对 `enabled` 无条件走「保留磁盘现值」分支，于是 `save(value)` 转交的开关值
+  被**静默丢弃**：磁盘上没有 `enabled` 键时展开成 `{}`，写入的 payload 根本不含开关。
+  同时 body 只在 `patch.enabledIds !== undefined` 时才带 `enabledIds`，而 `save()`
+  只传 `{enabled}` —— 所以**每点一次开关都会把已保存的清单整个删掉**。
+- **症状**（用户报告）：点「保存清单」后上面的开关变成「未接入」、源标注「配置」、
+  状态「未注册」，但模型列表照旧完整可见。三者是同一件事的三个读数：`enabled` 从未
+  落盘 → `store.enabled()` 返回 `null` → `resolveSwitchEnabled(null, false)` = false
+  → 开关「未接入」+ 源「配置」；`publisher.state.registered` 走 `registerWanted=false`
+  分支 → 「未注册」；而 roster 渲染**不读开关**，它来自 `inference.fetchModels()` 的
+  目录条目，所以模型全在。面板当场显示正确值是因为 `cache.remember()` 绕过了磁盘，
+  30s 后轮询重读磁盘（`use-snapshot-polling.ts`）就把开关打回「未接入」。
+- **修法**：`patchPayload(patch)` 改为一参、`enabled` 与 `enabledIds` **对称**三态 ——
+  省略（`undefined`）保留磁盘键、显式 `null` 清成「键不存在」（`forget()` 的语义，
+  原先靠写 `"enabled": null` 侥幸工作）、其余值照存。三处调用点（`save` /
+  `saveEnabledIds` / `forget`）同步收敛为单参。
+- **测试**：`test/provider.test.mjs` 原先只经 `store.enabled()` 断言，而它读的是
+  `cache.remember()` 填的内存值 —— 「面板显示对了」不等于「磁盘写对了」，所以整套
+  断言对这两个 bug 全盲。新增**冷读**断言：另开一个空缓存 store 读同一目录，并直接
+  解析 `provider.json` 核对 `enabled` / `enabledIds` 两个键。已确认新断言在有 bug 的
+  代码上失败（`开关值必须落盘，不能只活在缓存里`）、在修复后通过。
+- 全量 `npm test`（10 套件）、`npm run typecheck`、`npm run build` 全绿。
+
+## 0.1.0-M4+（未发布）— 面板收敛：删目录表、推荐改小卡片
+
+- **删掉「模型目录（免认证，不耗额度）」整张表**（模型 tab 底部）。/models 是
+  免认证的裸 id 列表，而同一 tab 顶部的 provider roster 已经是「接入后实际提供
+  哪些模型」（带可用性 / 额度耗尽 / 视觉标记）——两份列表并排只会让人对着两个
+  数字发愣。`modelsBody` 现在只有「接入为 DSH 模型」一个区块；`MODELS_PATH`
+  不再被 client 读取，Host 路由保留（无请求即无成本）。
+- **逐行「试调」按钮一并删除**（usage probe）。它只服务那张表，且不在 DSH 的
+  调用路径上（真调用经 provider adapter）；**零额度的 validity probe（验令牌）
+  保留在「接入」tab**，`POST /probe` 路由不动。相邻的 `runProbe` 状态机、
+  试调结果/错误行、`probeBusy` 随之移除。
+- **高亮降级为推荐卡片**：原先 deepseek/glm/qwen 三家在目录表里整行染色（左边线
+  + 底色 + 圆角 + ★ + 品牌色加粗名），把「一批里的三个 owner」渲染成了「被选中的
+  三行」。现在 roster 每行只挂一枚 **「推荐」pill**，与既有的「视觉」pill 同构
+  （同尺寸/同底色，仅字色用品牌色）——行背景、名字字号一律不动。判定仍走
+  `FEATURED_OWNERS` + `catalogOwner`（roster 用 `row.name` 显示、`row.id` 判定）。
+- 词汇表随之收敛：删 `section.catalog`、`models.count`、`models.fetched`、
+  `models.probeUsage`、`models.probeKept`、`probe.usage`、`probe.busy`、
+  `probe.ok`（zh/en 同步）；新增 `provider.featured`。
+- 无用的目录样式删除：`trendRowFeatured`、`trendModelFeatured`、`catalogStar`；
+  新增 `modelBadgeFeatured`。`catalogOwner` / `sortCatalogIds` / `FEATURED_OWNERS`
+  仍是承重导出（roster 判定 + `test/catalog.test.mjs` 冻结的排序契约）。
+- 测试：`panel.test.mjs` / `catalog.test.mjs` 全绿（目录排序纯函数契约未动）；
+  `npm run typecheck` / `npm run build` 全绿。
+
 ## 0.1.0-M4+（未发布）— 能力分类器 `resolveModelCapability`
 
 - **把二值「是不是 vision」升级为能力路由**：新增 `resolveModelCapability(entry)`，

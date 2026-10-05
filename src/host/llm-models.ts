@@ -416,13 +416,37 @@ export function toPiDescriptor(entry: CatalogEntry, options: { providerId?: stri
 }
 
 /**
+ * 允许清单的三态归一（§11 的 `allowed`）。
+ *
+ * 全插件只有这一处口径，快照（`snapshot-aggregate.ts`）与 provider 路由
+ * （`routes/provider.ts`）都调它，杜绝两处各自写一套分类导致口径漂移：
+ *
+ *   - 空清单            → `"all"`（不过滤，提供全部模型）；
+ *   - 含哨兵 `HIDE_ALL_MODELS` → `"none"`（什么都不提供）；
+ *   - 其余非空清单      → `"list"`（严格白名单）。
+ *
+ * 空清单已经占用了「不过滤」，所以「什么都不提供」必须有第二种拼写——这正是
+ * `HIDE_ALL_MODELS` 存在的原因。注意「含哨兵但还塞了别的 id」仍按 `"none"` 处理
+ * （哨兵语义优先，与 `filterByEnabled` 的「匹配不到任何真实 id」完全一致）。
+ * @param {string[]} enabledIds - 允许清单。
+ * @returns {"all"|"none"|"list"}
+ */
+export function resolveAllowedList(enabledIds: string[]): "all" | "none" | "list" {
+  if (!Array.isArray(enabledIds) || enabledIds.length === 0) return "all";
+  if (enabledIds.includes(HIDE_ALL_MODELS)) return "none";
+  return "list";
+}
+
+/**
  * 把目录缩到用户允许的模型子集。
  *
  * **空清单 = 不过滤**：新装没做过选择，仍应提供全部模型。一旦非空就是严格白
  * 名单；名单里点名了本目录没有的 id 也无害——它只是匹配不到东西。
  *
  * `HIDE_ALL_MODELS` 哨兵靠「匹配不到任何真实 id」表达「什么都不提供」，因为空
- * 清单已经被「不过滤」占用了。
+ * 清单已经被「不过滤」占用了。这里直接走 {@link resolveAllowedList} 的三态：
+ * 含哨兵的清单属 `"none"`，过滤结果必然是空（哨兵不是真实 id），与
+ * `isModelEnabled` 的口径一致（fix D）。
  * @param {object[]} entries - 归一目录条目。
  * @param {string[]} [enabledIds] - 允许清单；空/缺省关闭过滤。
  * @returns {object[]} 仍被提供的条目，按目录顺序。
@@ -437,8 +461,8 @@ export function filterByEnabled(entries: unknown, enabledIds?: unknown): object[
 /**
  * 某个模型 id 在给定允许清单下会不会被提供。
  *
- * 与 {@link filterByEnabled} 同一套语义：空清单提供一切，非空清单是严格白名单，
- * `HIDE_ALL_MODELS` 哨兵什么都不提供。
+ * 与 {@link filterByEnabled} 同一套语义：空清单提供一切，含 `HIDE_ALL_MODELS`
+ * 哨兵（= `"none"`）什么都不提供，其余非空清单是严格白名单（fix D）。
  * @param {string[]|undefined} enabledIds - 允许清单。
  * @param {string} id - 要问的模型 id。
  * @returns {boolean}
@@ -446,6 +470,7 @@ export function filterByEnabled(entries: unknown, enabledIds?: unknown): object[
 export function isModelEnabled(enabledIds: string[] | undefined, id: string): boolean {
   const list = Array.isArray(enabledIds) ? enabledIds : [];
   if (list.length === 0) return true;
+  if (list.includes(HIDE_ALL_MODELS)) return false; // 哨兵 = 什么都不提供
   return list.includes(str(id, ""));
 }
 
