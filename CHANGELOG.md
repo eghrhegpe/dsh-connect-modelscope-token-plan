@@ -1,5 +1,12 @@
 # Changelog
 
+## [未发布]
+
+**发布状态机的两处自伤**（受控复制的分叉实证：兄弟仓各自持有对方缺的修复）
+
+- 工厂加载的 rejection 被 memo 死：`createAdapterFactoryResolver` memo 的对象是 promise 本身，一次失败的 `import()`（典型 `ERR_MODULE_NOT_FOUND`）把错误钉在槽里直到进程结束——此后每次 publish 重抛同一个错，provider 再也注册不上。要命的是 `describeBuildFailure` 的补救提示恰好叫人修安装，照提示修好依然无效、必须重启 Host。现在只 memo 成功，失败清槽、下一次 publish 真重试（与 `dsh-connect-sensenova-token-plan` 对齐）。钉子：`provider-publish.test.mjs` §9（阴性对照实测：旧代码第二次 publish `ok:false`）。
+- `!llmAvailable` 分支漏清 `state.built`：残留 `built` 成为**下一次** publish 的回滚目标，注册失败时回滚会把一只 release 已调用过的适配器重新挂上 Host——回滚只在别处已出错时才跑，是最坏的发现时机。改为统一路由 `unregister`（与 `dsh-connect-agnes-token-plan` 对齐）。钉子：`provider-publish.test.mjs` §10（阴性对照实测：旧代码 `state.built` 仍是 `{adapter…}`）。
+
 ## [0.2.0] — 2026-10-05
 
 **凭据与红线**

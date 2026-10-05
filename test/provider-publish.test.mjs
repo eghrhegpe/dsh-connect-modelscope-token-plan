@@ -282,4 +282,70 @@ function makePublisher({ llm, panel = true, gate } = {}) {
   assert.equal(st.quotaSignature, quotaSignatureOf(["a", "b"]));
 }
 
+// §9 工厂加载失败**不得**被 memo 死：一次失败的 import 只能坑一次 publish。
+//
+// `createAdapterFactoryResolver` 曾把 memo 的对象做成**promise 本身**——于是
+// 一次失败的 `import()`（典型：`ERR_MODULE_NOT_FOUND`，peer 不在解析路径里）把
+// rejection 钉在槽里直到进程结束：此后每次 publish 都重抛同一个错，provider 再也
+// 注册不上。要命的是 `describeBuildFailure` 的补救提示恰好叫人「把 peer 装到能
+// 解析的位置」——照提示修好之后**依然无效**，必须重启 Host。可恢复的安装问题
+// 代价却是重启：本用例钉住「失败之后下一次 publish 是真重试」。
+{
+  const llm = makeLlm();
+  let loads = 0;
+  const warnings = [];
+  const publisher = createProviderPublisher({
+    settings: { registerProvider: true },
+    panelSwitch: async () => true,
+    getLlm: () => llm.service,
+    loadAdapterModule: async () => {
+      loads += 1;
+      if (loads === 1) throw Object.assign(new Error("Cannot find module '@deepseek-works/pi-ai'"), { code: "ERR_MODULE_NOT_FOUND" });
+      return { createModelScopeAdapter: async () => ({ adapter: { tag: "built" }, providerIds: ["modelscope-token-plan"] }) };
+    },
+    resolveApiKey: async () => "ms-3f2a1b8c1111222233334444555566",
+    logger: { warn: (m) => warnings.push(m) }
+  });
+
+  const first = await publisher.publish(ENTRIES, [], []);
+  assert.equal(first.ok, false, "首次加载失败必须以 ok:false 报出");
+  assert.equal(warnings.length, 1, "构建失败要有告警");
+
+  const second = await publisher.publish(ENTRIES, [], []);
+  assert.equal(second.ok, true, "失败的加载不得被 memo——下一次 publish 必须真重试并成功");
+  assert.equal(llm.adapters.has("modelscope-token-plan"), true, "重试成功后 provider 注册进了 Host");
+}
+
+// §10 `!llmAvailable` 分支必须连 `state.built` 一起清。
+//
+// 残留的 `built` 会成为**下一次** publish 的回滚目标（`previousBuilt =
+// state.built`），于是注册失败时的回滚把一只 release 已经调用过的适配器重新挂上
+// Host——回滚路径只在别处已经出错时才跑，是最坏的发现时机。这条与
+// `resolveRegistrationService` 里手写的 `release(); registered = false` 对着改：
+// 统一走 `unregister` 之后 built 一并清零。
+{
+  const llm = makeLlm();
+  let llmPresent = true;
+  const publisher = createProviderPublisher({
+    settings: { registerProvider: true },
+    panelSwitch: async () => true,
+    getLlm: () => (llmPresent ? llm.service : null),
+    loadAdapterModule: async () => ({
+      createModelScopeAdapter: async () => ({ adapter: { tag: "built" }, providerIds: ["modelscope-token-plan"] })
+    }),
+    resolveApiKey: async () => "ms-3f2a1b8c1111222233334444555566"
+  });
+
+  const up = await publisher.publish(ENTRIES, [], []);
+  assert.equal(up.ok, true, "llm 在场时先注册成功");
+  assert.notEqual(publisher.state.built, null, "注册成功后 built 有值");
+
+  llmPresent = false;                       // Host 的 llm 服务此刻不在（重启/未就绪）
+  const down = await publisher.publish(ENTRIES, [], []);
+  assert.equal(down.ok, false, "无 llm 服务 → 无法注册");
+  assert.equal(publisher.state.registered, false, "登记为未注册");
+  assert.equal(publisher.state.built, null, "built 必须随注销一起清（否则成为下一次 publish 的回滚目标）");
+  assert.equal(llm.adapters.has("modelscope-token-plan"), false, "适配器已从 Host 摘下");
+}
+
 console.log("provider-publish.test.mjs: all checks passed");

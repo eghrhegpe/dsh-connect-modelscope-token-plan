@@ -176,6 +176,15 @@ export function registerProviderPair(llm: { registerAdapter: (providerIds: strin
  *
  * The module is loaded once and the factory is read off it once, so a Host
  * whose peers resolve slowly pays that cost one time, not per publish.
+ *
+ * Only the SUCCESS is memoized. The memoized value used to be the promise
+ * itself, which pinned a rejection in the slot for the life of the process:
+ * after one failed `import()` every later publish rethrew the same error and
+ * the provider could never register again — even after the operator fixed the
+ * missing peer, which is exactly the remedy this file's own
+ * `describeBuildFailure` prints for `ERR_MODULE_NOT_FOUND`. A recoverable
+ * install problem cost a Host restart. Clearing the slot on failure keeps
+ * "loaded once" for the happy path and gives the next publish a real retry.
  * @param {() => Promise<object>} loadModule - resolves the adapter module.
  * @param {string} exportName - the factory export to read off the module.
  * @returns {() => Promise<Function>} the memoized factory resolver.
@@ -184,7 +193,12 @@ export function createAdapterFactoryResolver(loadModule: () => Promise<object>, 
   let adapterFactoryPromise: Promise<((options: unknown) => unknown) | undefined> | undefined;
   return async () => {
     if (adapterFactoryPromise === undefined) {
-      adapterFactoryPromise = Promise.resolve(loadModule()).then((mod) => (mod as Record<string, unknown>)?.[exportName] as ((options: unknown) => unknown) | undefined);
+      adapterFactoryPromise = Promise.resolve(loadModule())
+        .then((mod) => (mod as Record<string, unknown>)?.[exportName] as ((options: unknown) => unknown) | undefined)
+        .catch((error: unknown) => {
+          adapterFactoryPromise = undefined;
+          throw error;
+        });
     }
     return adapterFactoryPromise;
   };
@@ -246,6 +260,13 @@ export function warnBuildFailure(logger: { warn?: (message: string) => void } | 
  * fact about the Host — not about the provider — so it is one copy: a Host
  * with no `llm` service gets no registration and a stated reason, never a
  * half-built one.
+ *
+ * The absence routes through {@link unregister}, not a hand-rolled
+ * `release(); registered = false`: `state.built` must go down with it. A
+ * stale `built` survives into the NEXT publish as its rollback target, so a
+ * later failed publish would re-register an adapter whose release has already
+ * been called — a rollback path running against a dead pair, which is the
+ * worst possible moment to discover the divergence.
  * @param {object} job
  * @param {object} job.state - the publisher state.
  * @param {(service: string) => object|null} job.getLlm - the service resolver.
@@ -256,9 +277,7 @@ export function resolveRegistrationService({ state, getLlm, release }: { state: 
   const llm = getLlm("llm");
   state.llmAvailable = llm !== null && typeof llm.registerAdapter === "function";
   if (!state.llmAvailable) {
-    release();
-    state.registered = false;
-    state.error = NO_LLM_SERVICE_ERROR;
+    unregister({ state, release, error: NO_LLM_SERVICE_ERROR });
     return null;
   }
   return llm;
