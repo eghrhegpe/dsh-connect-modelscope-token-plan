@@ -243,10 +243,13 @@ const tsFiles = (dir) => {
 // 而面板上那句提示告诉他「环境变量为回退」——两边都没说清「快照在启动时冻结」。
 // 判据是机械的：环境变量与「回退/fallback」不得出现在同一句用户可见文案里。
 {
-  // 用户可见面：client 的全部字符串（i18n 是主战场）+ README 的诚实声明。
+  // 用户可见面：client 的全部字符串（i18n 是主战场）+ README 的诚实声明
+  // + cordis.patch.yml——操作者改配置时唯一在手边的文件，第十一轮发现它自己
+  // 也挂着「env 是回退」（§7 建时清单没含它，恰好漏掉最该正确的那份）。
   const surfaces = [
     ...tsFiles("src/client"),
-    "README.md"
+    "README.md",
+    "cordis.patch.yml"
   ];
   // 只有明确在讲「读取顺序/优先级」的句子才算违规；单纯提「环境变量」这个词是对的
   // （比如 token.ephemeral 在「没有凭据服务」时建议用环境变量，那是正确的）。

@@ -4,9 +4,10 @@
 # 并可选把魔搭注册成 OpenAI 兼容 LLM provider。以下全是普通配置：在这里改
 # （或在 profile 的 cordis.patch.yml 里覆盖同 id 字段）后重装/重载生效。
 #
-# 魔搭访问令牌（个人中心「访问令牌」，形如 ms-…）不在这里配置：插件默认读
-# DSH 凭据服务里的 MODELSCOPE_API_KEY 引用（本机已存在），env
-# MODELSCOPE_API_KEY 是回退。见 docs/SPIKE.md 与 README.md。
+# 魔搭访问令牌（个人中心「访问令牌」，形如 ms-…）不在这里配置：插件读 DSH
+# 凭据服务里的 MODELSCOPE_API_KEY 引用（面板保存即生效）。环境变量
+# MODELSCOPE_API_KEY 只在启动时读一次、且优先级高于引用值——设了它就别再用面板存
+# （见 README「凭据分层有个坑」与 ms-auth.ts 文件头）。见 docs/SPIKE.md 与 README.md。
 - insert:
     - id: dsh-connect-modelscope-token-plan
       name: dsh-connect-modelscope-token-plan
@@ -25,6 +26,8 @@
         # ------------------------------------------------------------------
         # 本地趋势保留天数（插件私有状态文件里的天桶数量，与上游无关）。
         trendDays: 14
+        # 429/错误事件环形缓冲的上限（面板只展示最近的）。上界 1000，硬夹。
+        maxEvents: 50
         # Host 侧对 /v1/models 的缓存秒数；面板脚注直接引用此值。上界 600。
         cacheSeconds: 60
         # 面板轮询间隔，由 Host 下发、面板跟随。上界 3600（1 小时）。

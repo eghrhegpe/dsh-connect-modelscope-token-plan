@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### 第十二轮：cordis.patch.yml 自己的「env 是回退」，与 maxEvents 的补票
+
+继续排查过时内容，命中两处「灯下黑」：
+
+- **§7 的清单不含 cordis.patch.yml 本身**。`cordis.patch.yml:7-9` 一直写着
+  「env MODELSCOPE_API_KEY 是回退」——第十轮建 §7 时 surfaces 只列了 client 与
+  README，唯独漏掉**操作者改配置时唯一在手边的文件**。改为陈述真实分层
+  （启动时读一次、优先级高于引用值、设了就别用面板存），并把 cordis.patch.yml
+  纳入 §7 清单；变异验证（旧文案塞回 → 门禁红）KILLED。
+- **`maxEvents` 自创面以来从未进文档与测试钉子**（第一轮锐评点名的配置缺口）。
+  `CONFIG_DEFAULTS.maxEvents = 50`（host-config.ts:49，clamp 1..1000）此前在
+  patch 文件、README、config.test 钉子里全部缺席。补为 live 配置项 + 注释，
+  并加进 `test/config.test.mjs` 的 patch↔defaults 钉子清单；变异验证
+  （patch 改成 99 → 红）KILLED。
+
 ### 第十一轮：被真机推翻的旧预期，散落在四个文件里
 
 用户要求继续排查过时描述。这轮扫的不是 key/数字，而是**「预测 → 真机回填」类

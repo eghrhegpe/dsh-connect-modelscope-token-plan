@@ -30,7 +30,7 @@ for (const key of ["dailyQuotaTotal", "dailyQuotaPerModel"]) {
     `cordis.patch.yml 不该再有 ${key} 配置项（面板不消费它）`
   );
 }
-for (const key of ["trendDays", "cacheSeconds", "pollSeconds", "inferenceTimeoutMs", "apiBase", "siteBase"]) {
+for (const key of ["trendDays", "cacheSeconds", "pollSeconds", "inferenceTimeoutMs", "maxEvents", "apiBase", "siteBase"]) {
   const patchValue = patch.match(new RegExp(String(key) + String.raw`:\s*([^#\n]+)`));
   assert.ok(patchValue, `cordis.patch.yml 缺少 ${key}（配置面与默认值必须同场）`);
   const literal = String(patchValue[1]).trim().replace(/^["']|["']$/g, "");
