@@ -56,9 +56,12 @@ npm whoami --registry=https://registry.npmjs.org   # 401 说明没登录
 **未登录时的表象会误导你**：`npm publish` 报的`404 Not Found ... you do not have permission`
 **不是「包不存在」**，是「你没有发布权限」。别去查包名、别重建tarball，去登录。
 
-**本机2026-10-05 实测**：查询 registry 时报 `DEPTH_ZERO_SELF_SIGNED_CERT`（自签证书）。
-这是 TLS 拦截导致的，**不是包不存在**。发版前需先解决（本机装企业根证书、或给 npm 配
-`strict-ssl=false`），否则第 5 步会卡住。
+**TLS 拦截在本机是偶发的**：2026-10-05 曾报 `DEPTH_ZERO_SELF_SIGNED_CERT`，同日复查时
+`strict-ssl=true` 下 `npm view … --registry=https://registry.npmjs.org` 直读成功、`npm whoami`
+正常——**不是常态，别为它改全局 npm 配置**（`npm config set strict-ssl false` 会把本机所有
+校验一起关掉）。若 publish 时真的再报证书错，用**单条命令级**开关：
+`npm publish --registry=https://registry.npmjs.org --strict-ssl=false`。注意它与登录无关：
+`npm login` 修的是 401，修不了证书；whoami 能回用户名就不需要 login。
 
 ## 每次发布的完整步骤
 
