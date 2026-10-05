@@ -70,13 +70,16 @@ npm view dsh-connect-modelscope-token-plan versions --registry=https://registry.
 发布：
 
 ```powershell
-npm publish --registry=https://registry.npmjs.org --access public
+npm publish --registry=https://registry.npmjs.org
 ```
 
-> `--access public` 不能省——npm 对未登记的包名默认按 restricted 处理。
-> 若真报 `DEPTH_ZERO_SELF_SIGNED_CERT`（本机 2026-10-05 出现过、同日复查已不复现），
-> 只在**这一条命令**上加 `--strict-ssl=false`，**不要** `npm config set strict-ssl false`
-> 改全局：那会把本机所有 TLS 校验一起关掉。
+> 就这一条，不用加别的。`--access public` **不是必需的**：包名没有 `@scope` 前缀，默认就是
+> public——2026-10-05 发 0.2.0 就是不带它成功的（留着也无害）。
+> 若报 `EOTP`（账号开了两步验证）：浏览器打开它打印的 auth 链接走完 2FA，把 6 位码追加成
+> `--otp 123456`。OTP 30 秒刷一次，过期就重新取一个。
+> 若报 `DEPTH_ZERO_SELF_SIGNED_CERT`（本机 2026-10-05 出现过、同日复查不复现），只在**这一条**
+> 命令上加 `--strict-ssl=false`，**不要** `npm config set strict-ssl false` 改全局——那会把本机
+> 所有 TLS 校验一起关掉。
 
 验证（`latest` 必须翻到 0.2.0）：
 
@@ -133,8 +136,10 @@ gh api repos/eghrhegpe/dsh-connect-modelscope-token-plan/topics
 
 | 症状 | 真相 | 动作 |
 |---|---|---|
-| `npm publish` 报 `404 ... you do not have permission` | **不是包不存在**，是未登录 | `npm login --registry=https://registry.npmjs.org` 后原版本号重发 |
-| `DEPTH_ZERO_SELF_SIGNED_CERT` | TLS 拦截，与登录无关 | 该条命令加 `--strict-ssl=false`；`npm login` 修不了它 |
+| `npm publish` 报 `EOTP` | 账号开了两步验证，**不是**登录失败 | 打开它打印的 auth 链接走完 2FA，命令末尾加 `--otp 123456`；30 秒刷一次 |
+| `npm publish` 报 `E401` | 未登录或 token 失效 | `npm login --registry=https://registry.npmjs.org` 后原版本号重发 |
+| `npm publish` 报 `404` | 多半还是登录态或权限，**不一定是包不存在** | 先 `npm whoami` + `npm view <包名> versions` 看清真实状态，别急着改名 |
+| `DEPTH_ZERO_SELF_SIGNED_CERT` | TLS 校验被拦，与登录无关 | 该条命令加 `--strict-ssl=false`；`npm login` 修不了它 |
 | `build-gate` 红「产物过期」 | 改了 `src/` 没 `npm run build` | 先 build 再提交，**不要**改门禁让它变绿 |
 | `gh release create` 报 `tag not found` | tag 没推 | 回第 4 步。**别**去掉 `--verify-tag` |
 | `gh run list` 空 | 第 2 步没推成功 | 核对 `git rev-parse --short origin/main` |
