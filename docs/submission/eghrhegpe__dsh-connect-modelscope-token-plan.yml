@@ -15,10 +15,10 @@
 #   "for calls made through this plugin" — src/host/usage-observer.ts:9 is the only producer of
 #     the local counters; it hooks DSH's model-call lifecycle, so direct-to-ModelScope clients do
 #     not show up. README:53 carries the same qualifier.
-#   "per-model counts, a daily trend" — src/client/cards.ts:86 LocalCallCard and
-#     src/client/cards.ts:132 TrendBars.
-#   "429 rate-limit and error event list" — src/client/cards.ts:152 EventsList, kind classified
-#     in src/host/codes.ts:52 (quota vs rate_limit by response body text).
+#   "per-model counts, a daily trend" — src/client/cards.ts:91 LocalDailyCard and
+#     src/client/cards.ts:133 TrendBars.
+#   "429 rate-limit and error event list" — src/client/cards.ts:153 EventsList, kind classified
+#     in src/host/codes.ts:76 (classifyRateLimit: quota vs rate_limit by response body text).
 #   "default-off switch" — README:57; the panel's 模型 tab toggle flips registerProvider and the
 #     saved value wins over cordis.patch.yml's default.
 #   "registers ModelScope models as a DSH LLM provider" — src/host/provider-publish.ts and

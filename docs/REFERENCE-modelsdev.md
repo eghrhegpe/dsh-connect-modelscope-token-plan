@@ -4,7 +4,11 @@
 > 的做法，作为我们插件 `isVisionModel` 判定方案的对照。它**不是主数据源**，也不改变本插件
 > 的检测逻辑——结论见末尾「对我们的意义」。
 >
-> 本地已拉取副本：`/tmp/models.dev`（`git clone --depth 1 https://github.com/anomalyco/models.dev.git`）。
+> 本地已拉取副本：`/tmp/models.dev`（`git clone --depth 1 https://github.com/anomalyco/models.dev.git`，
+> 2026-10-04 拉取，钉在 `a5c9719`——副本丢失时按此 SHA 重拉即可复现本节全部对照结论）。
+> **为何不在 `upstream/`**：REFERENCES.md 的家规要求「接入目标平台」的 OpenAPI/SDK
+> 仓库进 `upstream/` 各带独立 `.git`；models.dev 是**第三方策展参照**（对照 `isVisionModel`
+> 方案用），不是魔搭的 OpenAPI/SDK，故只钉版本、不进 `upstream/`。
 
 ## 1. 这个仓库是什么
 

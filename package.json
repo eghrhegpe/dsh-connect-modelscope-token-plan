@@ -8,7 +8,7 @@
     "url": "https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan/issues"
   },
   "author": "eghrhegpe",
-  "description": "ModelScope (modelscope.cn) connect bundle for the Harness Web UI: a local-usage quota panel for the free API-Inference tier (daily call budget, per-model caps, 429 events, local trend) plus optional provider registration that brings ModelScope models into DSH conversation.",
+  "description": "ModelScope (modelscope.cn) connect bundle for the Harness Web UI: the official Magicube balance plus, for calls made through this plugin, per-model counts, a daily trend, and a 429 error event list on the Plugins-page panel, plus a default-off switch that registers ModelScope models as a DSH LLM provider.",
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",

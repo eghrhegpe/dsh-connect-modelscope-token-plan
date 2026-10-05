@@ -1,5 +1,10 @@
 # 0.2.0 发布指令（复制粘贴即可）
 
+> **本文件已于 2026-10-05 执行完毕，保留作历史记录**（0.2.0 已上 npm、`v0.2.0` tag
+> 已推、GitHub Release 已建——第 5 步「2026-10-05 发 0.2.0 就是不带它成功的」即执行
+> 记录）。**发新版请照 `RELEASING.md`（通用流程）新开一份 `RELEASE-0.3.0.md`**，
+> 别把这份已执行的当现行手册。
+>
 > 仓库：`C:\Users\zhujieling11\.dsh\plugins\dsh-connect-modelscope-token-plan`
 > 远端：`https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan`
 > **本文件全部命令按 PowerShell 写**（`&&` 不可用，用 `;` 分行）。临时文件路径是

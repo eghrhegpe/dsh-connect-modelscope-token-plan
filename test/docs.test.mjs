@@ -312,4 +312,50 @@ const tsFiles = (dir) => {
   }
 }
 
+// ── §9 投稿溯源与 npm description：门外的两类可机械判声明 ─────────────────
+//
+// 2026-10-05 审计发现两类漂移住在 §1–§8 射程之外（README / docs / patch / src）：
+//   ① docs/submission/*.yml 的逐条溯源引用承诺「每个名词都是源码里真有的」，实际
+//      10 处引用 4 处失准——1 个组件名写错（`LocalCallCard` 不存在，实为
+//      `LocalDailyCard`）、3 处行号指到 JSDoc 行而非函数行。市场 CI 逐句对照源码
+//      核验 description，这份 yml 就是它的证据链；
+//   ② package.json 的 npm 公开 description 仍写着已删除的次数口径
+//      （"daily call budget, per-model caps"）——面板收敛时推算条已删，公开字段
+//      还在描述一个不存在的界面。
+// 判据照旧机械：行号不钉（随编辑漂移，注释里的行号旧了不致命）；**符号名**是
+// 引用承重部分——被引标识符必须真实存在于被引文件。
+{
+  // ① 投稿 yml 的每个 src/... 引用必须落盘；行号后紧跟的大写开头标识符（≥4 字符）
+  //   必须在被引文件里出现。小写开头的词（"says" 这类叙述）不判——宁可窄而硬。
+  const submissionDir = join(root, "docs", "submission");
+  const submissions = existsSync(submissionDir)
+    ? readdirSync(submissionDir).filter((f) => f.endsWith(".yml")).map((f) => `docs/submission/${f}`)
+    : [];
+  for (const rel of submissions) {
+    const refRe = /src\/([A-Za-z0-9_./-]+\.ts)(?::\d+)?(?:\s+([A-Z][A-Za-z0-9]{3,}))?/g;
+    for (const m of read(rel).matchAll(refRe)) {
+      const [, path, symbol] = m;
+      const full = `src/${path}`;
+      assert.ok(
+        existsSync(join(root, full)),
+        `${rel}: 引用的 ${full} 不存在——投稿溯源指向了仓库里没有的文件`
+      );
+      if (symbol) {
+        assert.ok(
+          read(full).includes(symbol),
+          `${rel}: ${full} 里找不到 ${symbol}——引用了一个不存在的组件/函数名`
+        );
+      }
+    }
+  }
+
+  // ② npm 公开 description 不得复活已删除的次数/上限口径（§3 的英文面补票）。
+  const desc = JSON.parse(read("package.json")).description;
+  assert.ok(
+    !/call budget|per-model caps/i.test(desc),
+    `package.json 的 description 仍用已删除的次数/上限口径：\n    ${desc}\n` +
+      `（面板收敛后次数口径推算条已删；公开字段只写现状：官方魔粒余额 + 经本插件的本地计数/趋势/429 事件流。）`
+  );
+}
+
 console.log("docs.test.mjs: all checks passed");

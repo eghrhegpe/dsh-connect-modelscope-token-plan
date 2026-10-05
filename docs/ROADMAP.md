@@ -42,15 +42,17 @@
   probe（验令牌）留在「接入」tab。服务端的 `kind:"usage"` 分支当时留着，第六轮
   才随「它是缺省值、会消耗额度」一并删除。
 
-## M3 — 测试 + 装机验证（进行中）
+## M3 — 测试 + 装机验证（已完成）
 
 - 离线套件（裸 node + strip-types）：wire / config / usage-store / routes / panel
   / doctor —— 全绿；panel 套件加载**构建产物** client.js（替身 React 渲染 PanelPage）。
 - 真机冒烟已过（真令牌 + 真上游，只读零额度）。
 - doctor 工具已落地（tools/doctor.mjs + src/host/doctor.ts，只读盘点）。
-- 待做：e2e（真 Host + 假魔搭平台）、build-freshness 门禁。
-- **测试绿之后**装机：`dsh plugin --profile <profile> add <本目录绝对路径>`，
-  重启 DSH 验证。
+- build-freshness 门禁已落地：`test/build-gate.mjs`（产物与 src 内容哈希对比，挂在
+  `npm test` 尾部）——0.2.0 第一轮收口时补齐。
+- 装机验证已完成：本插件位于 `~/.dsh/plugins/`（`dsh plugin add` 的安装目录），随
+  DSH 运行。
+- 剩下的 e2e（真 Host + 假魔搭平台）已并入下方 M4+ backlog，此处不再重复挂「待做」。
 
 ## M4 — 正式接入 DSH 作为 LLM provider（已完成，2026-10-04）
 
