@@ -1,9 +1,12 @@
-# 离线门禁：类型检查 + 16 套件测试。
+# 离线门禁：类型检查 + 全部离线套件测试（`npm test`，含尾部的 build-gate）。
 #
 # 为什么这个 CI 只做这些：本仓库的测试全部是**离线**的（裸node + strip-types，
 # 不 import 运行时 peer），所以整套跑完在 CI 上只要几秒——没有理由不跑。
 # 真机 / e2e 冒烟（真 Host + 假魔搭平台）需要本地环境，不在这里，见
 # docs/ROADMAP.md 的 backlog。
+#
+# 不要再写死套件数量：它会随每次加测试而漂移（这里曾写死一个早已过期的数字，
+# 被 test/docs.test.mjs §6 抓住）。数量以 `package.json` 的 test 脚本为准。
 #
 # build-gate 在 `npm test` 尾部：它重新构建到临时目录并与入库的lib/ + client.js
 # 逐字节比对。在 CI 上这一步尤其重要——入库产物走`github:` 安装源时不跑

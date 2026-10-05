@@ -85,7 +85,8 @@
   不在 `files` 内——直接投稿必然图裂。
 - ✅ **文档**：8 个内部里程碑节压成一节 `## [0.1.0]`，实施过程（病灶/ 取证 / 判据）搬进
   [IMPLEMENTATION.md](IMPLEMENTATION.md)；新增 [../RELEASING.md](../RELEASING.md)。
-- 离线套件 15 套件全绿，typecheck / build 全绿。
+- 离线套件全绿，typecheck / build 全绿。（数量以 `package.json` 的 test 脚本为准——
+  写死的数字只会越漂越远；`test/docs.test.mjs` §6 现在会盯着这类断言。）
 
 ### M4 之后（backlog，未做）
 

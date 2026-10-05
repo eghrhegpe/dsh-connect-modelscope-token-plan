@@ -31,6 +31,9 @@
 - 额度按天重置；耗尽返回 429。
 - `/v1/models` 免认证可读，**不消耗额度**。
 
+上面这些数字来自社区公开信息，非官方数据，官方调整后需手动更新本节；**它们只用于解释
+「额度怎么算」，不参与任何计算**——面板不消费次数上限，「还剩几次」算不出来（见下节）。
+
 ## 文档地图
 
 | 何时 | 查 |
@@ -40,7 +43,8 @@
 | **这版是怎么做出来的、踩过什么坑** | [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)（实施过程档案） |
 | 上游端点全景 / 第三方方案对比 | [docs/REFERENCES.md](docs/REFERENCES.md)、[docs/REFERENCE-modelsdev.md](docs/REFERENCE-modelsdev.md) |
 | v1 要做什么、做到哪了 | [docs/ROADMAP.md](docs/ROADMAP.md) |
-| Host/Client 两半怎么分 | sensenova 仓库 `docs/ARCHITECTURE.md`（本仓库按同构落地后再补自己的） |
+| Host/Client 两半怎么分 | [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md)（§14 红线）＋ [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)；本仓库暂无独立的 `ARCHITECTURE.md` |
+| 开发者校验工具（变异测试 / 覆盖率） | [tools/dev/README.md](tools/dev/README.md)；发布流程见 [RELEASING.md](RELEASING.md) |
 
 ## 诚实声明
 
@@ -50,6 +54,5 @@
 - **计数口径**：每次流结束记一次 call，**含失败、含用户中断**（魔搭按次数计费，限频掉的请求同样是一次调用）；token 数上游没给时是 `null` 而非 0。已知偏差方向是**少记**：peer 的重试在同一条流内部重发，观察器只看到一条流——宁可少记也不虚增。
 - **provider 默认关**（opt-in，与姊妹插件一致）：面板「模型」tab 的「接入为 DSH 模型」开关翻转即生效，面板保存值优先于 `cordis.patch.yml` 的 `registerProvider` 默认。
 - **已知限制：`reasoning` 恒为 false**。魔搭 API-Inference 是多模型代理，是否吃 `reasoning_effort` 取决于背后那个模型；本插件无法离线得知每个 id 的档位表，保守默认不发该参数（模型用自己的默认），也不提供思考强度选择器。「宁可不选，不可错发」——发错档位会整条请求 400。见 [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md) §4。
-- 额度常数来自社区公开信息，非官方数据；官方调整后需要手动更新配置。
 - 429 响应形状未实测（不值得烧额度去触发），解析按 OpenAI 惯例兼容，漂移时面板会给 `shapeWarnings`。
 - 面板「模型」tab 的每个模型都外链到其魔搭详情页（`https://www.modelscope.cn/models/{owner}/{model}`）：魔粒单价只在网页展示、不在官方 API，所以这只是一个**人工核对用的跳转，不是数据源**（「为什么没有按模型消耗 API」见 [docs/REFERENCES.md](docs/REFERENCES.md)）。

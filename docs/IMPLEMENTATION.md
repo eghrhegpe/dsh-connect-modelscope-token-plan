@@ -222,7 +222,9 @@ bug 完全无效。新增**冷读**断言：另开一个空缓存 store 读同�
 **为什么魔粒余额是主数据源**：`GET /openapi/v1/magicubes/balance` 真实可用（见
 [SPIKE.md](SPIKE.md)），而推理响应本身**不带任何额度头**。同日实测推翻了 Spike 的一半结论。
 次数口径的「推算剩余 / 参考上限」因此**从面板移除**——官方改魔粒计费后两个单位并排是误导；
-`dailyQuotaTotal` / `dailyQuotaPerModel` 配置保留为阈值提醒预留。
+`dailyQuotaTotal` / `dailyQuotaPerModel` 两个社区快照常数**也从配置里一并删除**（面板不消费
+它们，留着只会让人以为能算「还剩几次」）。真要加阈值提醒时，那应该是读官方余额的差值，
+不是这两个数；`test/config.test.mjs` 已钉住它们不会回来。
 
 **模型目录排序**：`/v1/models` 原始返回序把三家好用模型拆散（deepseek 在顶、Qwen 在中间、
 glm/ZhipuAI 在底）。新增 `FEATURED_OWNERS`（`deepseek-ai` / `ZhipuAI` / `Qwen`）与

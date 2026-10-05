@@ -2,6 +2,66 @@
 
 ## [Unreleased]
 
+### 第六轮：文档门禁与断言有效性
+
+前五轮都在修**代码**；这一轮的问题是**文档在说谎，而没有东西会红**。审计逐条复现了
+八处漂移，它们的共同形态是：文档里的「已实现 / 已删除 / 由某测试钉住」都是**声明**，
+没有任何门禁核对过声明与磁盘是否一致。
+
+- **新增 `test/docs.test.mjs`**（文档完整性门禁，6 段，静态文本检查、不联网、干净
+  checkout 可跑）。判据刻意是**机械可判**的，不试图理解语义：
+  - §1 README 里链到的每个仓库内文件必须存在（`docs/PROVIDER.md` 与
+    `docs/ARCHITECTURE.md` 都曾被指向而**不存在**）；
+  - §2 反向：`docs/` 下每个文件都要在 README 文档地图里出现；
+  - §3 已删除的配置项（`dailyQuotaTotal` / `dailyQuotaPerModel`）不得再以现存配置的
+    口吻出现在 README / patch / docs / src。判定按**整段**而非单行——中文句子经常
+    折行，「已随之删除」落在下一行（`cordis.patch.yml` 就是这种写法）；
+  - §4 `PROVIDER-M4.md` 不得再声称归档为 `docs/PROVIDER.md`，且那个文件不得存在；
+  - §5 文档说「某测试钉住 X」时，该测试必须真的提到 X；
+  - §6 套件数量与 CI 存在性必须与磁盘一致（见下）。
+  每一条都用**变异测试**验证过它真的会红（注入 8 种违规，逐条确认变红后恢复）。
+- **补齐 `panel.test.mjs` §6 的路由一致性，并新增 §6b 真交叉核对**。原清单只覆盖
+  `/snapshot`…`/probe` **五个**后缀——M4 加的**三条 provider 路由整条漏在门禁外**，
+  而它们正是 M4 的主功能。现在：
+  - §6 覆盖全部八条（区分 `paths.ts` 的字面量与 `routes/provider.ts` 的派生路由
+    `${PROVIDER_PATH}/roster`）；
+  - §6b 把 client 模板与 Host 字面量/派生路由**都解析成完整路径**再逐一比对，
+    改错任何一边都会红。这正是 `PROVIDER-M4.md:244` 曾经**谎称**存在的那条断言
+    （原句说 `test/config.test.mjs` 钉住相等，而该文件零引用）。
+  已验证：改错 Host 字面量 / client 模板 / 删派生路由三种变异全被抓住。
+- **修三处套件数量与 CI 存在性的漂移**：`RELEASING.md` 说「没有 `.github/workflows/`，
+  CI 也不存在」，而 `gate.yml` 就在版本库里且每次 push 都跑——**它正告诉维护者不要
+  期待 CI 检查**。同文件与 `docs/ROADMAP.md` 写死「15 套件」，`gate.yml` 注释写死
+  「16 套件」，实际早已不止。现在一律不写死数字，且 §6 会盯着这类断言（当场就抓到
+  了两处我自己刚写的）。
+- **修八处文档漂移**（审计逐条复现）：
+
+  | 位置 | 原来 | 现在 |
+  |---|---|---|
+  | `PROVIDER-M4.md:19` | 「本地计数覆盖全部 DSH 魔搭调用」 | 保留原文 + **更正块**：该结论在 M4 当时是**错的**（适配器没挂钩子），`usage-observer` 接上后才成立 |
+  | `PROVIDER-M4.md:6`/`§14` | 承诺归档为 `docs/PROVIDER.md` | 明确**未执行且已决定不执行**（该文件继续承担契约职责） |
+  | `PROVIDER-M4.md:244` | 「两边由 `config.test.mjs` 钉住相等」 | 改为真实情况，并说明 §6b 是事后补的 |
+  | `README.md` 文档地图 | 指向本仓没有的 `docs/ARCHITECTURE.md` | 指向 `PROVIDER-M4.md` §14 与 `IMPLEMENTATION.md` |
+  | `README.md` 额度节 | 「额度常数…需手动更新配置」 | 明说这些数字**不参与任何计算**，面板不消费次数上限 |
+  | `IMPLEMENTATION.md` / `SPIKE.md` / `REFERENCES.md` | 三处把已删的 `dailyQuotaTotal`/`dailyQuotaPerModel` 描述为现存配置 | 标注删除，SPIKE 那条加删除线标「已作废」 |
+  | `src/host/usage-store.ts` 文件头 | 「魔搭没有余额查询接口」等**三重化石** | 重写为当前口径（官方给总额/本 store 给分布与事件流/写入侧是谁） |
+  | `src/host/usage-observer.ts` 文件头 | 「唯一调用者是 `routes/probe.ts`」 | 改为「常规生产者」并说明 probe 的 `kind:"usage"` 分支为何仍在 |
+
+- **重组 `tools/`**：12 个无引用、无文档的临时脚本按「通用仪器 / 一次性探针」分流。
+  - 保留 6 个通用仪器进 `tools/dev/`（`mutate.mjs` 变异测试、`find-fake-gates.mjs`
+    假门禁扫描、`cov-{scan,merge,bundle,fn}.mjs` 覆盖率），并补
+    [tools/dev/README.md](tools/dev/README.md) 说明用法与「为什么变异测试是必要的」
+    ——新断言第一次跑就绿**什么都不能证明**。
+  - 删掉 6 个绑定单次调查的一次性探针（`bypass6` / `leak-real` / `cmp-degraded` /
+    `mutate-state-store` / `cov-trace` / `cov-hook`）。它们验证过的结论已经写进
+    `test/credentials.test.mjs` 与 CHANGELOG。
+  - **保留** `tools/check-market-entry.mjs`（它是 `5631a3b` 提交的投稿校验工具，不是
+    临时脚本——初判为 scratch 是错的，核实 git 历史后纠正）。
+  - 清掉 `.audit/`、`.cov/`、`.cov-*.json` 等本轮调查残留。
+- **重建 `lib/` 产物**：源码头两处改动需要重新 build，否则 `build-gate` 会红
+  （它红得对）。产物 chunk 文件名随内容哈希变化（`llm-adapter-CpcQ3gC5.js` →
+  `-CIXFWx9N.js`），`index.js` 的 import 同步更新，无外部引用。
+
 两轮：先是发布前的漂移收口与门禁补强，再是一轮由双路深审挖出的**数据安全与红线修复**。
 
 ### 第五轮：红线收口

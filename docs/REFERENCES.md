@@ -43,8 +43,10 @@
   - 魔搭站点的额度环以「**每日 250 魔豆/人/天**」为进度条总长——即每日
     魔粒上限量级是 250 而非 2000 次；与用户转述的「单模型 200/250/500 次/日」
     是两套口径（每日魔粒上限 vs 单模型调用次数上限）。我们的
-    `dailyQuotaTotal` / `dailyQuotaPerModel` 都只是**参考线配置**，两套口径
-    都写进注释，谁也不冒充官方。
+    `dailyQuotaTotal` / `dailyQuotaPerModel` 曾按**参考线配置**处理，两套口径
+    都写进注释，谁也不冒充官方——**该配置已随次数口径推算条一并删除**（见
+    README「三条事实」第 2 条），此处保留「两套口径」这一事实本身，它仍是
+    理解魔粒上限 ≠ 调用次数上限的依据。
   - API key 只存服务端、浏览器只打本插件代理路由——与我们同构，佐证
     provider 注册（M4）阶段的安全边界设计。
 - 它读的端点与我们相同（仅 balance），无额外端点知识；未读其实现细节，
@@ -84,8 +86,9 @@
    `/v1/usage` → **全 404**；只有 `/v1/models` → 200。即 api-inference 的 OpenAI 兼容
    面就是 `models` + `chat/completions`，没暴露 usage/quota 路径。
 
-**因此**：「每个模型消耗」只能本地计数——就是插件现在做的（usage 探针 + 本地计数
-store）。对比姊妹插件：sensenova 读官方余额端点、agnes 读
+**因此**：「每个模型消耗」只能本地计数——就是插件现在做的（本地计数
+store，写入侧是 `src/host/usage-observer.ts` 在流出口观测 provider 调用与
+失败事件；早先的 usage 探针已随模型目录表一起删除，见 IMPLEMENTATION.md）。对比姊妹插件：sensenova 读官方余额端点、agnes 读
 `/api/v2/subscription/credits-balance`，**都是服务端聚合余额，同样不是按模型消耗**；
 魔搭情况更差——连消费记录 API 都没有，只能做**余额差值趋势**（每日首末两次读
 balance，差值≈当日总消耗，见 ROADMAP 的 backlog）。

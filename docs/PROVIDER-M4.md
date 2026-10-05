@@ -3,7 +3,8 @@
 本文件是本次改动的**实现契约**：每条要新建/修改的模块、每个必须存在的
 导出符号、每个模块必须遵守的接线，都在这里钉死。实现按本文件分片进行，
 分片之间**只通过这里声明的符号**通信；任何分片不得自造另一个分片要读的名字。
-（实现完成后本文件归档为 `docs/PROVIDER.md`，去掉「契约」口吻。）
+（**未归档**：本文件仍是 M4 及其后续改动的契约与事实参照，不再改名。
+原计划的 `docs/PROVIDER.md` 未创建，见 §14。）
 
 姊妹插件（`dsh-connect-sensenova-token-plan`）的对应实现是**事实参照**，
 本文件的每一节都标注了「照抄 / 改写 / 新建」，照抄的只改 import 与措辞。
@@ -17,8 +18,14 @@
    直接吃 `/chat/completions` 与 `/models`。这就是为什么 M4 可以复用姊妹插件的
    `PiAiAdapter` 装配——魔搭不需要 sensenova 那套 OIDC/JWE。
 3. **额度信号不存在于推理响应**：本地计数只统计**经本插件的调用**。provider
-   注册后，DSH 的全部魔搭调用都经过本插件，因此本地计数**覆盖全部 DSH 魔搭
-   调用**（这是注册 provider 的第二个收益，第一个是把模型带进模型选择器）。
+   注册后，DSH 的全部魔搭调用都经过本插件注册的适配器，因此本地计数**覆盖全部
+   DSH 魔搭调用**（这是注册 provider 的第二个收益，第一个是把模型带进模型选择器）。
+
+   > **更正（M4+，2026-10-05）**：上面这个结论**在 M4 当时是错的**——M4 的适配器
+   > 路径并没有挂计数钩子，本地计数实际只反映探针用量。`usage-observer.ts` 接上
+   > 流出口之后该结论才成立（见 [IMPLEMENTATION.md](IMPLEMENTATION.md)「本地计数层
+   > 无生产者」与 [ROADMAP.md](ROADMAP.md) M4+）。此处保留原文是契约的历史记录，
+   > **当前实现以 `src/host/usage-observer.ts` 为准**。
 
 ## 1. Provider 身份（单一真源：`src/host/llm-models.ts`）
 
@@ -241,7 +248,10 @@ M4 之后的迭代（探测出档位表）再按模型开启。**文档里必须
 
 - `routes/paths.ts` 加：`export const PROVIDER_PATH = "/api/dsh-connect-modelscope-token-plan/provider";`
 - `client/const.ts` 加：`export const PROVIDER_PATH = \`/api/${NS}/provider\`;`
-  （两边由 `test/config.test.mjs` 钉住相等。）
+  （两边由 `test/panel.test.mjs` §6b 钉住相等——它把 client 的模板与 Host 的字面量
+  /派生路由**都解析成完整路径**再逐一比对，改错任何一边都会红。**M4 当时并没有
+  这条断言**：原句声称 `test/config.test.mjs` 钉住相等，而该文件零引用；§6 的路由
+  清单也整条漏掉三条 provider 路由。§6b 是 2026-10-05 补上的。）
 - 路由三件事，`withOrigin` 围栏、`refuseMethod` 一律照现有路由：
 
   | 方法 | 路径后缀 | 作用 |
@@ -366,7 +376,11 @@ roster），失败给降级形状（`enabled:false, error, roster:[]`），**绝
   已知限制（§4 reasoning、§2 目录整条读取）。
 - `cordis.patch.yml` 的 `registerProvider` 注释从「占位未实现」改为真实默认
   （默认 `false`，opt-in，与姊妹插件一致）。
-- `docs/ROADMAP.md` M4 勾掉；本文件归档为 `docs/PROVIDER.md`。
+- `docs/ROADMAP.md` M4 勾掉。
+  ~~本文件归档为 `docs/PROVIDER.md`~~ —— **未执行，且已决定不执行**：M4 之后本文件
+  仍继续承担契约职责（M4+ 的 usage-observer 接线、面板收敛都在此登记），改名会
+  丢掉「这份文档记录的是 M4 那次改动的契约」这层信息。文件头第 6 行的同一承诺
+  一并作废。
 - 红线：凭据只经 `tokenStore.resolve()`；`redactSecrets` 过所有日志/错误/
   响应；`registerAdapter` 只在 `llm` 服务存在时调用（`resolveRegistrationService`
   已处理）；Host 侧改动需完全重启 DSH。

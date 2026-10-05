@@ -3,10 +3,12 @@
 > 本文档是本仓库的**唯一权威发布流程**。姊妹插件的同文件可作参照（`dsh-connect-agnes-token-plan`
 > / `dsh-connect-sensenova-token-plan`），本文件只写本仓**特有**的部分与共同纪律。
 >
-> **先讲清一个常见误解**：本仓库**没有 release 自动化**——没有 `.github/workflows/`，CI 也不
-> 存在（`.github` 目录本身不存在）。GitHub Releases 页面上的发布说明是**手动**
-> `gh release create` 出来的。这正是历史上最容易漏的一步：它对安装、测试、打 tag **都没有任何
-> 影响**，漏掉时没有任何东西会报错。
+> **先讲清一个常见误解**：本仓库**没有发布自动化**——没有会自动打 tag / 发 npm / 建 Release 的
+> 工作流。但**有一条 CI 门禁**：`.github/workflows/gate.yml` 在 push 到 `main` 与所有 PR 上跑
+> `npm run typecheck` + `npm test`（全部离线套件，含尾部的 `build-gate`），几秒跑完。它是唯一能
+> 抓到「提交了忘 build」的地方——**发版前务必确认它绿**。GitHub Releases 页面上的发布说明仍是
+> **手动** `gh release create` 出来的：它对安装、测试、打 tag **都没有任何影响**，漏掉时只有
+> Release 页会缺一条，没有任何东西会报错。
 
 ## 前置条件
 
@@ -63,7 +65,7 @@ npm whoami --registry=https://registry.npmjs.org   # 401 说明没登录
 ### 1. 确认测试与代码
 
 ```bash
-npm test        # 15 套件离线门禁（含 release.test.mjs）
+npm test        # 全部离线套件（含 release.test.mjs 与尾部的 build-gate.mjs）
 npm run typecheck
 npm run build
 ```

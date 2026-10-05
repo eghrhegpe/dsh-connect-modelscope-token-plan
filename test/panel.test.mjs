@@ -160,12 +160,94 @@ assert.ok(JSON.stringify(balanceErr).includes("boom"), "错误形状渲染错误
 // 产物里的 slug 与各后缀模板。
 const artifact = readFileSync(new URL("../client.js", import.meta.url), "utf8");
 const hostPaths = readFileSync(new URL("../src/host/routes/paths.ts", import.meta.url), "utf8");
+const hostProviderRoutes = readFileSync(new URL("../src/host/routes/provider.ts", import.meta.url), "utf8");
 const slug = registration.id;
-for (const suffix of ["/snapshot", "/models", "/token", "/token/forget", "/probe"]) {
-  const resolved = `/api/${slug}${suffix}`;
-  assert.ok(hostPaths.includes(resolved), `paths.ts 缺 ${resolved}`);
-  // 产物里路由是模板拼接：`/api/${NS}/suffix`，NS 在运行时来自 REGISTRATION.id。
+
+// 两边**全部**路由后缀的并集。client 侧每条都是 `const.ts` 里的模板字面量；
+// Host 侧分两种：`paths.ts` 里的字面量（单数前缀），以及 `routes/provider.ts`
+// 里用 `${PROVIDER_PATH}/suffix` 拼出来的派生路由。**三条 provider 路由曾经整个
+// 漏在本清单外**（M4 加了路由没同步这里，于是「client 与 Host 路由一致」对 M4 的
+// 主功能恰好是盲的）。
+const ALL_SUFFIXES = [
+  "/snapshot",
+  "/models",
+  "/token",
+  "/token/forget",
+  "/probe",
+  "/provider",
+  "/provider/roster",
+  "/provider/reset"
+];
+const LITERAL_SUFFIXES = ["/snapshot", "/models", "/token", "/token/forget", "/probe", "/provider"];
+const DERIVED_SUFFIXES = ["/provider/roster", "/provider/reset"];
+
+for (const suffix of ALL_SUFFIXES) {
+  // ① client 产物里必须有这条模板（浏览器实际打的路径）。
   assert.ok(artifact.includes("`/api/${NS}" + suffix + "`"), `产物缺路由模板 ${suffix}`);
+  // ② Host 侧必须真的接得住这条路径——字面量或派生，二者必居其一。
+  if (LITERAL_SUFFIXES.includes(suffix)) {
+    assert.ok(hostPaths.includes(`/api/${slug}${suffix}`), `paths.ts 缺字面量 /api/${slug}${suffix}`);
+  } else {
+    // 派生路由：`routes/provider.ts` 里 `${PROVIDER_PATH}` + 后缀。
+    const derived = suffix.slice("/provider".length); // "/roster" | "/reset"
+    assert.ok(
+      hostProviderRoutes.includes("${PROVIDER_PATH}" + derived + "`"),
+      `routes/provider.ts 缺派生路由 \${PROVIDER_PATH}${derived}`
+    );
+  }
+}
+
+// 反向①：paths.ts 导出的每条字面量都必须在清单里（新增 Host 路由却忘了同步本
+// 清单时，这条会红——比漏检更早发现）。
+const hostLiterals = [...hostPaths.matchAll(/\/api\/dsh-connect-modelscope-token-plan(\/[a-z/]+)"/g)].map((m) => m[1]);
+for (const literal of hostLiterals) {
+  assert.ok(
+    LITERAL_SUFFIXES.includes(literal),
+    `paths.ts 有未纳入本清单的路由 ${literal}——新增路由请同步 panel.test.mjs §6`
+  );
+}
+
+// 反向②：client 每条路由都必须能对上一个 Host 路由（防止 client 打了个
+// Host 根本没注册的后缀——这是「面板点一下 404」的形态）。
+const clientSuffixes = [...artifact.matchAll(/`\/api\/\$\{NS\}(\/[a-z/]+)`/g)].map((m) => m[1]);
+assert.ok(clientSuffixes.length > 0, "产物里应当能抓到 client 路由模板");
+for (const suffix of new Set(clientSuffixes)) {
+  assert.ok(
+    ALL_SUFFIXES.includes(suffix),
+    `产物里有本清单未覆盖的 client 路由 ${suffix}——请确认 Host 也注册了它，然后同步本清单`
+  );
+}
+
+// §6b **真正的两边交叉核对**：把 client 源码 const.ts 的模板后缀解析成完整路径，
+// 与 Host 侧实际生效的完整路径逐一比对。上面的 §6 只检查「两边分别提到了这个
+// 后缀」，两边各自打错、但错成同一个字面量时它不会红；这里比较的是**解析后的
+// 完整字符串**，所以改错任何一边都会红。
+//
+// （这正是 docs/PROVIDER-M4.md:244 曾经**谎称**存在的那条断言。）
+{
+  const clientConst = readFileSync(new URL("../src/client/const.ts", import.meta.url), "utf8");
+  // client 侧：`/api/${NS}/xxx` → `/api/<slug>/xxx`，NS 运行时就是 REGISTRATION.id。
+  const clientResolved = new Set(
+    [...clientConst.matchAll(/`\/api\/\$\{NS\}(\/[a-z/]+)`/g)].map((m) => `/api/${slug}${m[1]}`)
+  );
+  // Host 侧：paths.ts 的字面量 ∪ routes/provider.ts 的派生路由。
+  const hostResolved = new Set(
+    [...hostPaths.matchAll(/["'](\/api\/[a-z0-9/_-]+)["']/g)].map((m) => m[1])
+  );
+  for (const m of hostProviderRoutes.matchAll(/`\$\{PROVIDER_PATH\}(\/[a-z/]+)`/g)) {
+    hostResolved.add(`/api/${slug}/provider${m[1]}`);
+  }
+
+  assert.ok(clientResolved.size >= 5, `client 侧应解析出至少 5 条路由，实际 ${clientResolved.size}`);
+  assert.ok(hostResolved.size >= 5, `Host 侧应解析出至少 5 条路由，实际 ${hostResolved.size}`);
+
+  // 每个 client 会打的路径，Host 必须都有；反之亦然。
+  for (const path of clientResolved) {
+    assert.ok(hostResolved.has(path), `client 会打 ${path}，但 Host 没注册——点下去就是 404`);
+  }
+  for (const path of hostResolved) {
+    assert.ok(clientResolved.has(path), `Host 注册了 ${path}，但 client 没有任何 const 指向它（死路由？）`);
+  }
 }
 
 // §7 apply()：把字典与卡注册进 slots。
