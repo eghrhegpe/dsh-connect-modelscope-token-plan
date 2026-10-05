@@ -17,10 +17,17 @@ export function useSnapshotPolling(defaultCadenceMs = 30_000) {
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [updatedAt, setUpdatedAt] = useState(0);
   const [cadenceMs, setCadenceMs] = useState(defaultCadenceMs);
+  /** Host 少给的顶层键（契约漂移）；透给面板当 shapeWarning，不静默。 */
+  const [missingKeys, setMissingKeys] = useState<readonly string[]>([]);
 
   // generation guard：慢响应不许覆盖新响应；手动刷新可以顶掉在途的定时轮询。
   const generation = useRef(0);
   const inFlight = useRef<{ abort?: () => void } | null>(null);
+  // cadence 的回退值经ref 读，不进 useCallback 依赖：否则 Host 每次改声明
+  // cadence 都会让 load 换新引用，连锁换掉三个写回调，再连锁换掉 ProviderCard
+  // 的 onToggle/onSaveList/onReset —— 组件树无意义地多渲染一轮。
+  const cadenceRef = useRef(cadenceMs);
+  cadenceRef.current = cadenceMs;
 
   const load = useCallback(async () => {
     generation.current += 1;
@@ -40,20 +47,27 @@ export function useSnapshotPolling(defaultCadenceMs = 30_000) {
         setError(errorOfStatus(response.status));
         return;
       }
-      const body = await response.json();
+      // Host 挂掉时（反向代理/登录墙）响应的 `ok` 仍可能是 true 而 body 是
+      // HTML ——裸 `json()` 会抛 SyntaxError，而 `errorText` 对 Error 返回
+      // `.message`，于是那段 HTML 源码会被整个塞进面板正文。解析失败一律读作
+      // null，交给 interpretSnapshot 的 "unexpected payload" 分支（同仓http.ts
+      // 的 postJson 早就是这么做的，这里是漏）。
+      const body = await response.json().catch(() => null);
       if (!isCurrent()) return;
       const read = interpretSnapshot(body);
       if (read.data === null) {
         setData(null);
+        setMissingKeys([]);
         setError(read.error);
         return;
       }
       setData(read.data);
+      setMissingKeys(read.missingKeys ?? []);
       setError(null);
       setUpdatedAt(Date.now());
       const stated = (read.data as { pollSeconds?: unknown })?.pollSeconds;
       if (typeof stated === "number" && Number.isFinite(stated)) {
-        setCadenceMs(statedCadenceMs(stated, cadenceMs));
+        setCadenceMs(statedCadenceMs(stated, cadenceRef.current));
       }
     } catch (reason) {
       // abort 是我们自己的顶替，不是网络故障。
@@ -63,7 +77,7 @@ export function useSnapshotPolling(defaultCadenceMs = 30_000) {
       if (isCurrent()) setLoadedOnce(true);
       if (inFlight.current === controller) inFlight.current = null;
     }
-  }, [cadenceMs]);
+  }, []);
 
   const failed = error !== null;
   usePollingInterval(load, cadenceMs, { failed });
@@ -75,5 +89,5 @@ export function useSnapshotPolling(defaultCadenceMs = 30_000) {
     inFlight.current?.abort?.();
   }, []);
 
-  return { data, error, loadedOnce, updatedAt, load };
+  return { data, error, loadedOnce, updatedAt, load, missingKeys };
 }

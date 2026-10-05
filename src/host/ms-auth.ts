@@ -28,6 +28,23 @@ import type { TokenStatus } from "../shared/wire.ts";
 export const TOKEN_REF = "MODELSCOPE_API_KEY";
 
 /**
+ * 令牌形状：`ms-` + 至少 16 位十六进制，允许连字符分段（UUID 那种）。
+ *
+ * 存在的理由见 {@link createTokenStore} 的 `save`：脱敏闸是正则，遮不住它不
+ * 认识的形状，所以「什么形状能进来」必须在入口就钉住，而不是指望出口拦得住。
+ *
+ * **下限必须与 `util.ts#redactSecrets` 的 `ms-` 闸一致**（都是 16 位）：比它宽则
+ * 出现「进得来但遮不住」的缝，比它窄则无谓地拒掉合法令牌。两处同改——
+ * `test/credentials.test.mjs` 钉住这条一致性。
+ */
+const TOKEN_SHAPE = /^ms-[0-9a-f-]{16,}$/i;
+
+/** 这个值长得像魔搭访问令牌吗？（只判形状，不判真伪——真伪要问上游。） */
+export function isPlausibleToken(value: string): boolean {
+  return typeof value === "string" && TOKEN_SHAPE.test(value.trim());
+}
+
+/**
  * 构造令牌 store。
  * @param {object} [options] - wiring。
  * @param {object|Function|null} [options.credentials] - `ctx.credentials` 服务
@@ -45,11 +62,28 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
   };
 
   return {
-    /** 把面板输入的令牌存成引用；原样存（不 trim），空白值视为没输入。 */
+    /**
+     * 把面板输入的令牌存成引用；原样存（不 trim），空白值视为没输入。
+     *
+     * **形状校验**：只接受 `ms-` + 至少 16 位十六进制（可含连字符分段）。这不是
+     * 洁癖——`redactSecrets` 的脱敏闸是**正则**，只能遮它认识的形状；一个
+     * `ms-short-abc` 这样的短值它遮不住，而任何非空字符串此前都能被存下来并作为
+     * `Authorization: Bearer …` 发出（非标准形状的令牌是可达状态）。上游一旦把
+     * 它回显进错误消息（`inference-client` 的几处都把上游 body 拼进错误文本），
+     * 凭据就进日志与面板响应——撞红线 1。
+     *
+     * 收紧入口同时也修了 UX：粘错令牌时立刻得到一句明确的话，而不是等一次
+     * 真机请求换来一个语焉不详的 401。
+     */
     async save(token: string) {
       const value = verbatim(token, "");
       if (typeof value !== "string" || value.trim() === "") {
         throw new Error("a ModelScope token is required");
+      }
+      if (!isPlausibleToken(value.trim())) {
+        throw new Error(
+          "that does not look like a ModelScope access token (expected ms- followed by hex digits)"
+        );
       }
       const service = resolveService();
       if (service !== null && typeof service.set === "function") {
@@ -64,16 +98,18 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
 
     /**
      * 忘掉面板保存的令牌。env 回退**不动**——清面板引用不能删操作者的 .env。
+     *
+     * 失败**向上传播**（由路由脱敏后呈报），不静默：凭据文件只读（EACCES）或
+     * 服务实现里 unset 抛错时，吞掉错误会让路由回 `ok: true` + `source: credentials`，
+     * 而令牌**仍在 `~/.dsh/.credentials.yaml` 里并且仍被 resolve() 读回来**。
+     * 「忘掉令牌」是一个安全动作，谎报成功比失败更糟——用户以为凭据已删干净。
+     * 内存副本无论如何都先清掉（它才是本进程真正持有的那份）。
      */
     async forget() {
       memory.delete(TOKEN_REF);
-      try {
-        const service = resolveService();
-        if (service !== null && typeof service.unset === "function") {
-          await service.unset(TOKEN_REF);
-        }
-      } catch {
-        // 内存副本已清，没有别的可做。
+      const service = resolveService();
+      if (service !== null && typeof service.unset === "function") {
+        await service.unset(TOKEN_REF);
       }
     },
 
@@ -104,6 +140,12 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
      * 无秘密的状态描述（快照与面板消费）。
      * `valid` 恒为 null：本模块不做有效性断言（零额度探针在 probe 路由，
      * 尚待真机验证后接入——SPIKE.md §结论 5）。
+     *
+     * `ephemeral` 答的是「**手里这个值**重启会不会丢」，不是「有没有凭据服务」
+     * ——wire 的定义是前者。曾经只按「服务缺席」置位，于是两种都说谎：没有服务
+     * 时若令牌来自 env（重启不丢）被标 ephemeral；服务在场时面板保存的值被标非
+     * ephemeral（那是碰巧对，不是判出来的）。按来源答：
+     * `memory` 才真的只在本次进程存活期间存在。
      */
     async state(): Promise<TokenStatus> {
       const { source } = await this.resolve();
@@ -112,7 +154,7 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
         source: source === null ? "none" : source,
         valid: null,
         checkedAt: null,
-        ephemeral: resolveService() === null
+        ephemeral: source === "memory"
       };
     }
   };

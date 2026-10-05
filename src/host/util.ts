@@ -51,8 +51,17 @@ export function redactSecrets(text: unknown) {
       .replace(/(["']?[Aa]uthorization["']?\s*[:=]\s*["']?)(?!Bearer\s)[^"',;\s]+/g, "$1[REDACTED]")
       // 2) Bearer / Basic 令牌。
       .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 [REDACTED]")
-      // 3) 魔搭访问令牌裸值：ms-xxxxxxxx-xxxx-…（本插件的主凭据）。
-      .replace(/\bms-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "ms-[REDACTED]")
+      // 3) 魔搭访问令牌裸值：ms- + 至少 16 位十六进制（连字符可有可无）。
+      //    这条闸曾经硬编码 UUID 的 `8-4-4-4-12` 分组形状，于是紧凑写法
+      //    `ms-3f2a1b8c1111222233334444555566` 整条漏网。而 `ms-auth.save()`
+      //    过去不做形状校验，任何非空字符串都会被存下来并作为
+      //    `Authorization: Bearer …` 发出——「非标准形状的令牌」是**可达状态**，
+      //    上游一旦把它回显进错误消息（inference-client 的几处都把上游 body
+      //    拼进错误文本），凭据就进日志与面板响应。撞红线 1。
+      //    现在两头都堵：这里放宽到「ms- + 16 位以上的十六进制/连字符」，入口
+      //    （ms-auth.isPlausibleToken）拒收遮不住的短值。脱敏闸宁可宽——漏遮的
+      //    代价（凭据外泄）远大于误遮（一条日志里的长hex 被替换掉）。
+      .replace(/\bms-[0-9a-f-]{16,}\b/gi, "ms-[REDACTED]")
       // 4) 裸推理键 sk-…。
       .replace(/\bsk-[A-Za-z0-9._-]{8,}/g, "sk-[REDACTED]")
       // 5) 已知密钥 JSON 键值对。

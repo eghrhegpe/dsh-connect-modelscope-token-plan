@@ -71,12 +71,20 @@ const RATE_SIGNAL = [
   /请求过于频繁|限流|频率/
 ];
 
-/** 硬额度措辞：命中即相信是配额耗尽，不纠正（避免把真耗尽也拉去重试）。 */
+/**
+ * 硬额度措辞：命中即相信是配额耗尽，不纠正（避免把真耗尽也拉去重试）。
+ *
+ * 最后两条是被 `codes.ts#classifyRateLimit` 的回归用例逼出来的：那张表的旧词表
+ * 里有 `"daily"`，而这里没有，于是 `"You have reached your daily limit"`（真日额度
+ * 耗尽）被共用后的新判据读成限频。两处现在共用这一份，缺口不会再各漂各的。
+ */
 const HARD_QUOTA_WORDING = [
   /\b(?:balance|credits?)\s+(?:exhausted|depleted)\b/i,
   /\bout[\s_-]+of[\s_-]+(?:credits?|budget)\b/i,
   /额度\s*(?:已)?\s*(?:用尽|耗尽|不足)/,
-  /quota\s*(?:exceeded|exhausted|reached)/i
+  /quota\s*(?:exceeded|exhausted|reached)/i,
+  /\b(?:daily|per[\s_-]?day|monthly|per[\s_-]?month)\b[^\n]{0,24}?\blimit\b/i,
+  /(?:每日|每月)\s*(?:调用)?\s*(?:上限|额度|配额)/
 ];
 
 /** 结构化 type 分支认的「速率上限」信号：rpm/tpm/每分钟/限流/频率。 */
@@ -85,6 +93,21 @@ const RATE_CAP_WORDING =
 
 /** 从错误文本里回捞魔搭结构化 `type` 字段（如 `"type":"quota_exceeded_error"`）。 */
 const STRUCTURED_TYPE = /"type"\s*:\s*"([^"]+)"/i;
+
+/**
+ * 文本是否含硬额度措辞（真耗尽，不纠正）。
+ *
+ * 导出给 `codes.ts` 的 `classifyRateLimit`——那张表曾自己维护一份同组正则，
+ * 于是「限频被误判成耗尽」和「耗尽被误判成限频」两个方向的漂移都可能发生。
+ * 词表只有这一份，改它时 `test/error-fix.test.mjs` 与 `test/provider.test.mjs`
+ * 会一起红。
+ * @param message - 平台错误文本。
+ * @returns `true` 表示命中硬额度措辞。
+ */
+export function hasHardQuotaWordingIn(message: string): boolean {
+  if (typeof message !== "string" || message.length === 0) return false;
+  return HARD_QUOTA_WORDING.some((re) => re.test(message));
+}
 
 /**
  * 一个 429 体是否“更可能是限频而非真配额耗尽”——纯文本启发（v1）。
@@ -102,8 +125,7 @@ export function looksLikeRateLimit(message: string): boolean {
   const m = message.toLowerCase();
   const hasRateSignal = RATE_SIGNAL.some((re) => re.test(m));
   if (!hasRateSignal) return false;
-  const isHardQuota = HARD_QUOTA_WORDING.some((re) => re.test(m));
-  return !isHardQuota;
+  return !hasHardQuotaWordingIn(message);
 }
 
 /**

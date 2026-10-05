@@ -21,7 +21,7 @@ export function PanelPage({ tt, localeSubscribe }: {
   tt: Tt;
   localeSubscribe?: unknown;
 }): unknown {
-  const { data, error, loadedOnce, updatedAt, load } = useSnapshotPolling();
+  const { data, error, loadedOnce, updatedAt, load, missingKeys } = useSnapshotPolling();
   const [, setLocaleRevision] = useState(0);
   const [openSections, setOpenSections] = useState({ balance: true, local: true, trend: true, events: false, provider: true, token: true });
   const [activeTab, setActiveTab] = useState<TabId>("quota");
@@ -35,7 +35,7 @@ export function PanelPage({ tt, localeSubscribe }: {
     setOpenSections((current) => ({ ...current, [key]: !current[key as keyof typeof current] }));
   }, []);
 
-  const { failure, needsSetup, guidance, shapeWarnings } = viewOf(data, error, tt);
+  const { failure, needsSetup, guidance, shapeWarnings } = viewOf(data, error, tt, missingKeys);
   const showSetup = needsSetup && loadedOnce;
 
   // 接入为 DSH 模型：快照的 `provider` 块是首选；wire 已声明它，但旧 Host 或
@@ -111,7 +111,11 @@ export function PanelPage({ tt, localeSubscribe }: {
   const tokenState = data?.token ?? null;
   // 验令牌（validity probe）需要一个 model id——鉴权与模型无关，取目录样本的
   // 第一个即可；目录不可读时没有 id，按钮不渲染（诚实降级，不猜模型名）。
-  const sampleModel = data?.models.sample[0] ?? null;
+  //
+  // `?.` 必须一路到底：`data?.models?.sample?.[0]`。`data?.models.sample[0]`
+  // 里那个 `?.` 只护住 data 本身，models 缺失时照样 TypeError——而这一行在
+  // **所有 tab 上都执行**，所以它炸起来是整个面板炸，不止当前 tab。
+  const sampleModel = data?.models?.sample?.[0] ?? null;
 
   // 验令牌：独立于 usage probe 的状态（两个 tab 不互相串结果）。
   const [verifyBusy, setVerifyBusy] = useState(false);
@@ -150,7 +154,7 @@ export function PanelPage({ tt, localeSubscribe }: {
     return h(
       "div",
       null,
-      snap.token.present === false
+      snap.token?.present === false
         ? h("div", { style: S.formNote, role: "status" }, tt("panel.noToken"))
         : null,
       h(SectionCard, { title: tt("section.balance"), open: openSections.balance, onToggle: () => toggleSection("balance"), tt }, h(BalanceCard, { balance: snap.balance, tt })),
@@ -161,13 +165,13 @@ export function PanelPage({ tt, localeSubscribe }: {
       ),
       h(
         SectionCard,
-        { title: format(tt("section.trend"), { days: snap.trend.days }), open: openSections.trend, onToggle: () => toggleSection("trend"), tt },
-        h(TrendBars, { buckets: snap.trend.buckets, tt })
+        { title: format(tt("section.trend"), { days: snap.trend?.days ?? 0 }), open: openSections.trend, onToggle: () => toggleSection("trend"), tt },
+        h(TrendBars, { buckets: snap.trend?.buckets ?? [], tt })
       ),
       h(
         SectionCard,
         { title: tt("section.events"), open: openSections.events, onToggle: () => toggleSection("events"), tt },
-        h(EventsList, { events: snap.events, tt })
+        h(EventsList, { events: snap.events ?? [], tt })
       )
     );
   };
@@ -193,7 +197,7 @@ export function PanelPage({ tt, localeSubscribe }: {
         onToggle: toggleProvider,
         onSaveList: saveRoster,
         onReset: resetProvider,
-        tokenPresent: data?.token.present === true,
+        tokenPresent: data?.token?.present === true,
         tt
       })
     )

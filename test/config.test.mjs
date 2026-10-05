@@ -66,6 +66,19 @@ assert.equal(hostName("::1"), "::1");
 assert.equal(hostName("::1:3080"), "::1");
 assert.equal(hostName("fe80::1"), "fe80::1");
 
+// §7b 围栏必须是**精确**匹配，不是前缀匹配。
+//
+// 回归用例：`[::1]evil.com` 曾读成 `[::1]` 并通过白名单——截断到第一个 `]` 就
+// 返回，把「集合成员」放宽成了「以成员开头」。白名单的意义正在于精确。
+for (const bad of ["[::1]evil.com", "[::1]:8080@evil.com", "[::1]evil.com:3080", "[::1", "::1]evil", "[]", "[::1]:"]) {
+  assert.equal(isAdmitted({ headers: { host: bad } }, new Set(["[::1]", "::1"])), false, `Host "${bad}" 必须被拒绝（围栏不允许前缀匹配）`);
+}
+// 合法的 IPv6 形状仍要放行，别把围栏收得太紧误伤真浏览器。
+for (const good of ["[::1]", "[::1]:3080", "[2001:db8::1]:443"]) {
+  const parsed = hostName(good);
+  assert.notEqual(parsed, "", `Host "${good}" 应被解析成合法形状`);
+}
+
 // §8 isAdmitted：Host 对白名单；Origin 与 Host 一致；无 Origin 放行。
 const allowed = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 assert.equal(isAdmitted({ headers: { host: "localhost:3080" } }, allowed), true, "同源无 Origin 放行");

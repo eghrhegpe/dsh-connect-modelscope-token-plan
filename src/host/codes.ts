@@ -10,6 +10,8 @@
  */
 
 /** 面板按它分流的稳定码表。 */
+import { looksLikeRateLimit, hasHardQuotaWordingIn } from "./llm-error-fix.ts";
+
 export const CODE = Object.freeze({
   CONFIG_ERROR: "config_error",
   NETWORK_ERROR: "network_error",
@@ -17,7 +19,16 @@ export const CODE = Object.freeze({
   AUTH_ERROR: "auth_error",
   RATE_LIMITED: "rate_limited",
   QUOTA_EXCEEDED: "quota_exceeded",
-  UPSTREAM_ERROR: "upstream_error"
+  UPSTREAM_ERROR: "upstream_error",
+  /**
+   * 插件自身抛错（聚合器、状态层、路由之外的意外）。
+   *
+   * 曾经只作为 `soft()` / `failureCode()` 的兜底字符串出现在快照里，没进这张
+   * 表——于是 Client 的 `GUIDANCE_BY_CODE` 也没法映射它（那份映射被测试钉住
+   * 「每个键必须在 CODE 里」），最需要人看的内部错误反而没有引导文案。
+   * 正式收进码表，两端从此同一份真源。
+   */
+  INTERNAL_ERROR: "internal_error"
 });
 
 export type CodeValue = (typeof CODE)[keyof typeof CODE];
@@ -39,13 +50,39 @@ export function classifyStatus(status: number): CodeValue {
 
 /**
  * 429 的文案分诊：quota（当日/单模型额度耗尽，重试无意义）vs rate_limit
- * （每分钟限频，退避有用）。判据是**平台自己的语言**，单词命中即可；没有
- * 文案或看不懂时归 rate_limit——退避是两个方向里更安全的默认。
+ * （每分钟限频，退避有用）。
+ *
+ * 判据**复用 `llm-error-fix.ts` 的 {@link looksLikeRateLimit}**（限频信号 +
+ * 硬额度措辞的二元区分），不再在这里维护第二份词表——两个词表必然漂移，而漂移
+ * 的后果是插件内部两层互相抵消。
+ *
+ * 为什么曾经判错：这张表原来把 `"limit reached"` / `"daily"` / `"次数"` 归进
+ * quota 桶，于是
+ *
+ *   - `"Rate limit reached, please retry after 60 seconds"` → quota（应为 rate_limit）
+ *   - `"429 rate limit reached for rpm"`                → quota（应为 rate_limit）
+ *   - `"请求过于频繁，请稍后重试"`                        → quota（"次数" 命中）
+ *
+ * 后果很具体：`inference-client` 据此选 `QUOTA_EXCEEDED`，而 `llm-retry.ts`刻意
+ * 把 QUOTA 排除在可重试之外 —— 瞬时限频被当成耗尽、快失败且不重试；面板事件流
+ * 还会把 rpm 限频显示成「额度耗尽」，与 `llm-error-fix.ts` 那套「429 不是耗尽」
+ * 的纠正层在同一条数据上自相矛盾。
+ *
+ * 语义顺序：**限频信号优先，硬额度措辞兜底**。`looksLikeRateLimit` 正是这个
+ * 二元判定（有限频信号且无硬额度措辞），所以它说 true → rate_limit；说 false
+ * 时需要区分「有硬额度措辞的真耗尽」与「完全读不懂」，前者 quota、后者按更安全
+ * 的默认归 rate_limit。
  */
 export function classifyRateLimit(message: string): "quota" | "rate_limit" {
-  const text = String(message).toLowerCase();
-  const quotaWords = ["quota", "daily", "limit reached", "额度", "上限", "次数"];
-  return quotaWords.some((word) => text.includes(word)) ? "quota" : "rate_limit";
+  if (typeof message !== "string" || message.length === 0) return "rate_limit";
+  if (looksLikeRateLimit(message)) return "rate_limit";
+  // 走到这里 = 没有限频信号。命中硬额度措辞才是真耗尽；否则读不懂 → rate_limit。
+  return hasHardQuotaWording(message) ? "quota" : "rate_limit";
+}
+
+/** 文本是否含硬额度措辞（真耗尽，不纠正）——直接问 llm-error-fix 的那张表。 */
+function hasHardQuotaWording(message: string): boolean {
+  return hasHardQuotaWordingIn(message);
 }
 
 /**
@@ -60,11 +97,25 @@ export function parseRetryAfterMs(headers: { get?: (name: string) => string | nu
     const date = Date.parse(raw);
     if (!Number.isNaN(date)) return Math.max(0, date - Date.now());
   }
+  // 文案里的等待时长。中文与英文都要认：只认中文时，上游把文案换成
+  // "retry after 5 seconds" 会静默退化成「无时长」→ 调用方改用自己的默认退避。
   const cn = String(message).match(/(\d+)\s*(秒|分钟|小时|天)/);
   if (cn) {
     const unit = cn[2] ?? "秒";
     const value = Number(cn[1]);
     const multiplier = unit === "分钟" ? 60 : unit === "小时" ? 3600 : unit === "天" ? 86400 : 1;
+    if (Number.isFinite(value) && value > 0) return value * multiplier * 1000;
+  }
+  // 注意 `(...)` 是**捕获**组：单位必须捕获才能读倍率。早先写成 `(?:...)` 时
+  // `en[2]` 恒为 undefined，"2 minutes" 会被当成 2 秒——退避差 30 倍。
+  const en = String(message).match(/(\d+)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?|days?)\b/i);
+  if (en) {
+    const value = Number(en[1]);
+    const unit = (en[2] ?? "seconds").toLowerCase();
+    const multiplier = unit.startsWith("min") ? 60
+      : unit.startsWith("h") ? 3600
+        : unit.startsWith("d") ? 86400
+          : 1;
     if (Number.isFinite(value) && value > 0) return value * multiplier * 1000;
   }
   return null;

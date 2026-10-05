@@ -2,7 +2,63 @@
 
 ## [Unreleased]
 
-发布前的漂移收口与门禁补强（0.1.0 已在市场可装，故这批改动单独记一条）：
+两轮：先是发布前的漂移收口与门禁补强，再是一轮由双路深审挖出的**数据安全与红线修复**。
+
+### 第二轮：深审挖出的真问题（每条都有复现证据，不是推断）
+
+- **修 usage-store 版本守卫（数据静默销毁）**：守卫检查写在 `enqueue` 开头，而
+  `readOnly` 的置位发生在其后的 `cache.read()` 内部——判据比真正的探测**晚了一
+  步**。实测：磁盘预置 version 2 含 110 次真实调用，一次 `recordCall` 后 version
+  降级成 1、历史归零，而日志还在说「recording disabled to avoid clobbering」——
+  旧构建正在降级覆写新构建的数据，日志与磁盘状态互相撒谎。同一处 `readOnly` 只
+  置位不复位，于是用户按 doctor 建议删掉 usage.json 后写入永久静默丢弃、面板
+  还在显示内存残留。现在版本探测由写路径自己做（判据与写入之间不再隔 await），
+  且「版本已知」时复位闩锁。回归用例见 `test/usage-store.test.mjs` §7b/§7c（已验证
+  它们在修复前确实变红）。
+- **修信任围栏的前缀匹配**：`hostName` 对 `Host: [::1]evil.com` 读成 `[::1]` 并
+  **通过**白名单——白名单是精确集合，前缀匹配等于把它放宽成「以成员开头」。现在
+  校验 `]` 之后只允许空或 `:port`。
+- **修面板缺键即白屏**：`interpretSnapshot` 对 `ok:true` 的 body 是裸 cast，
+  `SNAPSHOT_REQUIRED_KEYS` 只在测试里被引用、运行时零防线。缺 `models` / `trend` /
+  `token` 任一 → TypeError炸掉整个面板（那一行在**所有 tab 上都执行**），而只有
+  `provider` 有防御。现在按 `SNAPSHOT_REQUIRED_KEYS` 校验并把缺失块补成与 Host
+  降级同构的空形状，缺失名单作为 `missingKeys` 冒到面板上（不静默）。顺带收口同
+  族裸解引用（`data?.models.sample` 的 `?.` 没到底、`TokenForm` 的 `=== null` 漏
+  `undefined`、`LocalDailyCard` 裸解构）。
+- **修 429 分诊把限频误判成额度耗尽**：`classifyRateLimit` 曾把 `"limit reached"` /
+  `"daily"` / `"次数"` 归进 quota 桶，于是「Rate limit reached, retry after 60s」
+  被判成耗尽 → `llm-retry` 刻意排除 QUOTA → **瞬时限频快失败且不重试**；面板事件
+  流还把 rpm 限频显示成「额度耗尽」，与 `llm-error-fix` 的纠正层自相矛盾。现在判据
+  **复用** `llm-error-fix` 的 `looksLikeRateLimit` + `hasHardQuotaWordingIn`（消除
+  第二份词表），并补上 `daily|monthly … limit` 这组硬额度措辞。
+- **修 `internal_error` 没有引导**：聚合器兜底码曾不在 `CODE` 表里，于是 Client 的
+  `GUIDANCE_BY_CODE` 映射不了它，最需要人看的内部错误反而没有引导文案，且因为不
+  在 `FORM_EXCLUDED_CODES` 里被引导去「配令牌」——方向反了。现在
+  `CODE.INTERNAL_ERROR` 正式进表，两端同一份真源。
+- **修令牌脱敏漏紧凑写法（红线 1）**：`redactSecrets` 的 `ms-` 正则硬编码 UUID 的
+  `8-4-4-4-12` 分组形状，紧凑写法 `ms-3f2a1b8c1111222233334444555566` 整条漏网；
+  而 `ms-auth.save()` 不做形状校验，非标准形状的令牌是**可达状态**，上游一旦回显
+  即进日志与面板响应。两头都堵：脱敏闸放宽到 `ms-[0-9a-f-]{16,}`，入口新增形状
+  校验拒收遮不住的短值。
+- **修 `forget()` 谎报删除成功（红线 1）**：曾吞掉凭据服务的 `unset` 失败，让路由回
+  `ok: true`，而令牌**仍在凭据文件里且仍被读回来**。安全动作谎报成功比失败更糟，
+  现在失败向上传播（路由已有脱敏呈现路径）。
+- **修 `state().ephemeral` 答错问题**：wire 定义是「这个值重启会不会丢」，实现却答
+  「有没有凭据服务」——于是 env 来源的值（重启不丢）被标成 ephemeral。现在按来源
+  答：只有 `memory` 才真 ephemeral。
+- **修 `parseRetryAfterMs` 漏英文单位**：只认中文单位，上游文案换成
+  `retry after 5 seconds` 就静默退化成「无时长」。补英文单位时还抓到一个**新引入的
+  30 倍退避差**——单位写成了非捕获组 `(?:...)`，`en[2]` 恒为 undefined，`2 minutes`
+  会被当成 2 秒。
+- **修 HTML 响应被塞进面板**：`use-snapshot-polling` 的裸 `await response.json()`
+  在反向代理/登录墙回 HTML 时抛 SyntaxError，而 `errorText` 对 Error 返回
+  `.message`，于是那段 HTML 源码会显示在面板正文（同仓 `http.ts` 早有 `.catch`，
+  这里是漏）。
+- 新增两个套件：`test/codes.test.mjs`（`classifyRateLimit` 此前**零测试覆盖**，所以
+  它能悄悄漂移）、`test/credentials.test.mjs`（红线 1 的专属门禁，此前也没有）。
+  后者逐档比对入口与脱敏闸**同宽**——这是防「进得来却遮不住」的关键不变量。
+
+### 第一轮：漂移收口与门禁补强
 
 - **修配置面漂移（会误导用户的那一处）**：`cordis.patch.yml` 仍写着「本地计数只覆盖
   probe、不覆盖 provider 接入后的对话推理调用」——该说法在 `usage-observer` 落地时就
@@ -21,8 +77,9 @@
 - **清悬空引用**：源码里 20+ 处引用本仓库不存在的 `PITFALLS §NN` / `docs/IMPROVEMENTS.md`、
   以及一个本仓库没有的 Raccoon 插件的 bug 史。**保留知识、删掉死指针**——坑是什么仍写
   在注释里，只是不再指向查不到的编号。
-- **新增 CI**（`.github/workflows/gate.yml`）：typecheck + 16 套件离线门禁。CI 是唯一能
-  抓到「提交了忘 build」的地方（本地若产物是入库的，差异只存在于提交内容里）。
+- **新增 CI**（`.github/workflows/gate.yml`）：typecheck + 18 套件离线门禁。CI 是唯一能
+  抓到「提交了忘 build」的地方。`on` 加了引号（裸 `on` 被 YAML 1.1 解析成布尔 true，
+  工作流不报错但永不触发）。
 
 ## [0.1.0] — 2026-10-05
 

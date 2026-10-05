@@ -58,6 +58,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"panel.networkError": "无法连接本机 Host，通常是临时故障，下一轮自动刷新即可恢复。",
 			"panel.timeout": "请求超时，下一轮自动刷新即可恢复。",
 			"panel.upstream": "魔搭暂时无法读取，通常下一次自动刷新即可恢复。",
+			"panel.internalError": "插件内部错误，不是令牌或配置问题；请查看 DSH 日志中的插件名。",
 			"panel.authError": "令牌被拒绝（401/403）。请到「接入」tab 更换访问令牌。",
 			"panel.noToken": "还没有配置魔搭访问令牌。到「接入」tab 粘贴一枚 ms-… 令牌即可。",
 			"panel.shapeDrift": "上游返回的结构可能有变：{detail}",
@@ -141,6 +142,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"panel.networkError": "Cannot reach the local Host — usually transient, the next auto-refresh will recover.",
 			"panel.timeout": "Request timed out; the next auto-refresh will recover.",
 			"panel.upstream": "ModelScope is temporarily unreadable; the next auto-refresh usually recovers.",
+			"panel.internalError": "Internal plugin error — not a token or configuration problem. Check the DSH log for the plugin name.",
 			"panel.authError": "Token rejected (401/403). Replace the access token in the Access tab.",
 			"panel.noToken": "No ModelScope access token configured yet. Paste an ms-… token in the Access tab.",
 			"panel.shapeDrift": "Upstream shape may have changed: {detail}",
@@ -800,8 +802,96 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	}));
 
 //#endregion
+//#region src/shared/wire.ts
+	var SNAPSHOT_REQUIRED_KEYS;
+	var init_wire = __esmMin((() => {
+		SNAPSHOT_REQUIRED_KEYS = Object.freeze([
+			"ok",
+			"name",
+			"version",
+			"now",
+			"pollSeconds",
+			"cacheSeconds",
+			"token",
+			"balance",
+			"quota",
+			"events",
+			"trend",
+			"models",
+			"provider",
+			"shapeWarnings",
+			"quotaError"
+		]);
+	}));
+
+//#endregion
 //#region src/client/snapshot.ts
-/** 读一个快照应答。HTTP 恒 200，成败看 body.ok。 */
+/**
+	* 缺失块的空形状，**逐字对齐 Host 的降级实现**（`snapshot-aggregate.ts` 的
+	* `providerDegraded` 与各 `soft()` 失败分支、TokenStatus 的失败分支）。
+	*
+	* 这里的每一条都是「Host 那一路失败时真的产出的形状」，不是随手捏的：面板渲染
+	* 的每一个字段都必须有一个与 Host 同构的空值，否则补出来的空块自己就会炸——
+	* 那正是本函数存在的原因。
+	*/
+	function emptyBlock(key) {
+		switch (key) {
+			case "token": return {
+				present: false,
+				source: "none",
+				valid: null,
+				checkedAt: null,
+				ephemeral: true
+			};
+			case "balance": return {
+				available: null,
+				total: null,
+				frozen: null,
+				fetchedAt: null,
+				error: null
+			};
+			case "quota": return {
+				daily: { usedLocal: 0 },
+				perModel: [],
+				countingNote: "local-counting"
+			};
+			case "events": return [];
+			case "trend": return {
+				days: 0,
+				buckets: []
+			};
+			case "models": return {
+				available: false,
+				count: 0,
+				sample: [],
+				error: null
+			};
+			case "provider": return DEGRADED_PROVIDER;
+			case "shapeWarnings":
+			case "quotaError": return key === "quotaError" ? null : [];
+			default: return;
+		}
+	}
+	/** 把缺失的顶层键补成空形状（不改原body，返回新对象）。 */
+	function withEmptyBlocks(raw, missingKeys) {
+		const out = { ...raw };
+		for (const key of missingKeys) out[key] = emptyBlock(key);
+		return out;
+	}
+	/**
+	* 读一个快照应答。HTTP 恒 200，成败看 body.ok。
+	*
+	* `ok:true` 的body **必须**带齐 {@link SNAPSHOT_REQUIRED_KEYS} 的每个顶层键，
+	* 缺一个都在这里被归一，而不是留到渲染期炸掉。曾经这里是裸 cast，于是
+	* `panel-page.ts` 里 `data?.models.sample[0]` 这类解引用会抛 TypeError 把整个面板
+	* 炸掉——`data?.` 只护住了 `data` 本身，护不住它下面的 `models`。而那一行在
+	* **所有 tab 上都执行**，所以任意一个键缺失都不止炸当前 tab。
+	*
+	* 缺键走两件事：把确实缺的那个块补成同构的空形状（让面板渲染「空」而不是
+	* 崩），并把缺失名单带进 `shapeWarnings` 的等价物——`SnapshotRead` 上的
+	* `missingKeys`，由 `viewOf` 呈现给用户。**不**静默：Host 少给键是双端契约
+	* 漂移，用户该看见。
+	*/
 	function interpretSnapshot(body) {
 		const payload = body;
 		if (payload && payload.ok === false) return {
@@ -815,9 +905,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			data: null,
 			error: "unexpected payload"
 		};
+		const raw = payload;
+		const missingKeys = SNAPSHOT_REQUIRED_KEYS.filter((key) => raw[key] === void 0);
 		return {
-			data: payload,
-			error: null
+			data: missingKeys.length === 0 ? raw : withEmptyBlocks(raw, missingKeys),
+			error: null,
+			missingKeys
 		};
 	}
 	/**
@@ -860,25 +953,36 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		};
 		return `HTTP ${status}`;
 	}
-	/** 面板决策：这张快照意味着什么。纯函数，Node 套件驱动同一个函数。 */
-	function viewOf(data, error, tt) {
+	/**
+	* 面板决策：这张快照意味着什么。纯函数，Node 套件驱动同一个函数。
+	*
+	* `missingKeys` 是 `interpretSnapshot` 查出的缺失顶层键（非空 = 双端契约漂移）。
+	* 它**不**把面板变成错误态——数据能渲染就渲染——但会作为一条 shapeWarning
+	* 冒到面板上，因为「Host 少给了键」是维护者要修的事，用户该看见而不是面对
+	* 一个悄悄少了一半信息的界面。
+	*/
+	function viewOf(data, error, tt, missingKeys = []) {
 		const failure = error === null || error === void 0 ? null : typeof error === "string" ? {
 			message: error,
 			code: null
 		} : error;
 		const needsSetup = data === null && !FORM_EXCLUDED_CODES.has(failure?.code ?? null);
 		const guidanceKey = failure === null ? null : GUIDANCE_BY_CODE[failure.code] ?? null;
+		const guidance = guidanceKey === null ? null : guidanceKey === "panel.configError" ? format(tt(guidanceKey), { error: failure?.message }) : tt(guidanceKey);
+		const shapeWarnings = Array.isArray(data?.shapeWarnings) ? [...data.shapeWarnings] : [];
+		if (missingKeys.length > 0) shapeWarnings.push(`snapshot: Host omitted required key(s): ${missingKeys.join(", ")}`);
 		return {
 			failure,
 			needsSetup,
 			guidanceKey,
-			guidance: guidanceKey === null ? null : guidanceKey === "panel.configError" ? format(tt(guidanceKey), { error: failure?.message }) : tt(guidanceKey),
-			shapeWarnings: Array.isArray(data?.shapeWarnings) ? data.shapeWarnings : []
+			guidance,
+			shapeWarnings
 		};
 	}
 	var DEGRADED_PROVIDER, GUIDANCE_BY_CODE, FORM_EXCLUDED_CODES;
 	var init_snapshot = __esmMin((() => {
 		init_format();
+		init_wire();
 		DEGRADED_PROVIDER = Object.freeze({
 			enabled: false,
 			source: "config",
@@ -898,7 +1002,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			timeout_error: "panel.timeout",
 			upstream_error: "panel.upstream",
 			rate_limited: "panel.upstream",
-			quota_exceeded: "panel.upstream"
+			quota_exceeded: "panel.upstream",
+			internal_error: "panel.internalError"
 		});
 		FORM_EXCLUDED_CODES = Object.freeze(/* @__PURE__ */ new Set([
 			"config_error",
@@ -906,7 +1011,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"timeout_error",
 			"upstream_error",
 			"rate_limited",
-			"quota_exceeded"
+			"quota_exceeded",
+			"internal_error"
 		]));
 	}));
 
@@ -1040,7 +1146,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	* 本地计数回答的是官方余额回答不了的问题：哪个模型在烧、何时撞的 429。
 	*/
 	function LocalDailyCard({ snapshot, tt }) {
-		const { daily, perModel } = snapshot.quota;
+		const quota = snapshot.quota;
+		const daily = quota?.daily ?? { usedLocal: 0 };
+		const perModel = Array.isArray(quota?.perModel) ? quota.perModel : [];
 		return h("div", { style: S.card }, h("div", { style: S.poolName }, format(tt("quota.headline"), {
 			calls: count(daily.usedLocal),
 			models: count(perModel.length)
@@ -1109,14 +1217,14 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	/** 令牌表单：保存 / 忘掉 / 验令牌 + 状态行 + 外链。唯一持 state 的展示组件。 */
 	function TokenForm({ token, busy, error, onSave, onForget, onVerify, verifyTitle, tt }) {
 		const [value, setValue] = useState("");
-		const source = token === null ? "none" : token.source;
+		const source = token?.source ?? "none";
 		const sourceKey = source === "credentials" ? "source.credentials" : source === "env" ? "source.env" : source === "memory" ? "source.memory" : "source.none";
-		const validKey = token !== null && token.valid === true ? "validity.yes" : "validity.no";
+		const validKey = token?.valid === true ? "validity.yes" : "validity.no";
 		return h("div", null, h("div", { style: S.quotaUsed }, format(tt("token.status"), {
-			present: token !== null && token.present ? tt("present.yes") : tt("present.no"),
+			present: token?.present ? tt("present.yes") : tt("present.no"),
 			source: tt(sourceKey),
 			valid: tt(validKey)
-		})), token !== null && token.ephemeral ? h("div", { style: S.formNote }, tt("token.ephemeral")) : null, h("div", { style: S.rosterTools }, h("input", {
+		})), token?.ephemeral ? h("div", { style: S.formNote }, tt("token.ephemeral")) : null, h("div", { style: S.rosterTools }, h("input", {
 			style: S.input,
 			type: "password",
 			placeholder: tt("token.placeholder"),
@@ -1130,7 +1238,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				onSave(value);
 				setValue("");
 			}
-		}, tt("token.save")), token !== null && token.present ? h("button", {
+		}, tt("token.save")), token?.present ? h("button", {
 			type: "button",
 			style: S.button,
 			disabled: busy,
@@ -1452,8 +1560,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const [loadedOnce, setLoadedOnce] = useState(false);
 		const [updatedAt, setUpdatedAt] = useState(0);
 		const [cadenceMs, setCadenceMs] = useState(defaultCadenceMs);
+		/** Host 少给的顶层键（契约漂移）；透给面板当 shapeWarning，不静默。 */
+		const [missingKeys, setMissingKeys] = useState([]);
 		const generation = useRef(0);
 		const inFlight = useRef(null);
+		const cadenceRef = useRef(cadenceMs);
+		cadenceRef.current = cadenceMs;
 		const load = useCallback(async () => {
 			generation.current += 1;
 			const mine = generation.current;
@@ -1472,19 +1584,21 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 					setError(errorOfStatus(response.status));
 					return;
 				}
-				const body = await response.json();
+				const body = await response.json().catch(() => null);
 				if (!isCurrent()) return;
 				const read = interpretSnapshot(body);
 				if (read.data === null) {
 					setData(null);
+					setMissingKeys([]);
 					setError(read.error);
 					return;
 				}
 				setData(read.data);
+				setMissingKeys(read.missingKeys ?? []);
 				setError(null);
 				setUpdatedAt(Date.now());
 				const stated = read.data?.pollSeconds;
-				if (typeof stated === "number" && Number.isFinite(stated)) setCadenceMs(statedCadenceMs(stated, cadenceMs));
+				if (typeof stated === "number" && Number.isFinite(stated)) setCadenceMs(statedCadenceMs(stated, cadenceRef.current));
 			} catch (reason) {
 				if (!isCurrent()) return;
 				setError(errorText(reason));
@@ -1492,7 +1606,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				if (isCurrent()) setLoadedOnce(true);
 				if (inFlight.current === controller) inFlight.current = null;
 			}
-		}, [cadenceMs]);
+		}, []);
 		usePollingInterval(load, cadenceMs, { failed: error !== null });
 		useEffect(() => () => {
 			generation.current += 1;
@@ -1503,7 +1617,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			error,
 			loadedOnce,
 			updatedAt,
-			load
+			load,
+			missingKeys
 		};
 	}
 	var init_use_snapshot_polling = __esmMin((() => {
@@ -1517,7 +1632,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 //#endregion
 //#region src/client/panel-page.ts
 	function PanelPage({ tt, localeSubscribe }) {
-		const { data, error, loadedOnce, updatedAt, load } = useSnapshotPolling();
+		const { data, error, loadedOnce, updatedAt, load, missingKeys } = useSnapshotPolling();
 		const [, setLocaleRevision] = useState(0);
 		const [openSections, setOpenSections] = useState({
 			balance: true,
@@ -1538,7 +1653,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				[key]: !current[key]
 			}));
 		}, []);
-		const { failure, needsSetup, guidance, shapeWarnings } = viewOf(data, error, tt);
+		const { failure, needsSetup, guidance, shapeWarnings } = viewOf(data, error, tt, missingKeys);
 		const showSetup = needsSetup && loadedOnce;
 		const rawProvider = data?.provider;
 		const hasProviderBlock = rawProvider !== void 0 && rawProvider !== null;
@@ -1600,7 +1715,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			}
 		}, [load]);
 		const tokenState = data?.token ?? null;
-		const sampleModel = data?.models.sample[0] ?? null;
+		const sampleModel = data?.models?.sample?.[0] ?? null;
 		const [verifyBusy, setVerifyBusy] = useState(false);
 		const [verifyNote, setVerifyNote] = useState(null);
 		const [verifyError, setVerifyError] = useState(null);
@@ -1628,7 +1743,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				role: "alert"
 			}, guidance ?? format(tt("panel.error"), { error: failure.message }));
 			const snap = data;
-			return h("div", null, snap.token.present === false ? h("div", {
+			return h("div", null, snap.token?.present === false ? h("div", {
 				style: S.formNote,
 				role: "status"
 			}, tt("panel.noToken")) : null, h(SectionCard, {
@@ -1648,12 +1763,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				snapshot: snap,
 				tt
 			})), h(SectionCard, {
-				title: format(tt("section.trend"), { days: snap.trend.days }),
+				title: format(tt("section.trend"), { days: snap.trend?.days ?? 0 }),
 				open: openSections.trend,
 				onToggle: () => toggleSection("trend"),
 				tt
 			}, h(TrendBars, {
-				buckets: snap.trend.buckets,
+				buckets: snap.trend?.buckets ?? [],
 				tt
 			})), h(SectionCard, {
 				title: tt("section.events"),
@@ -1661,7 +1776,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				onToggle: () => toggleSection("events"),
 				tt
 			}, h(EventsList, {
-				events: snap.events,
+				events: snap.events ?? [],
 				tt
 			})));
 		};
@@ -1677,7 +1792,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			onToggle: toggleProvider,
 			onSaveList: saveRoster,
 			onReset: resetProvider,
-			tokenPresent: data?.token.present === true,
+			tokenPresent: data?.token?.present === true,
 			tt
 		})));
 		const accessBody = () => h("div", null, h(SectionCard, {

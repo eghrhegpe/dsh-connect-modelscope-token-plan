@@ -157,17 +157,45 @@ export function createFileUsageStore({ name, profile = null, trendDays = 14, max
   /** 写串行化：读-改-写必须排队，两个并发 recordCall 不能互相覆盖。 */
   let writeChain: Promise<void> = Promise.resolve();
 
+  /**
+   * 磁盘版本闸 —— 读路径与写路径**各自**调用，不共享副作用。
+   *
+   * 为什么必须两边都直接调（而不是让读路径置位、写路径顺带检查）：这个函数
+   * 早先只在 `readThrough` 里被调用，而写路径的守卫写在 `enqueue` 开头——那时
+   * `readOnly` 还没被置位（置位发生在随后的 `cache.read()` 内部），于是**守卫永远
+   * 比真正的探测晚一步**，旧构建会用一个空载荷把新构建的 usage.json 降级覆写
+   * （实测：version 2 → 1，110 次历史归零，而日志还在说 "recording disabled to
+   * avoid clobbering"——日志与磁盘状态互相撒谎）。
+   *
+   * 现在写路径在 mutate 之前**自己**读一次盘，判据与执行之间不再隔着一个 await。
+   *
+   * @returns `true` = 磁盘版本比本构建新（写必须拒绝）；`false` = 可以写。
+   */
+  const diskVersionBlocksWrites = async (): Promise<boolean> => {
+    const onDisk = await readStateVersion(file);
+    if (onDisk !== null && !isKnownStateVersion(onDisk, KNOWN_VERSIONS)) {
+      const note = `usage-state: on-disk version ${onDisk} is newer than this build knows`;
+      if (!readOnly) logger?.warn?.(`${name}: ${note} — recording disabled to avoid clobbering`);
+      anomaly = note;
+      readOnly = true;
+      return true;
+    }
+    // 版本已知（或文件不存在）→ 闸可以开。**复位**是这里的关键：闩锁曾经只置位
+    // 不复位，于是用户按doctor 的建议删掉 usage.json 之后，readOnly 永远停在
+    // true——文件永不重建、每次写入静默丢弃，而面板还在显示内存里的残留数字，
+    // 唯一出路是重启 Host。删文件是用户可见的恢复手段，闩锁必须认。
+    if (readOnly) {
+      logger?.warn?.(`${name}: usage-state: version guard lifted (on-disk version ${onDisk ?? "none"}) — recording resumed`);
+      readOnly = false;
+    }
+    return false;
+  };
+
   /** 读盘（缓存穿透）；返回 null = 无记录或损坏。 */
   const readThrough = async (): Promise<UsagePayload | null> => {
     // 版本守卫先于解析：未知版本是**更新构建**写的，读作空并进入只读——
     // 只挡读不挡写的话，下一次 recordCall 会用一个空载荷覆写新版文件。
-    const onDisk = await readStateVersion(file);
-    if (onDisk !== null && !isKnownStateVersion(onDisk, KNOWN_VERSIONS)) {
-      anomaly = `usage-state: on-disk version ${onDisk} is newer than this build knows`;
-      readOnly = true;
-      logger?.warn?.(`${name}: ${anomaly} — recording disabled to avoid clobbering`);
-      return null;
-    }
+    if (await diskVersionBlocksWrites()) return null;
     const parsed = parsePayload(await readStateJson(file));
     anomaly = parsed.anomaly;
     if (parsed.anomaly !== null) logger?.warn?.(`${name}: ${parsed.anomaly} — starting from empty`);
@@ -186,7 +214,10 @@ export function createFileUsageStore({ name, profile = null, trendDays = 14, max
   /** 排队执行一次读-改-写；只读闸置位时整个变更是 no-op。 */
   const enqueue = (mutate: (payload: UsagePayload) => void) => {
     const run = writeChain.then(async () => {
-      if (readOnly) return;
+      // 守卫在这里**自己**读盘，而不是依赖 readThrough 的副作用——见
+      // diskVersionBlocksWrites 的注释：这个 await 之后才可能发生写入，所以
+      // 判据必须落在同一个 await 链上，中间不能隔任何东西。
+      if (await diskVersionBlocksWrites()) return;
       const fromDisk = loaded ? current : ((await cache.read()) ?? null);
       const payload: UsagePayload = fromDisk ?? { version: STATE_VERSION, days: {}, models: {}, events: [] };
       mutate(payload);

@@ -89,7 +89,12 @@ export function BalanceCard({ balance, tt }: { balance: BalanceData | null | unk
  * 本地计数回答的是官方余额回答不了的问题：哪个模型在烧、何时撞的 429。
  */
 export function LocalDailyCard({ snapshot, tt }: { snapshot: Snapshot; tt: Tt }): unknown {
-  const { daily, perModel } = snapshot.quota;
+  // 与 BalanceCard / ModelUsageTable / EventsList 同一纪律：形状不对渲染「空」，
+  // 绝不抛。曾经这里是裸解构，quota 一旦缺失就TypeError——而本文件头部就写着
+  // 「形状不对的数据渲染『空』，绝不抛」，自己没做到。
+  const quota = snapshot.quota;
+  const daily = quota?.daily ?? { usedLocal: 0 };
+  const perModel = Array.isArray(quota?.perModel) ? quota.perModel : [];
   return h(
     "div",
     { style: S.card },
@@ -174,26 +179,29 @@ export function TokenForm({ token, busy, error, onSave, onForget, onVerify, veri
   tt: Tt;
 }): unknown {
   const [value, setValue] = useState("");
-  const source = token === null ? "none" : token.source;
+  // 守卫必须用 `== null` 而不是 `=== null`：调用点是 `data?.token ?? null`，
+  // 而 `??` 只在null/undefined 之间桥接——`data` 存在但 `token` 键缺失时
+  // `data?.token` 是 undefined，喂进来就把这里带进崩路径（读 undefined.source）。
+  const source = token?.source ?? "none";
   const sourceKey = (source === "credentials" ? "source.credentials" : source === "env" ? "source.env" : source === "memory" ? "source.memory" : "source.none") as Parameters<Tt>[0];
   // TokenStatus.valid 恒 null（v0.1 不在快照里断言有效性）→ 显示「未校验」；
   // 验令牌按钮的即时结果由调用方渲染在表单下方，不进这条状态行。
-  const validKey = (token !== null && token.valid === true ? "validity.yes" : "validity.no") as Parameters<Tt>[0];
+  const validKey = (token?.valid === true ? "validity.yes" : "validity.no") as Parameters<Tt>[0];
   return h(
     "div",
     null,
     h("div", { style: S.quotaUsed }, format(tt("token.status"), {
-      present: token !== null && token.present ? tt("present.yes") : tt("present.no"),
+      present: token?.present ? tt("present.yes") : tt("present.no"),
       source: tt(sourceKey),
       valid: tt(validKey)
     })),
-    token !== null && token.ephemeral ? h("div", { style: S.formNote }, tt("token.ephemeral")) : null,
+    token?.ephemeral ? h("div", { style: S.formNote }, tt("token.ephemeral")) : null,
     h(
       "div",
       { style: S.rosterTools },
       h("input", { style: S.input, type: "password", placeholder: tt("token.placeholder"), value, onChange: (event: unknown) => setValue(String((event as { target: { value: string } }).target.value ?? "")) }),
       h("button", { type: "button", style: S.primary, disabled: busy, onClick: () => { onSave(value); setValue(""); } }, tt("token.save")),
-      token !== null && token.present ? h("button", { type: "button", style: S.button, disabled: busy, onClick: onForget }, tt("token.forget")) : null,
+      token?.present ? h("button", { type: "button", style: S.button, disabled: busy, onClick: onForget }, tt("token.forget")) : null,
       onVerify !== undefined ? h("button", { type: "button", style: S.button, disabled: busy, onClick: onVerify, title: verifyTitle }, tt("probe.validity")) : null
     ),
     error !== null ? h("div", { style: S.formError, role: "alert" }, error) : null,

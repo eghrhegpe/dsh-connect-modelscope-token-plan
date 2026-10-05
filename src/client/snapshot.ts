@@ -9,6 +9,7 @@ import { format } from "./format.ts";
 import type { zh } from "./i18n.ts";
 import type { Tt } from "./runtime.ts";
 import type { Snapshot, SnapshotResponse, ProviderStatus } from "../shared/wire.ts";
+import { SNAPSHOT_REQUIRED_KEYS } from "../shared/wire.ts";
 
 /**
  * 面板视图层的失败形状（与 wire.ts 的 `SnapshotFailure` 同名异形曾是漂移源，
@@ -24,6 +25,55 @@ export interface PanelFailure {
 export interface SnapshotRead {
   data: Snapshot | null;
   error: PanelFailure | string | null;
+  /**
+   * `ok:true` 但缺失的顶层键（`SNAPSHOT_REQUIRED_KEYS` 的子集）。
+   *
+   * 空数组 = 契约完整。非空 = Host 少给了键，属双端漂移——面板据此在
+   * `viewOf` 里加一条提示，而不是静默渲染半空的面板。
+   */
+  missingKeys?: readonly string[];
+}
+
+/**
+ * 缺失块的空形状，**逐字对齐 Host 的降级实现**（`snapshot-aggregate.ts` 的
+ * `providerDegraded` 与各 `soft()` 失败分支、TokenStatus 的失败分支）。
+ *
+ * 这里的每一条都是「Host 那一路失败时真的产出的形状」，不是随手捏的：面板渲染
+ * 的每一个字段都必须有一个与 Host 同构的空值，否则补出来的空块自己就会炸——
+ * 那正是本函数存在的原因。
+ */
+function emptyBlock(key: string): unknown {
+  switch (key) {
+    case "token":
+      return { present: false, source: "none", valid: null, checkedAt: null, ephemeral: true };
+    case "balance":
+      return { available: null, total: null, frozen: null, fetchedAt: null, error: null };
+    case "quota":
+      return { daily: { usedLocal: 0 }, perModel: [], countingNote: "local-counting" };
+    case "events":
+      return [];
+    case "trend":
+      return { days: 0, buckets: [] };
+    case "models":
+      return { available: false, count: 0, sample: [], error: null };
+    case "provider":
+      // 与 DEGRADED_PROVIDER 同源；用同一个常量避免两处漂移。
+      return DEGRADED_PROVIDER;
+    case "shapeWarnings":
+    case "quotaError":
+      return key === "quotaError" ? null : [];
+    // 标量键（ok/name/version/now/pollSeconds/cacheSeconds）补undefined 就够：
+    // 渲染层对它们各自有兜底（数字 NaN 不上屏、`?? null` 落到「—」）。
+    default:
+      return undefined;
+  }
+}
+
+/** 把缺失的顶层键补成空形状（不改原body，返回新对象）。 */
+function withEmptyBlocks(raw: Record<string, unknown>, missingKeys: readonly string[]): Record<string, unknown> {
+  const out = { ...raw };
+  for (const key of missingKeys) out[key] = emptyBlock(key);
+  return out;
 }
 
 /** viewOf 的裁决：这张快照对面板意味着什么。 */
@@ -36,17 +86,32 @@ export interface SnapshotView {
   shapeWarnings: string[];
 }
 
-/** 读一个快照应答。HTTP 恒 200，成败看 body.ok。 */
+/**
+ * 读一个快照应答。HTTP 恒 200，成败看 body.ok。
+ *
+ * `ok:true` 的body **必须**带齐 {@link SNAPSHOT_REQUIRED_KEYS} 的每个顶层键，
+ * 缺一个都在这里被归一，而不是留到渲染期炸掉。曾经这里是裸 cast，于是
+ * `panel-page.ts` 里 `data?.models.sample[0]` 这类解引用会抛 TypeError 把整个面板
+ * 炸掉——`data?.` 只护住了 `data` 本身，护不住它下面的 `models`。而那一行在
+ * **所有 tab 上都执行**，所以任意一个键缺失都不止炸当前 tab。
+ *
+ * 缺键走两件事：把确实缺的那个块补成同构的空形状（让面板渲染「空」而不是
+ * 崩），并把缺失名单带进 `shapeWarnings` 的等价物——`SnapshotRead` 上的
+ * `missingKeys`，由 `viewOf` 呈现给用户。**不**静默：Host 少给键是双端契约
+ * 漂移，用户该看见。
+ */
 export function interpretSnapshot(body: unknown): SnapshotRead {
   const payload = body as { ok?: unknown; error?: unknown; code?: unknown } | null | undefined;
   if (payload && payload.ok === false) {
     return { data: null, error: { message: payload.error || "unexpected payload", code: payload.code } };
   }
   if (!payload || payload.ok !== true) return { data: null, error: "unexpected payload" };
-  // provider 块原样透传：它就是 body 上的顶层字段，`data` 的裸 cast 已经带上。
-  // 失败分支没有 provider 块可言（data 恒 null）——调用方用 providerOf(null) 拿到
-  // DEGRADED_PROVIDER，那就是失败时的降级形状，两条路不会互相漂移。
-  return { data: payload as unknown as Snapshot, error: null };
+  const raw = payload as unknown as Record<string, unknown>;
+  const missingKeys = SNAPSHOT_REQUIRED_KEYS.filter((key) => raw[key] === undefined);
+  // provider 块原样透传：它就是 body 上的顶层字段，裸 cast 已经带上；缺失时由
+  // providerOf(null) 给出 DEGRADED_PROVIDER，两条路不会互相漂移。
+  const filled = missingKeys.length === 0 ? raw : withEmptyBlocks(raw, missingKeys);
+  return { data: filled as unknown as Snapshot, error: null, missingKeys };
 }
 
 /**
@@ -118,19 +183,32 @@ export const GUIDANCE_BY_CODE: Readonly<Record<string, keyof typeof zh>> = Objec
   timeout_error: "panel.timeout",
   upstream_error: "panel.upstream",
   rate_limited: "panel.upstream",
-  quota_exceeded: "panel.upstream"
+  quota_exceeded: "panel.upstream",
+  // 聚合器自身抛错时的兜底码（Host 的 soft()/failureCode 在无 code 时产出它）。
+  // 曾经漏在这里：最需要人看的内部错误反而没有引导文案，且因为不在
+  // FORM_EXCLUDED_CODES 里，needsSetup 会算成 true——把一个内部错误引导去「配
+  // 令牌」，方向完全反了。
+  internal_error: "panel.internalError"
 });
 
 /** 这些码不是「配令牌」能修的：引导行不是去贴令牌，而是等/修配置。 */
 export const FORM_EXCLUDED_CODES: ReadonlySet<string> = Object.freeze(
-  new Set(["config_error", "network_error", "timeout_error", "upstream_error", "rate_limited", "quota_exceeded"])
+  new Set(["config_error", "network_error", "timeout_error", "upstream_error", "rate_limited", "quota_exceeded", "internal_error"])
 );
 
-/** 面板决策：这张快照意味着什么。纯函数，Node 套件驱动同一个函数。 */
+/**
+ * 面板决策：这张快照意味着什么。纯函数，Node 套件驱动同一个函数。
+ *
+ * `missingKeys` 是 `interpretSnapshot` 查出的缺失顶层键（非空 = 双端契约漂移）。
+ * 它**不**把面板变成错误态——数据能渲染就渲染——但会作为一条 shapeWarning
+ * 冒到面板上，因为「Host 少给了键」是维护者要修的事，用户该看见而不是面对
+ * 一个悄悄少了一半信息的界面。
+ */
 export function viewOf(
   data: Snapshot | null,
   error: PanelFailure | string | null,
-  tt: Tt
+  tt: Tt,
+  missingKeys: readonly string[] = []
 ): SnapshotView {
   const failure: PanelFailure | null = error === null || error === undefined
     ? null
@@ -142,7 +220,10 @@ export function viewOf(
     : guidanceKey === "panel.configError"
       ? format(tt(guidanceKey), { error: failure?.message })
       : tt(guidanceKey);
-  const shapeWarnings = Array.isArray(data?.shapeWarnings) ? (data.shapeWarnings as string[]) : [];
+  const shapeWarnings = Array.isArray(data?.shapeWarnings) ? [...(data.shapeWarnings as string[])] : [];
+  if (missingKeys.length > 0) {
+    shapeWarnings.push(`snapshot: Host omitted required key(s): ${missingKeys.join(", ")}`);
+  }
   return { failure, needsSetup, guidanceKey, guidance, shapeWarnings };
 }
 

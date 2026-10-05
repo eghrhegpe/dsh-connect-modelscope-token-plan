@@ -12,6 +12,7 @@
  * @module dsh-connect-modelscope-token-plan/snapshot-aggregate
  */
 import { PLUGIN_VERSION, name } from "./host-config.ts";
+import { CODE } from "./codes.ts";
 import { rosterWithAvailability, resolveAllowedList } from "./llm-models.ts";
 import { resolveSwitchEnabled, switchSource } from "./switch-precedence.ts";
 import { errMsg } from "./util.ts";
@@ -27,7 +28,7 @@ async function soft<T>(promise: Promise<T>): Promise<{ ok: true; value: T } | { 
     return {
       ok: false,
       error: errMsg(error),
-      code: typeof code === "string" ? code : "internal_error"
+      code: typeof code === "string" ? code : CODE.INTERNAL_ERROR
     };
   }
 }
@@ -165,5 +166,5 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
 /** 聚合器自身抛错时的失败码（快照路由的 ok:false 分支用）。 */
 export function failureCode(error: unknown): string {
   const code = (error as { code?: unknown }).code;
-  return typeof code === "string" ? code : "internal_error";
+  return typeof code === "string" ? code : CODE.INTERNAL_ERROR;
 }

@@ -1,7 +1,7 @@
 // usage-store 行为测试：注入 DSH_HOME 到临时目录，隔离的 profile 段里跑。
 // 覆盖：天桶/单模型计数、跨日清零、事件有界、损坏即忽略、版本只读闸。
 import { strict as assert } from "node:assert";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFileUsageStore, localDateKey } from "../src/host/usage-store.ts";
@@ -94,6 +94,61 @@ assert.equal((await future.daily()).calls, 0, "未知版本读作空");
 await future.recordCall({ modelId: "m/y", tokens: null, at: t0 });
 assert.equal(JSON.parse(readFileSync(file, "utf8")).version, 2, "只读闸：新版本文件未被覆写");
 assert.equal((await future.state()).readOnly, true);
+
+// §7b 守卫必须在**第一次写入**之前就位，不能靠读路径的副作用。
+//
+// 回归用例，对应一次真实事故：守卫早先写在 enqueue 开头，而 readOnly 的置位
+// 发生在其后的 cache.read() 内部——判据比真正的探测晚了一步，于是**首次**
+// recordCall 就用空载荷把version 2 的文件降级覆写成 version 1（实测两天共 110
+// 次历史归零，而日志还在说 "recording disabled to avoid clobbering"：日志与磁盘
+// 状态互相撒谎）。§7 测的是「先读后写」，恰好绕过了这一步，所以全绿。
+//
+// 这里**不读**就直接写：新实例的第一个动作必须是 recordCall。
+{
+  const v2 = JSON.stringify({
+    version: 2,
+    days: { "2026-10-01": { calls: 50, tokens: 5000 }, "2026-10-02": { calls: 60, tokens: 6000 } },
+    models: {},
+    events: []
+  });
+  writeFileSync(file, v2, "utf8");
+  warnings.length = 0;
+  const blind = makeStore();
+  await blind.recordCall({ modelId: "m/first", tokens: 1, at: t0 });
+  assert.equal(
+    readFileSync(file, "utf8"),
+    v2,
+    "首次写入（未经任何读）也不得clobber 新版本文件"
+  );
+  const onDisk = JSON.parse(readFileSync(file, "utf8"));
+  assert.equal(onDisk.version, 2, "磁盘版本保持 2，不被降级覆写");
+  assert.equal(onDisk.days["2026-10-01"].calls, 50, "历史天桶保持不变");
+  assert.equal(onDisk.days["2026-10-02"].calls, 60, "历史天桶保持不变");
+  assert.ok(
+    warnings.some((m) => /newer than this build knows/.test(m)),
+    "并且要留下警告（此前是「日志说在保护、磁盘已被抹」）"
+  );
+}
+
+// §7c 只读闸必须能复位：删掉文件是用户可见的恢复手段（doctor 就是这么建议的）。
+//
+// 闩锁曾经只置位不复位，于是这条路径永久静默：文件不重建、每次写入被丢弃，面板
+// 却还在显示内存里的残留数字，用户唯一出路是重启 Host。
+{
+  writeFileSync(file, JSON.stringify({ version: 2, days: { "2026-10-01": { calls: 9, tokens: 9 } } }), "utf8");
+  const latched = makeStore();
+  await latched.recordCall({ modelId: "m/a", tokens: 1, at: t0 });
+  assert.equal((await latched.state()).readOnly, true, "先闩住");
+  rmSync(file, { force: true });
+  await latched.recordCall({ modelId: "m/b", tokens: 5, at: t0 });
+  assert.ok(existsSync(file), "删文件后写入必须恢复（闩锁要复位）");
+  assert.equal(
+    JSON.parse(readFileSync(file, "utf8")).models["m/b"].tokens,
+    5,
+    "恢复后的新计数真的落盘了"
+  );
+  assert.equal((await latched.state()).readOnly, false, "闩锁已复位");
+}
 
 // §8 localDateKey 是本地时区日历天。
 assert.equal(localDateKey(new Date(2026, 9, 4)), "2026-10-04");

@@ -148,15 +148,28 @@ export function resolveAllowedHosts(source: Record<string, unknown>): Set<string
   return admitted;
 }
 
-/** 从 Host 头里剥端口；IPv6 字面量保留方括号。 */
+/**
+ * 从 Host 头里剥端口；非法形状返回空串（被 {@link isAdmitted} 拒绝）。
+ *
+ * IPv6 字面量必须**整体**匹配 `[...]` 或 `[...]:port`：方括号闭合之后只允许空
+ * 或 `:端口`，其余一律拒绝。曾经这里只「截断到第一个 `]` 就返回」，于是
+ * `Host: [::1]evil.com` 读成 `[::1]` 并**通过**围栏——白名单是精确集合，前缀
+ * 匹配等于把它放宽成「以白名单成员开头」。
+ */
 export function hostName(host: string): string {
-  // "[::1]:8080" 保留方括号；"localhost:8080" 剥掉端口。
-  if (host.startsWith("[") && host.includes("]")) {
-    return host.slice(0, host.indexOf("]") + 1);
-  }
   // 裸 IPv6 字面量带多个冒号。仅当倒数第二段与最后一段**都是纯数字**时，
   // 最后一段才是端口（"::1:3080" → "::1"；"::1" 的 ":1" 不是端口）。
   // 没认出来的名字原样返回 → 被 isAdmitted 拒绝，这是安全的方向。
+  if (host.startsWith("[")) {
+    const end = host.indexOf("]");
+    // 没有闭合的 `]`：不是合法的 IPv6 字面量，也不是主机名 → 拒绝。
+    if (end < 0) return "";
+    const rest = host.slice(end + 1);
+    // 闭合后只允许空或 `:port`（1–5 位数字）。`evil.com` / `:8080@evil.com` 走这里。
+    if (rest !== "" && !/^:\d{1,5}$/.test(rest)) return "";
+    return host.slice(0, end + 1);
+  }
+  if (host.includes("]")) return "";   // 闭合括号出现在非开头：形状不对
   const colons = host.split(":");
   if (colons.length > 2) {
     const penultimate = colons[colons.length - 2] ?? "";
