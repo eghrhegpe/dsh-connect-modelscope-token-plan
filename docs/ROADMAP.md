@@ -58,8 +58,10 @@
   `llm-adapter-core.ts` 装配（inert pi-ai auth + image hook）、`publish-core.ts` +
   `provider-publish.ts` 状态机（publish 队列 / disposed 闸 / registerPair 单点 +
   rollback 恢复旧对）、`provider-store.ts` 面板开关 + 允许清单（按 profile 分段）、
-  `routes/provider.ts` 三条路径。注册后 DSH 的全部魔搭调用都经本插件，**本地计数
-  即涵盖全部 DSH 魔搭调用**。设计契约见 [PROVIDER-M4.md](PROVIDER-M4.md)。
+  `routes/provider.ts` 三条路径。设计契约见 [PROVIDER-M4.md](PROVIDER-M4.md)。
+  ~~注册后 DSH 的全部魔搭调用都经本插件，本地计数即涵盖全部 DSH 魔搭调用~~——
+  **这句当时是错的**（M4 单次提交内doc/code 漂移：适配器路径没挂计数钩子，
+  `recordCall` 全仓只在 probe 一处调用），M4+ 已由 `usage-observer` 补上，见下。
 - ✅ **面板「接入为 DSH 模型」**：模型 tab 顶部 provider 区块（开关 + roster 勾选 +
   全部/全部隐藏/保存清单/回到默认）。~~原「试调」按钮保留为次要动作~~ —— 该按钮
   随后在 M4+ 面板收敛里删除（见上）；roster 里 deepseek/glm/qwen 三家改挂一枚
@@ -69,6 +71,21 @@
 - ✅ 离线测试：`test/provider.test.mjs`（目录映射 / 开关+清单 / publish 三条语义）、
   `test/provider-routes.test.mjs`（路由形状 / 哨兵 / 信任围栏）。
 - ✅ `docs/PROVIDER-M4.md`：本次改动的实现契约 + 三条承重语义说明。
+
+## M4+ — 0.1.0 发版前收口（已完成，2026-10-05）
+
+- ✅ **本地计数接上真实对话**（`src/host/usage-observer.ts`，peer-free）：观察 harness
+  流出口，一次遍历拿到 token 与失败分类。在此之前面板三块（今日调用 / 分布 / 趋势 / 429
+  事件流）**恒为 0 与空**——`recordCall` 唯一的生产者是 usage probe，而那个按钮已随目录表
+  删除。**恒为 0 是合法状态，没有任何门禁会红**，靠 `tools/doctor.mjs` 盘点磁盘真相才抓到。
+- ✅ **能力分类器** `resolveModelCapability`：二值 vision 升级为七档能力路由，判定走详情
+  端点 `Tasks[].Name`，`KNOWN_VISION_IDS` 14 条实测吃图模型兜底，全不认识则 `unknown`。
+- ✅ **发版链路**：`screenshots.json` 清单 + `files` 白名单补 `assets`；新增
+  `test/release.test.mjs`（SCREENSHOTS / SHIPPED 两道门禁）。此前 `assets/` 长期未跟踪且
+  不在 `files` 内——直接投稿必然图裂。
+- ✅ **文档**：8 个内部里程碑节压成一节 `## [0.1.0]`，实施过程（病灶/ 取证 / 判据）搬进
+  [IMPLEMENTATION.md](IMPLEMENTATION.md)；新增 [../RELEASING.md](../RELEASING.md)。
+- 离线套件 15 套件全绿，typecheck / build 全绿。
 
 ### M4 之后（backlog，未做）
 

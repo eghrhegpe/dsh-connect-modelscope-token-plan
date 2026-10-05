@@ -36,6 +36,9 @@
 | 何时 | 查 |
 |---|---|
 | 「上游到底有没有额度信号」 | [docs/SPIKE.md](docs/SPIKE.md)（实测记录 + 结论） |
+| provider 怎么接入（写代码前） | [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md)（实现契约） |
+| **这版是怎么做出来的、踩过什么坑** | [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)（实施过程档案） |
+| 上游端点全景 / 第三方方案对比 | [docs/REFERENCES.md](docs/REFERENCES.md)、[docs/REFERENCE-modelsdev.md](docs/REFERENCE-modelsdev.md) |
 | v1 要做什么、做到哪了 | [docs/ROADMAP.md](docs/ROADMAP.md) |
 | Host/Client 两半怎么分 | sensenova 仓库 `docs/ARCHITECTURE.md`（本仓库按同构落地后再补自己的） |
 
