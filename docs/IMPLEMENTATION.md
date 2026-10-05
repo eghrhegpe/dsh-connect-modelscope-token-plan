@@ -44,7 +44,7 @@ claim 的残留**——SPIKE.md 回填了新事实，旧预告却没跟着改掉
 - `src/host/routes/probe.ts:5`：**相邻两行自相矛盾**——第 5 行写「预期 401 先于 400」（早先的预测，
   已被真机推翻），第 6 行写「语义已真机回填」。标题「测试一次调用」也与按钮实际文案
   「验令牌（零额度）」（i18n `probe.validity`）脱节。
-- `docs/ROADMAP.md:17`：「400-vs-401，验证后落地」（已落地、已回填）——探针早就落地，规则也已反转；
+- `docs/ROADMAP.md`（旧版第 17 行）：「400-vs-401，验证后落地」（已落地、已回填）——探针早就落地，规则也已反转；
   同格「env 回退」是 §7 抓过的同一族假话（§7 清单不含 docs，漏网）。
 - 四处全部改写为回填后的事实，保留出处（SPIKE.md §结论 5 + 日期）。
 
@@ -100,7 +100,7 @@ A/B 探测得出的档位表不可信。
 
 - `docs/PROVIDER-M4.md` §4：追加更正块，保留原文作契约的历史记录；
 - `docs/ROADMAP.md`：`reasoning_effort` 档位表那条 backlog 加删除线，标「已探测，判定不可行」；
-- `docs/IMPLEMENTATION.md`、`README.md`、`RELEASE-0.1.0.md`：四处同一错误声明的
+- `docs/IMPLEMENTATION.md`、`README.md`、`RELEASE-0.1.0.md`（已归档至 `releases/archive/`）：四处同一错误声明的
   传播点一并改述。
 
 ### 第八轮：读 peer 源码核实「重分类→重试」链路，更正「少记」的错误声明
