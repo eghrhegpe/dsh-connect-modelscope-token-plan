@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+### 第九轮：真机探测证伪 `reasoning_effort` 的 400 理由，改述为实测障碍
+
+起因是用户报告「Windows 环境变量改了插件不认」，查证过程中顺带把
+`docs/PROVIDER-M4.md` §4 里那条从 M4 起就存在的理由**真机验证了一遍**。
+
+**探测（`ZhipuAI/GLM-4.7-Flash`，`POST /v1/chat/completions`，实测 2026-10-05）**：
+
+| 请求 | 结果 |
+|---|---|
+| 不带 `reasoning_effort` | 200（可能是空壳） |
+| `reasoning_effort: "low"` | 200（真响应带 `reasoning_content`）；**同一请求复测变成空壳 200** |
+| `reasoning_effort: "bogus"` | **200**——参数名被接受，**值不被校验** |
+
+**结论**：原理由「发错档位会整条请求 400」是**推测且已被证伪**。真实障碍更硬：
+①无法区分「参数生效」与「参数被静默忽略」（两者都 200）；②该端点在真响应与
+空壳 200（`{"created":0,"choices":null,"usage":{全0}}`）之间摇摆，不稳定信道上做
+A/B 探测得出的档位表不可信。
+
+**改动**（`reasoning: false` 的代码**未动**——它本来也是无操作，模型不在 pi-ai
+安装目录里，`base === undefined`，`resolveModelReasoning` 兜底成 `false`）：
+
+- `docs/PROVIDER-M4.md` §4：追加更正块，保留原文作契约的历史记录；
+- `docs/ROADMAP.md`：`reasoning_effort` 档位表那条 backlog 加删除线，标「已探测，判定不可行」；
+- `docs/IMPLEMENTATION.md`、`README.md`、`RELEASE-0.1.0.md`：四处同一错误声明的
+  传播点一并改述。
+
 ### 第八轮：读 peer 源码核实「重分类→重试」链路，更正「少记」的错误声明
 
 起因是评「代码功能本身是否优秀」时，发现两处承重声明互相矛盾：

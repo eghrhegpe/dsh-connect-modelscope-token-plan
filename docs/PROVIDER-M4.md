@@ -147,8 +147,26 @@ export function summarizeCatalog(entries: unknown): { modelCount: number; vision
 - `reasoning: false` → 不发 `reasoning_effort`，模型用自己的默认；
 - `thinkingLevelMap` **不设** → picker 不给思考强度选择器。
 
-这是「宁可不选，不可错发」的方向：发错档位会整条请求 400，比不发差得多。
-M4 之后的迭代（探测出档位表）再按模型开启。**文档里必须把这条写成已知限制**。
+**更正（第九轮，2026-10-05，真机实测）**：上面「发错档位会整条请求 400」是**推测，且已被证伪**。
+实测（`ZhipuAI/GLM-4.7-Flash`，`POST /v1/chat/completions`）：
+
+| 请求 | 结果 |
+|---|---|
+| 不带 `reasoning_effort` | 200（可能返回空壳，见下） |
+| `reasoning_effort: "low"` | 200（真响应带 `reasoning_content`；复测同一请求变成空壳 200） |
+| `reasoning_effort: "bogus"` | **200**——参数名被接受，**值不被校验** |
+
+结论：魔搭对 `reasoning_effort` **既不校验、也不保证生效**（拼错的值同样 200，说明很可能静默忽略）。
+所以真正的障碍**不是**「错发会 400」，而是两条更硬的：
+
+1. **无法区分「参数生效」与「参数被静默忽略」**——两者都是 200；
+2. **该端点在真响应与空壳 200 之间摇摆**（空壳形如
+   `{"created":0,"choices":null,"usage":{全 0}}`，正是 validity 探针见到的那种形状）。
+   在不稳定信道上做 A/B 探测得出的档位表不可信。
+
+`reasoning: false` **保持不动**（它本来也是无操作：模型不在 pi-ai 安装目录里，
+`base === undefined`，`dsh-llm-pi-ai` 的 `resolveModelReasoning` 会兜底成 `false`）。
+但理由从「宁可不选，不可错发」改为上面两条实测事实。**文档里必须把这条写成已知限制**。
 
 ## 5. 适配器（`src/host/llm-adapter-core.ts` 照抄、`src/host/llm-adapter.ts` 新建）
 
