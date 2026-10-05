@@ -13,6 +13,7 @@
  *   - `snapshot-aggregate.ts` 快照聚合（软失败）
  *   - `state-store.ts`        状态文件原子原语
  *   - `codes.ts`              错误分类单一真源
+ *   - `usage-observer.ts`     真实对话 → 本地计数/事件（观察流出口，见该文件头）
  *
  * @module dsh-connect-modelscope-token-plan
  */
@@ -75,19 +76,41 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     panelSwitch: () => providerStore.enabled(),
     getLlm: (service: string) => ctx.get?.(service) ?? null,
     resolveApiKey: async () => (await tokenStore.resolve()).value,
+    // 本地计数的唯一生产者：DSH 真实对话经适配器出去时，每一次调用与每一条
+    // 429/错误事件都写进上面那个 usage-store（面板四块计数面板的**唯一**数据
+    // 来源——probe 那条写入路径已随目录表删除）。写同一个 store 实例，所以面板
+    // 读到的就是这里写的账，不会分叉到另一个 profile 目录。
+    //
+    // 两条都吞错：观测失败不是对话失败（`usage-observer.safe` 也再兜一层）。
+    usage: {
+      recordCall: (input) => usageStore.recordCall({ modelId: input.modelId, tokens: input.tokens }).catch(() => {}),
+      recordEvent: (input) => usageStore.recordEvent(input).catch(() => {})
+    },
     emit: (event: string) => ctx.emit?.(event),
     logger: ctx.logger
   });
 
   /**
-   * 读允许清单。
+   * 一次目录轮询：拉目录 + 读落盘允许清单，再 publish 当前 offer。
    *
-   * M4 阶段**不落盘**允许清单（见 docs/PROVIDER-M4.md §10），所以从
-   * `publisher.state.enabledIds` 读最后一次 publish 用的那份；从未保存过为 `[]`，
-   * 语义是「不过滤」（与哨兵「什么都不提供」是两回事）。
+   * 允许清单必须走 `providerStore.enabledIds()`——清单是**落盘**的（provider-store
+   * 按 profile 分段持久化），重启后内存里的 `publisher.state.enabledIds` 早已清空，
+   * 若从它读，用户勾选的清单会随重启静默丢失（见 fix A）。
+   * @returns {Promise<void>}
    */
-  const readEnabledIds = (): string[] =>
-    Array.isArray(publisher.state.enabledIds) ? publisher.state.enabledIds : [];
+  const runPoll = async (): Promise<void> => {
+    try {
+      const catalog = await inference.fetchModels();
+      // 落盘优先；读不到（磁盘损坏/未初始化）回退内存最近一次 publish 的清单。
+      const stored = await providerStore.enabledIds().catch(() => null);
+      const enabledIds = Array.isArray(stored) && stored.length > 0
+        ? stored
+        : (Array.isArray(publisher.state.enabledIds) ? publisher.state.enabledIds : []);
+      await publisher.publish(catalog.entries, enabledIds, []);
+    } catch {
+      // 轮询失败不影响面板：下一轮再试，快照侧另有降级形状。
+    }
+  };
 
   const wiring = {
     settings,
@@ -103,22 +126,16 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   const offs = registerRoutes(ctx, wiring);
 
   ctx.effect(() => {
-    // M4 seed：挂载时立即 publish 一次（空目录 + 空清单），fire-and-forget。
-    // 本插件**不落盘目录**，所以 `seedPublisherFromCatalog` 可省略——读不到目录
-    // 就等第一次轮询；开关/清单保存在 provider-store，provider 路由直接 publish。
-    void publisher.publish([], [], []).catch(() => {});
+    // M4 seed：挂载时立即跑一次轮询，让重启的 Host 在第一次目录拉到后就有模型，
+    // 且**用落盘的允许清单**注册（而非空清单）——见 fix A/C。读不到目录就等下一轮
+    // 轮询；开关/清单保存在 provider-store，provider 路由直接 publish。
+    void runPoll();
 
-    // 目录轮询：`pollSeconds` 一次。变化时 `publish`（provider-publish 内部按
-    // catalogSignature 比对，未变则空转）；开关翻转、清单保存由 provider 路由
-    // 直接 publish，不在这里。
-    const timer = setInterval(async () => {
-      try {
-        const catalog = await inference.fetchModels();
-        const enabledIds = (await providerStore.enabled().catch(() => null)) === true ? readEnabledIds() : [];
-        await publisher.publish(catalog.entries, enabledIds, []);
-      } catch {
-        // 轮询失败不影响面板：下一轮再试，快照侧另有降级形状。
-      }
+    // 目录轮询：每 `pollSeconds` 一次，拉目录、读落盘清单、`publish`。变化检测在
+    // `publishProviderOnce` 内按 `catalogSignature` 比对——未变则空转不重建
+    // （见 fix B）；开关翻转、清单保存由 provider 路由直接 publish，不在这里。
+    const timer = setInterval(() => {
+      void runPoll();
     }, settings.pollSeconds * 1000);
 
     // 返回的是卸载清理：Cordis 在 fiber dispose 时跑它——提前跑会把刚注册的

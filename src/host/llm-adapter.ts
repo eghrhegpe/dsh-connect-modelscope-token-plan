@@ -23,6 +23,7 @@
  */
 import { buildDescriptors, LLM_PROVIDER_ID, LLM_DISPLAY_NAME, LLM_API_KEY_NAME } from "./llm-models.ts";
 import { assemblePiAiAdapter } from "./llm-adapter-core.ts";
+import { withUsageObserver, type UsageSinks } from "./usage-observer.ts";
 
 /**
  * 为一份目录快照装配适配器实例。
@@ -40,19 +41,24 @@ import { assemblePiAiAdapter } from "./llm-adapter-core.ts";
  *   `fs`）的服务解析器。
  * @param {string[]} [options.unavailableModelIds] - 额度耗尽的模型 id，从 offer 里
  *   排除，避免发出注定 429 的请求。
+ * @param {UsageSinks} [options.usage] - 本地计数的写入口（usage-store 的两条
+ *   方法）。**这是面板「今日次数 / 模型分布 / 趋势 / 429 事件流」唯一的生产
+ *   者**——probe 那条写入路径已随目录表删除，缺了它四块面板恒为 0 与空。
+ *   缺省不套观察层（零开销，见 `usage-observer.ts`）。
  * @returns {{adapter: object, providerIds: string[]}} 适配器与它拥有的 ids。
  */
-export function createModelScopeAdapter({ entries, enabledIds = [], baseUrl, resolveApiKey, get, unavailableModelIds = [] }: {
+export function createModelScopeAdapter({ entries, enabledIds = [], baseUrl, resolveApiKey, get, unavailableModelIds = [], usage }: {
   entries: unknown;
   enabledIds?: string[];
   baseUrl: string;
   resolveApiKey: () => Promise<string>;
   get?: (service: string) => unknown;
   unavailableModelIds?: string[];
+  usage?: UsageSinks;
 }) {
   const models = buildDescriptors(entries, { providerId: LLM_PROVIDER_ID, baseUrl, enabledIds, unavailableModelIds });
 
-  return assemblePiAiAdapter({
+  const built = assemblePiAiAdapter({
     providerId: LLM_PROVIDER_ID,
     displayName: LLM_DISPLAY_NAME,
     apiKeyName: LLM_API_KEY_NAME,
@@ -63,4 +69,10 @@ export function createModelScopeAdapter({ entries, enabledIds = [], baseUrl, res
     ...(get !== undefined ? { get } : {})
     // §4：不传 `reasoning`，profile 不钉 effort，picker 也不给思考强度选择器。
   });
+  // 观察层套在装配结果**之外**：重分类层在内（改写 429 的 code），观察层在外
+  // （读改写后的 code 记事件），顺序不能反——反了事件流会把限频记成额度耗尽。
+  return {
+    adapter: usage === undefined ? built.adapter : withUsageObserver(built.adapter, usage),
+    providerIds: built.providerIds
+  };
 }

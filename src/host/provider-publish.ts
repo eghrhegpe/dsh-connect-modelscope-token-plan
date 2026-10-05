@@ -26,6 +26,7 @@
 
 import { LLM_PROVIDER_ID, LLM_DISPLAY_NAME, isVisionModel } from "./llm-models.ts";
 import type { CatalogEntry } from "./llm-models.ts";
+import type { UsageSinks } from "./usage-observer.ts";
 import { str } from "./util.ts";
 import { resolveSwitchEnabled } from "./switch-precedence.ts";
 import {
@@ -53,6 +54,14 @@ interface ProviderPublisherDeps {
   loadAdapterModule?: () => Promise<object>;
   getLlm?: (service: string) => object | null;
   resolveApiKey?: () => Promise<string>;
+  /**
+   * 本地计数的写入口，透传给适配器工厂（`usage-observer.ts`）。
+   *
+   * 缺省即「不套观察层」——那正是 M4 之前的状态：面板四块计数面板恒为 0 与空。
+   * 它是 deps 而非模块内构造：usage-store 由 `index.ts` 按 profile 创建，观察
+   * 层必须写进**同一个** store，否则面板读的是另一个目录的账。
+   */
+  usage?: UsageSinks;
   emit?: (event: string) => void;
   logger?: { warn?: (m: string) => void };
 }
@@ -98,6 +107,7 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
     loadAdapterModule,
     getLlm,
     resolveApiKey,
+    usage,
     emit,
     logger
   } = deps;
@@ -198,7 +208,19 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
     // `effectiveSettings` may be a bare `{}` (no settings passed, the tests), so
     // an absent patch default reads as "not registered" — never a crash.
     const registerWanted = resolveSwitchEnabled(panelValue, effectiveSettings.registerProvider === true);
-    if (!registerWanted) return unregister({ state, release });
+    if (!registerWanted) {
+      // 空转守卫：开关关着、且上次也确实没注册、签名也没漂（offer 没变），就别跑
+      // unregister——否则每个轮询周期都做一次无意义（且会发 llm/adapters-updated
+      // 事件的）注销。见 fix B：签名比对让「目录没变」的轮询不再 churn。
+      if (state.registered === false && state.error === null &&
+          state.signature === catalogSignature(state.entries, state.enabledIds) &&
+          state.quotaSignature === quotaSignatureOf(state.unavailableIds)) {
+        return { ok: true, skipped: true };
+      }
+      const result = unregister({ state, release });
+      syncSignaturesAfterPublish(state); // 让下次开关内轮的空转判断有正确基准
+      return result;
+    }
     const llm = resolveRegistrationService({ state, getLlm: effectiveGetLlm, release });
     if (llm === null) return { ok: false, error: state.error };
     let createModelScopeAdapter;
@@ -215,7 +237,10 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
         baseUrl: effectiveSettings.apiBase,
         resolveApiKey: effectiveResolveApiKey,
         get: effectiveGetLlm,
-        unavailableModelIds: state.unavailableIds
+        unavailableModelIds: state.unavailableIds,
+        // 观察层缺席即不套（`exactOptionalPropertyTypes` 下条件展开，不能传
+        // undefined 让它与「显式无观察层」变成两件事）。
+        ...(usage !== undefined ? { usage } : {})
       });
       // 同一个理由，换个说法：适配器是 Host 级注册的，所以 factory 返回别的形状
       // 必须在这里失败，而不是发布一个无法服务请求的 provider。
@@ -228,10 +253,19 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
       warnBuildFailure(effectiveLogger, "ModelScope", described);
       return { ok: false, error: described.error };
     }
+    // 空转守卫（注册路径）：开关开着、且 offer 与失败状态都没变——这次 publish 与上
+    // 次重建出来的结果完全一致——就**不要重建** provider 对（否则每轮询周期都摘下再
+    // 挂上同一个对，期间任何在途请求可能被打断）。见 fix B。注意只在「已成功注册」
+    // 且「无错误」时跳过；失败态必须继续尝试重注册自愈。
+    if (state.registered === true && state.error === null &&
+        state.signature === catalogSignature(state.entries, state.enabledIds) &&
+        state.quotaSignature === quotaSignatureOf(state.unavailableIds)) {
+      return { ok: true, skipped: true };
+    }
     // swap（连同背后的 rollback）是共享机制：失败的重新注册必须恢复先前在服务的对。
     // 在这边被恢复的是目录身份——entries、允许清单与额度耗尽集合（不能还指着一个
     // 我们没能发布的集合）。
-    return swapRegistration({
+    const result = swapRegistration({
       llm,
       built,
       previousBuilt,
@@ -245,6 +279,11 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
         state.unavailableIds = previousUnavailable;
       }
     });
+    // 成功的 publish 之后同步签名（与轮询用的公式同源，由 syncSignaturesAfterPublish
+    // 内部调用导出的 catalogSignature/quotaSignatureOf，不会漂移）。失败的 publish 上
+    // onRollback 已经恢复了之前的字段，这里同步的也是恢复后的正确基准。
+    syncSignaturesAfterPublish(state);
+    return result;
   };
 
   /**
@@ -312,8 +351,19 @@ export function seedPublisherFromCatalog(publisher: Pick<ReturnType<typeof creat
  * @returns {string}
  */
 export function catalogSignature(entries: unknown, enabledIds: unknown): string {
+  // 覆盖「重建会不会改变 offer」的每一个维度：id（模型在不在）+ vision 位（是否吃图，
+  // 用与 roster/descriptor 完全相同的判定）+ 展示名 + 上下文窗口 + 单次输出上限
+  // （三者任一变了，descriptor 形状就变了）。id 没变但任一属性翻了也必须重建。
   const models = (Array.isArray(entries) ? entries : [])
-    .map((entry) => `${str((entry as { id?: unknown })?.id, "")}:${isVisionModel(entry as CatalogEntry) ? 1 : 0}`)
+    .map((entry) => {
+      const e = entry as CatalogEntry;
+      const id = str(e?.id, "");
+      const vision = isVisionModel(e) ? 1 : 0;
+      const name = str(e?.name, id);
+      const ctx = typeof e?.contextWindow === "number" ? e.contextWindow : "";
+      const out = typeof e?.maxOutputLength === "number" ? e.maxOutputLength : "";
+      return `${id}:v${vision}:n${name}:c${ctx}:o${out}`;
+    })
     .join(",");
   return `${models}|${(Array.isArray(enabledIds) ? enabledIds : []).join(",")}`;
 }

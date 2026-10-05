@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.1.0-M4+（未发布）— 修：本地计数层在接入 provider 之后没有任何生产者
+
+- **病灶**：`usageStore.recordCall` 全仓只有 `routes/probe.ts` 一处调用，且只在
+  `kind:"usage"` 分支。而面板的 usage 试调按钮已随目录表删除（client 只发
+  `kind:"validity"`，validity 按设计不记调用），接入 provider 后 DSH 的真实对话
+  走 pi-ai 适配器、**没有任何计数钩子**。于是「额度」tab 的三块面板——今日调用
+  （`cards.ts` 的 `daily.usedLocal`）、单模型分布、趋势、429 事件流——**恒为 0 与
+  空**，唯二能往事件流里写东西的动作是手动点「验令牌」且恰好失败。插件叫
+  `-token-plan`，`quota.note` 写着「本地口径：只统计经本插件的调用」，而经本插件
+  的调用从未被计过。`tools/doctor.mjs` 现场佐证：磁盘上 1 个天桶、0 条事件。
+- **修法**：新增 `src/host/usage-observer.ts`（peer-free，纯函数 + 生成器，离线可测）
+  观察 harness 流出口——`StreamChunk` 自带 `{type:'usage', usage: TokenUsage}` 与
+  带 `reason.failure` 的 `finish` chunk，一次遍历同时拿到 token 与失败分类，不必碰
+  provider 私有 API，也不必改 vendor peer。接线：`llm-adapter.ts` 组合观察层 →
+  `provider-publish.ts` 的 deps 增加 `usage?: UsageSinks` 并透传给工厂 →
+  `index.ts` 把上面那个 usage-store 的两条方法接上（写**同一个** store 实例，所以
+  面板读到的就是这里写的账，不会分叉到别的 profile 目录）。
+- **不重复造第二本账**：DSH 自己有 `@linxin666/dsh-usage`，按
+  `days→provider→model` 折 token，但它只订阅 session 的 `assistant/message`
+  ——**失败调用一次都不记**。所以边界划在这里：成功的 token 总量交给全局账本（插件
+  不重复记），本插件只生产全局账本答不了的两件：①经本插件的分布/趋势；②**429/
+  错误事件流**（官方只给总额度余额，不给「哪个模型刚才在限频」）。
+- **顺序承重**：观察层套在 `llm-error-fix` 重分类层**之外**，事件分诊读的是改写
+  后的 code。顺序反了，被纠正成 `RATE_LIMIT` 的 rpm 限频会被记成 `quota`——面板
+  说「额度耗尽」而退避策略在同一刻按限频处理，两边说两套话。
+- **刻意不动 `llm-adapter-core.ts`**：那个文件是三族插件受控复制的共享层，往里加一个
+  只有魔搭需要的观测钩子，等于给三份副本之间再造一个漂移面（`patchPayload`、签名
+  比对、三态口径都栽在这类地方）。观察层独立成文件、由魔搭自己的 `llm-adapter.ts`
+  组合；无 sinks 时**不套 Proxy**，那条路径零开销。
+- **记账口径**：每次流结束记一次 call（正常/用户中断/内层抛错都走同一个 `finally`），
+  **含失败**——魔搭按次数计费，限频掉的请求同样是一次上游调用；token 上游没给时是
+  `null` 而非 0。写 sinks 的任何失败（同步抛与异步拒）都在 `safe()` 里吞掉：观测
+  失败不是对话失败。已知偏差方向是**少记**（peer 的重试在同一条流内部重发，观察器
+  只看到一条流）——宁可少记也不虚增。
+- **测试**：新增 `test/usage-observer.test.mjs`（已接入 `npm test`，现 14 套件），
+  钉死 token 读取/累计值语义、429 四类分诊、`aborted` 不算事件、凭据脱敏、
+  透传不丢 chunk、失败/中断/崩溃三种结束都恰好记一次、sinks 炸了不影响对话、
+  `options.model` 缺失就不记（分布图不能凭空多出一行）、`prepareCall` 两条路都包。
+- 全量 `npm test`（14 套件）、`npm run typecheck`、`npm run build`、`npm run doctor` 全绿。
+
 ## 0.1.0-M4+（未发布）— 修：重启丢清单、轮询空转失效、计数与分类口径漂移
 
 - **重启后允许清单静默丢失（fix A / fix C）**：`index.ts` 的目录轮询原本读
