@@ -107,6 +107,25 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
     }
   };
 
+  /**
+   * 丢弃一个我们不读的响应体。
+   *
+   * undici 里未消费的 body 会**占住连接**直到 GC。目录刷新会对 35 个模型并发打
+   * 详情端点（`Promise.all` 分批），其中任何一条走「!ok」或「形状不符」分支，
+   * 连接就一直挂着——短时间内连接池被这些挂起的响应吃满，后面的请求开始排队。
+   *
+   * `cancel()` 是显式的弃权：告诉 undici「这个 body 我不要了」，它会立刻释放
+   * 连接而不是等GC。用 `void` 前缀是因为这是best-effort——取消失败不影响我们
+   * 已经决定返回 `[]` 的结论。
+   */
+  const discardBody = (response: Response): void => {
+    try {
+      void response.body?.cancel();
+    } catch {
+      // body 已 locked / 已读完 / 不支持 cancel：无可做，也不该因此改结论。
+    }
+  };
+
   /** 读响应 body 里的 OpenAI 错误文案（形状漂移时返回空串，不抛）。 */
   const readErrorMessage = async (response: Response): Promise<string> => {
     try {
@@ -114,6 +133,9 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
       const message = body?.error?.message ?? body?.message;
       return typeof message === "string" ? message : "";
     } catch {
+      // 解析失败时 body 可能**没被消费**（json() 抛在半路），连接会一直挂着。
+      // 错误路径同样要弃权，否则上游反复 4xx 时连接池会被挂满。
+      discardBody(response);
       return "";
     }
   };
@@ -127,7 +149,11 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
   const fetchTaskTags = async (id: string): Promise<string[]> => {
     const detailUrl = settings.siteBase + "/api/v1/models/" + encodeURI(id);
     const response = await fetchWithTimeout(detailUrl, { method: "GET", headers: { accept: "application/json" } });
-    if (!response.ok) return [];
+    // 下面两条「不读 body 就返回」的路径都必须先弃权，否则连接被挂住不放。
+    if (!response.ok) {
+      discardBody(response);
+      return [];
+    }
     const json = (await response.json().catch(() => null)) as { Code?: unknown; Data?: { Tasks?: unknown; widgets?: unknown } } | null;
     if (json === null || typeof json !== "object" || json.Code !== 200) return [];
     const data = (json.Data ?? {}) as { Tasks?: unknown; widgets?: unknown };

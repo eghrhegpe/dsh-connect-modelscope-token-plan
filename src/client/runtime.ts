@@ -58,19 +58,6 @@ export type DictionaryKey = keyof typeof zh;
  */
 export type Tt = (key: DictionaryKey) => string;
 
-/**
- * A dictionary key built from a HOST-enumerated value.
- *
- * The families this builds (`llm.level.…`, `llm.src.…`) cannot be listed in
- * `zh` — the Host enumerates them — so the lookup has to widen past
- * compile-time sight. This is the ONE place that does it, so the escape is a
- * named helper rather than three scattered `as DictionaryKey` casts, and any
- * new family the Host adds has one obvious place to extend.
- */
-export function dictKey(family: string, value: string): DictionaryKey {
-  return `${family}.${value}` as DictionaryKey;
-}
-
 let api: ReactApi | null = null;
 
 /** Hand the loader-provided React to the rest of the client. One-shot. */

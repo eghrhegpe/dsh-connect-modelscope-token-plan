@@ -16,7 +16,7 @@
 import { inject, apply } from "./apply.ts";
 import { NS } from "./const.ts";
 import { interpretSnapshot, viewOf, errorOfStatus, GUIDANCE_BY_CODE, FORM_EXCLUDED_CODES } from "./snapshot.ts";
-import { clockLong, count, errorText, format, isoTime, statedCadenceMs, when } from "./format.ts";
+import { clockLong, count, errorText, format, isoTime, statedCadenceMs } from "./format.ts";
 import { provideClientReact } from "./runtime.ts";
 import { en, zh } from "./i18n.ts";
 import { S } from "./styles.ts";
@@ -24,7 +24,7 @@ import { BalanceCard, EventsList, LocalDailyCard, ModelUsageTable, ProviderCard,
 import { PanelPage } from "./panel-page.ts";
 import { usePollingInterval } from "./use-polling-interval.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
-import { getJson, postJson, postJsonOrThrow } from "./http.ts";
+import { getJson, postJson } from "./http.ts";
 
 function clientFactory(loaderRequire: (specifier: string) => unknown): {
   inject: string[];
@@ -48,12 +48,10 @@ function clientFactory(loaderRequire: (specifier: string) => unknown): {
       format,
       isoTime,
       statedCadenceMs,
-      when,
       usePollingInterval,
       useSnapshotPolling,
       getJson,
       postJson,
-      postJsonOrThrow
     }),
     components: Object.freeze({
       BalanceCard,

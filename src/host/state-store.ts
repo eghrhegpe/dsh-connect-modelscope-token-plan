@@ -27,7 +27,7 @@
  *
  * @module dsh-connect-modelscope-token-plan/state-store
  */
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -221,9 +221,53 @@ export function temporaryOf(dir: string, base: string, now = Date.now) {
  * @param {{temporary: string}} options - the temp path to write first.
  * @returns {Promise<void>}
  */
+/**
+ * 写一个状态文件：一个 0600 临时文件，然后 rename。
+ *
+ * 载荷串以换行结尾，与本模块存在前每个 store 的写法一致。失败**向上传播** ——
+ * 调用方自己决定只读 Home 要不要吞（throttle/catalog 吞，provider 开关不吞）。
+ *
+ * ## rename 失败时的临时文件清理
+ *
+ * `rename` 会失败，而最常见的原因是 Windows 上目标文件正被另一个进程/编辑器
+ * 占着（EACCES/EPERM）。临时文件此前**留在原地**：名字是
+ * `<base>.<pid>.<ts>.<uuid>.tmp`，每次失败多一个，于是
+ * `state/<profile>/<name>/` 慢慢堆满垃圾，而没有任何代码会去清它们（全仓原本
+ * 无任何 unlink）。现在失败时删掉自己的临时文件再重抛——清理失败不掩盖原始错误
+ * （那才是调用方要处理的），所以只 `catch {}`。
+ *
+ * @param {string} file - 最终文件路径。
+ * @param {string} payload - 序列化后的正文（JSON 文本）。
+ * @param {{temporary: string}} options - 先写哪个临时路径。
+ * @returns {Promise<void>}
+ */
 export async function writeStateFile(file: string, payload: string, { temporary }: { temporary: string }) {
   await writeFile(temporary, `${payload}\n`, { encoding: "utf8", mode: 0o600 });
-  await rename(temporary, file);
+  // 先把内容 fsync 到盘，再 rename。这是**崩溃一致性**（不是并发原子性，后者由
+  // rename 本身保证）：没有它，断电/内核崩溃时 rename 可能把一个**空或半截**的
+  // 文件立到目标路径上——而 parsePayload 对损坏文件是「读作未设置」静默降级的，
+  // 于是用户看到的是「模型清单/历史计数全没了」而没有任何错误。
+  //
+  // 代价是真机上每次几毫秒（实测 tmpfs 上 0.07ms，机械盘/容器 overlay 上更贵）。
+  // 这值得：`usage.json` 每次对话都写、`provider.json` 每次点开关都写——**都不是
+  // 低频操作**，而丢一次用户的允许清单意味着要重勾一遍。
+  const handle = await open(temporary, "r+");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try {
+    await rename(temporary, file);
+  } catch (error) {
+    // 自己的临时文件，不留垃圾。unlink 失败（权限/并发）不该盖掉 rename 的原因。
+    try {
+      await unlink(temporary);
+    } catch {
+      // 已被别的进程清掉，或压根不存在：无可做。
+    }
+    throw error;
+  }
 }
 
 /**

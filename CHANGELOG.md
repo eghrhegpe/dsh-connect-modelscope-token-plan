@@ -4,6 +4,36 @@
 
 两轮：先是发布前的漂移收口与门禁补强，再是一轮由双路深审挖出的**数据安全与红线修复**。
 
+### 第四轮：资源与一致性
+
+- **原子写补崩溃一致性与临时文件清理**（`writeStateFile`，四个 store 共同的唯一写入口）：
+  - `rename` 失败时（Windows 上目标文件被占用最常见）临时文件**留在原地**——名字是
+    `<base>.<pid>.<ts>.<uuid>.tmp`，全仓原本无任何 `unlink`，于是
+    `state/<profile>/<name>/` 会慢慢堆满垃圾。现在失败时删掉自己的临时文件再重抛
+    （清理失败不掩盖原始错误）。
+  - rename 前对临时文件 `fsync`。这是**崩溃一致性**（rename 本身只保证并发原子性）：
+    没有它，断电/内核崩溃时 rename 可能把一个空或半截文件立到目标路径，而
+    `parsePayload` 对损坏文件是「读作未设置」**静默降级**——用户看到「清单和历史全没了」
+    而没有任何错误。代价是真机每次几毫秒，值得：`usage.json` 每次对话都写、
+    `provider.json` 每次点开关都写，都不是低频操作。
+- **修未消费的 response body 占住连接**：`fetchTaskTags` 在 `!response.ok` 分支直接
+  `return []`、不读也不取消 body。undici 里未消费的 body 会**占住连接直到 GC**，而目录
+  刷新对 35 个模型并发打详情端点——任何一条走该分支，连接就一直挂着，连接池被吃满后
+  后续请求开始排队。`readErrorMessage` 的 catch 分支同理（`json()` 抛在半路时 body 未被
+  消费）。现在两条路径都显式 `void response.body?.cancel()`。
+- **删 27 个零引用样式token**（83 → 56）：`poolsGrid` / `quotas` / `quotaRemaining` /
+  `statHeadline` / `details*` / `primaryHover` / `primaryBusy` 等。它们连同解释其设计
+  决策的注释一起是「上一轮删模型目录表 / 次数口径推算条」的**化石**——注释里还在描述
+  「额度双栏」「grant chip」「details 折叠区」「twin card」，读代码的人会以为这些 UI 还在。
+  已连带清理 5 处引用已删 token 的注释。
+- **删 4 个死 helper**：`when()`（注释声称「头部更新于必须能熬过隔天」，而 `panel-page`
+  实际用 `isoTime`，该设计从未落地）、`postJsonOrThrow`、`dictKey`，以及
+  `sortCatalogIds`（featured 置顶排序随「模型目录表」退役，`roster` 现按 Host 返回顺序
+  渲染，只保留 featured 徽标——排序规则连同它的 6 条性质断言一起删，不留「有契约无
+  实现」的孤儿）。`clockLong` 经核实**有 2 处真实调用**（`format.ts:24,42`），保留。
+- **新增 `test/state-store.test.mjs`**：`state-store.ts` 是四个 store 共同的唯一写入口，
+  此前零直接测试。
+
 ### 第三轮：状态机与配置边界
 
 派代理专门核实三个「需要真peer 才能判定」的疑点——它在DSH 发行版里找到了
@@ -115,7 +145,7 @@
 - **清悬空引用**：源码里 20+ 处引用本仓库不存在的 `PITFALLS §NN` / `docs/IMPROVEMENTS.md`、
   以及一个本仓库没有的 Raccoon 插件的 bug 史。**保留知识、删掉死指针**——坑是什么仍写
   在注释里，只是不再指向查不到的编号。
-- **新增 CI**（`.github/workflows/gate.yml`）：typecheck + 19 套件离线门禁。CI 是唯一能
+- **新增 CI**（`.github/workflows/gate.yml`）：typecheck + 20 套件离线门禁。CI 是唯一能
   抓到「提交了忘 build」的地方。`on` 加了引号（裸 `on` 被 YAML 1.1 解析成布尔 true，
   工作流不报错但永不触发）。
 

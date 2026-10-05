@@ -24,21 +24,6 @@ export async function postJson(path: string, payload: Record<string, unknown>): 
   return await response.json().catch(() => null) as ApiBody | null;
 }
 
-/** POST 并要求 ok:true；否则抛 Host 自己的 error 文案。 */
-export async function postJsonOrThrow(path: string, payload: Record<string, unknown>): Promise<ApiBody> {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    cache: "no-store",
-    body: JSON.stringify(payload)
-  });
-  const body = await response.json().catch(() => null) as ApiBody | null;
-  if (body === null || body.ok !== true) {
-    throw new Error(typeof body?.error === "string" ? body.error : `HTTP ${response.status}`);
-  }
-  return body;
-}
-
 /** GET 同源 JSON；非 2xx 或非 JSON 返回 null（调用方决定怎么降级）。 */
 export async function getJson(path: string): Promise<ApiBody | null> {
   const response = await fetch(path, { headers: { accept: "application/json" }, cache: "no-store" });

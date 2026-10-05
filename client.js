@@ -242,20 +242,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const epoch = Date.parse(iso);
 		return Number.isNaN(epoch) ? "—" : clockLong(epoch / 1e3);
 	}
-	/**
-	* 同日的时刻显示 `HH:MM`，跨日带日期——头部「更新于」必须能熬过隔天，
-	* 否则次日早上读「更新于 20:39」像 20 分钟前。
-	*/
-	function when(epoch) {
-		if (typeof epoch !== "number" || !Number.isFinite(epoch) || epoch <= 0) return "—";
-		const date = /* @__PURE__ */ new Date(epoch * 1e3);
-		const now = /* @__PURE__ */ new Date();
-		if (date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate()) {
-			const pad = (value) => String(value).padStart(2, "0");
-			return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-		}
-		return clockLong(epoch);
-	}
 	/** 数字文本：≥10000 整数千分位，否则最多两位小数。 */
 	function count(value) {
 		const number = typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -439,81 +425,15 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				borderRadius: 12,
 				padding: 16
 			},
-			poolsGrid: {
-				display: "grid",
-				gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))",
-				gap: 12,
-				alignItems: "start"
-			},
-			cardHead: {
-				display: "flex",
-				alignItems: "center",
-				gap: 10,
-				flexWrap: "wrap"
-			},
 			poolName: {
 				fontSize: 15,
 				fontWeight: 600
-			},
-			chip: {
-				display: "inline-flex",
-				alignItems: "center",
-				height: 22,
-				padding: "0 8px",
-				borderRadius: 999,
-				fontSize: 12,
-				border: "1px solid var(--dsw-alias-border-l1)",
-				background: "var(--dsw-alias-bg-layer-2)",
-				color: "var(--dsw-alias-label-secondary)"
-			},
-			grantChip: {
-				display: "inline-flex",
-				alignItems: "center",
-				fontSize: 13,
-				color: "var(--dsw-alias-label-primary)",
-				fontVariantNumeric: "tabular-nums"
-			},
-			quotas: {
-				display: "grid",
-				gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 170px), 1fr))",
-				gap: 10,
-				marginTop: 14
-			},
-			quota: {
-				display: "flex",
-				flexDirection: "column",
-				gap: 8,
-				minWidth: 0,
-				padding: "12px 14px",
-				borderRadius: 10,
-				background: "var(--dsw-alias-bg-layer-2)"
-			},
-			quotaTop: {
-				display: "flex",
-				alignItems: "center",
-				justifyContent: "space-between",
-				gap: 8,
-				flexWrap: "wrap"
 			},
 			quotaLabel: {
 				fontSize: 12,
 				fontWeight: 500,
 				color: "var(--dsw-alias-label-secondary)"
 			},
-			statHeadline: {
-				fontSize: 18,
-				lineHeight: "22px",
-				fontWeight: 650,
-				letterSpacing: "-0.02em",
-				fontVariantNumeric: "tabular-nums"
-			},
-			statCaption: {
-				fontSize: 11,
-				lineHeight: "15px",
-				color: "var(--dsw-alias-label-secondary)",
-				fontVariantNumeric: "tabular-nums"
-			},
-			statError: { color: "var(--dsw-alias-state-error-primary)" },
 			statGrid: {
 				display: "grid",
 				gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 110px), 1fr))",
@@ -535,61 +455,16 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				lineHeight: "20px",
 				fontVariantNumeric: "tabular-nums"
 			},
-			quotaReset: {
-				fontSize: 11,
-				color: "var(--dsw-alias-label-secondary)"
-			},
-			quotaRemaining: {
-				fontSize: 18,
-				lineHeight: "22px",
-				fontWeight: 650,
-				letterSpacing: "-0.02em",
-				fontVariantNumeric: "tabular-nums"
-			},
 			quotaUsed: {
 				fontSize: 11,
 				lineHeight: "15px",
 				color: "var(--dsw-alias-label-secondary)",
 				fontVariantNumeric: "tabular-nums"
 			},
-			bar: {
-				height: 6,
-				borderRadius: 3,
-				background: "var(--dsw-alias-bg-layer-1)",
-				overflow: "hidden"
-			},
 			barFill: {
 				height: "100%",
 				borderRadius: 3,
 				background: BRAND
-			},
-			barFillWarn: { background: "var(--dsw-alias-state-warn-primary)" },
-			barFillError: { background: "var(--dsw-alias-state-error-primary)" },
-			details: {
-				marginTop: 12,
-				paddingTop: 10,
-				borderTop: "1px solid var(--dsw-alias-border-l1)"
-			},
-			detailsSummary: {
-				fontSize: 12,
-				color: "var(--dsw-alias-label-secondary)",
-				cursor: "pointer",
-				userSelect: "none"
-			},
-			detailsBody: {
-				display: "flex",
-				flexDirection: "column",
-				gap: 10,
-				marginTop: 10
-			},
-			grant: {
-				fontSize: 12,
-				color: "var(--dsw-alias-label-secondary)"
-			},
-			models: {
-				display: "flex",
-				flexWrap: "wrap",
-				gap: 6
 			},
 			modelTag: {
 				fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
@@ -598,19 +473,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				borderRadius: 6,
 				background: "var(--dsw-alias-bg-layer-2)",
 				border: "1px solid var(--dsw-alias-border-l1)"
-			},
-			trendHead: {
-				display: "flex",
-				alignItems: "baseline",
-				justifyContent: "space-between",
-				gap: 12,
-				paddingBottom: 6,
-				borderBottom: "1px solid var(--dsw-alias-border-l1)"
-			},
-			trendHeadLabel: {
-				fontSize: 12,
-				color: "var(--dsw-alias-label-secondary)",
-				fontWeight: 500
 			},
 			trendRow: {
 				display: "flex",
@@ -657,16 +519,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				color: "var(--dsw-alias-label-secondary)",
 				padding: "18px 0"
 			},
-			field: {
-				display: "flex",
-				flexDirection: "column",
-				gap: 6,
-				marginBottom: 12
-			},
-			fieldLabel: {
-				fontSize: 12,
-				color: "var(--dsw-alias-label-secondary)"
-			},
 			input: {
 				height: 32,
 				padding: "0 10px",
@@ -687,11 +539,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				background: "var(--dsw-alias-button-primary-fill)",
 				color: "var(--dsw-alias-label-primary-foreground)",
 				cursor: "pointer"
-			},
-			primaryHover: { background: "var(--dsw-alias-button-primary-hover)" },
-			primaryBusy: {
-				opacity: .6,
-				cursor: "default"
 			},
 			formError: {
 				color: "var(--dsw-alias-state-error-primary)",
@@ -757,12 +604,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				textOverflow: "ellipsis",
 				whiteSpace: "nowrap"
 			},
-			modelRate: {
-				flex: "none",
-				fontSize: 11,
-				color: "var(--dsw-alias-label-secondary)",
-				fontVariantNumeric: "tabular-nums"
-			},
 			modelBadge: {
 				flex: "none",
 				fontSize: 11,
@@ -779,12 +620,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				background: "var(--dsw-alias-bg-layer-2)",
 				color: BRAND,
 				fontWeight: 600
-			},
-			modelMeta: {
-				paddingLeft: 25,
-				fontSize: 11,
-				lineHeight: "15px",
-				color: "var(--dsw-alias-label-secondary)"
 			},
 			rosterFoot: {
 				display: "flex",
@@ -1461,21 +1296,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			body: JSON.stringify(payload)
 		})).json().catch(() => null);
 	}
-	/** POST 并要求 ok:true；否则抛 Host 自己的 error 文案。 */
-	async function postJsonOrThrow(path, payload) {
-		const response = await fetch(path, {
-			method: "POST",
-			headers: {
-				"content-type": "application/json",
-				accept: "application/json"
-			},
-			cache: "no-store",
-			body: JSON.stringify(payload)
-		});
-		const body = await response.json().catch(() => null);
-		if (body === null || body.ok !== true) throw new Error(typeof body?.error === "string" ? body.error : `HTTP ${response.status}`);
-		return body;
-	}
 	/** GET 同源 JSON；非 2xx 或非 JSON 返回 null（调用方决定怎么降级）。 */
 	async function getJson(path) {
 		const response = await fetch(path, {
@@ -1967,12 +1787,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 					format,
 					isoTime,
 					statedCadenceMs,
-					when,
 					usePollingInterval,
 					useSnapshotPolling,
 					getJson,
-					postJson,
-					postJsonOrThrow
+					postJson
 				}),
 				components: Object.freeze({
 					BalanceCard,

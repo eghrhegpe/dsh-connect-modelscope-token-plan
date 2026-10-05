@@ -24,24 +24,6 @@ export function isoTime(iso: unknown): string {
   return Number.isNaN(epoch) ? "—" : clockLong(epoch / 1000);
 }
 
-/**
- * 同日的时刻显示 `HH:MM`，跨日带日期——头部「更新于」必须能熬过隔天，
- * 否则次日早上读「更新于 20:39」像 20 分钟前。
- */
-export function when(epoch: unknown): string {
-  if (typeof epoch !== "number" || !Number.isFinite(epoch) || epoch <= 0) return "—";
-  const date = new Date(epoch * 1000);
-  const now = new Date();
-  const sameDay = date.getFullYear() === now.getFullYear()
-    && date.getMonth() === now.getMonth()
-    && date.getDate() === now.getDate();
-  if (sameDay) {
-    const pad = (value: number) => String(value).padStart(2, "0");
-    return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-  }
-  return clockLong(epoch);
-}
-
 /** 数字文本：≥10000 整数千分位，否则最多两位小数。 */
 export function count(value: unknown): string {
   const number = typeof value === "number" && Number.isFinite(value) ? value : 0;

@@ -55,102 +55,26 @@ export const S = {
   chevron: { display: "inline-flex", flex: "none", transition: "transform 0.15s ease", color: "var(--dsw-alias-label-secondary)" },
   chevronOpen: { transform: "rotate(180deg)" },
   sectionBody: { borderTop: "1px solid var(--dsw-alias-border-l1)", margin: "0 16px", padding: "12px 0 16px" },
-  // Pool cards live in the responsive `poolsGrid` (gap owns the spacing),
-  // so the card itself carries no bottom margin.
   card: { background: "var(--dsw-alias-bg-layer-1)", border: "1px solid var(--dsw-alias-border-l1)", borderRadius: 12, padding: 16 },
-  // Responsive deck of pool cards: each column is at least 320px and the
-  // row reflows on narrow panels instead of overflowing.
-  poolsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 12, alignItems: "start" },
-  cardHead: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
   poolName: { fontSize: 15, fontWeight: 600 },
-  chip: { display: "inline-flex", alignItems: "center", height: 22, padding: "0 8px", borderRadius: 999, fontSize: 12, border: "1px solid var(--dsw-alias-border-l1)", background: "var(--dsw-alias-bg-layer-2)", color: "var(--dsw-alias-label-secondary)" },
-  // The grant balance is money the user can still spend, so it reads as a
-  // metric, not a decoration: right-aligned tabular figures on the card's
-  // own line, no chip frame. A pill here gave a headline number the same
-  // weight as the static type label beside it.
-  grantChip: { display: "inline-flex", alignItems: "center", fontSize: 13, color: "var(--dsw-alias-label-primary)", fontVariantNumeric: "tabular-nums" },
-  // The two quota windows sit side by side as twin sub-cards, stacking
-  // when the card gets narrower than ~2*170px (170 leaves room for the
-  // longest "used x / limit" caption beside the headline figures).
-  quotas: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 170px), 1fr))", gap: 10, marginTop: 14 },
-  // The twin quota windows float on a darker surface (layer-2) rather than
-  // a third nested border: the section card owns the outer frame and the
-  // pool card owns the inner one, so the sub-window reads by background
-  // step alone. A border here made three equal-weight rectangles inside
-  // each other and flattened the hierarchy it was meant to express.
-  quota: { display: "flex", flexDirection: "column", gap: 8, minWidth: 0, padding: "12px 14px", borderRadius: 10, background: "var(--dsw-alias-bg-layer-2)" },
-  // `flexWrap` because the reset stamp can grow to `MM-DD HH:mm`: in a narrow
-  // twin column the label and the date no longer share a row, and the date is
-  // the one part of the line that must never be clipped.
-  quotaTop: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" },
   quotaLabel: { fontSize: 12, fontWeight: 500, color: "var(--dsw-alias-label-secondary)" },
-  // The second upstream's balance is the same KIND of fact a quota headline is
-  // — the number the user came to read — so it borrows the quota headline's
-  // weight (18 / 650 / tabular) rather than the run-on meta line it used to
-  // ride in. The balance headline is the number the user came to read, so it
-  // owns its own card; that independence was never a licence to skip the type
-  // scale, and a headline spelled in 12px secondary text is how a tab reads as
-  // unfinished next to its siblings.
-  statHeadline: { fontSize: 18, lineHeight: "22px", fontWeight: 650, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" },
-  // A quiet secondary label for a headline's own caption line (the declared
-  // split, the credential clocks). It is the same stop `quotaLabel` uses, so a
-  // number and its caption read as one unit across both upstreams.
-  statCaption: { fontSize: 11, lineHeight: "15px", color: "var(--dsw-alias-label-secondary)", fontVariantNumeric: "tabular-nums" },
-  // A headline figure that IS the alarm, not decoration: a balance at zero
-  // must say so at the same weight the bar's error tone does. There is no warn
-  // band here on purpose — the quota headline has one because a PERCENTAGE has
-  // honest thresholds, while an absolute credit figure's normal magnitude is
-  // not something this client is told, so any "low" cut would be a number
-  // invented below the wire.
-  statError: { color: "var(--dsw-alias-state-error-primary)" },
-  // The balance split, as a deck of min-width cards:
-  // the same responsive rule `poolsGrid` and `quotas` own (auto-fit, each
-  // column at least N px, row reflows instead of overflowing). 110px is the
-  // floor that fits the longest label ("奖励") beside its figure without
-  // dropping it to a second line, and it stacks to 2×2 or a single column on a
-  // narrow panel. One run-on `每日 600 · 奖励 8344 · 月度 0 · 充值 0` line read as
-  // a comma list of four different facts with no place to separate them.
+  // 魔粒余额的拆分卡片：auto-fit 每列至少 110px（放得下最长的标签而不折行），
+  // 窄面板下堆叠。110px 这个下限是量出来的，不是随手取的。
   statGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 110px), 1fr))", gap: 10, marginTop: 12 },
-  // A grid card rides on the card's own step — the balance headline gives
-  // the deck the same layer-2 the quota twin gets, so a part reads by
-  // background alone rather than as a fourth nested border.
+  // 拆分卡片用 layer-2 底色（而不是第四层嵌套边框）表达从属关系。
   statCard: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0, padding: "10px 12px", borderRadius: 10, background: "var(--dsw-alias-bg-layer-2)" },
   // The part's figure is the point of the card; the name under it is the label,
   // so the big number leads and the label never competes with it.
   statValue: { fontSize: 16, fontWeight: 600, lineHeight: "20px", fontVariantNumeric: "tabular-nums" },
-  quotaReset: { fontSize: 11, color: "var(--dsw-alias-label-secondary)" },
-  // The usage PERCENTAGE is the headline — the same number the bar below
-  // draws, so the pair can never point in opposite directions. Tabular
-  // figures keep it still while polling.
-  quotaRemaining: { fontSize: 18, lineHeight: "22px", fontWeight: 650, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" },
-  // used/limit is a single quiet caption under the bar (its own full row,
-  // so the figures row never wraps on a narrow twin card).
+  // 已用次数的安静脚注（占满一行，窄面板下不会与别的数字挤在一行）。
   quotaUsed: { fontSize: 11, lineHeight: "15px", color: "var(--dsw-alias-label-secondary)", fontVariantNumeric: "tabular-nums" },
-  bar: { height: 6, borderRadius: 3, background: "var(--dsw-alias-bg-layer-1)", overflow: "hidden" },
   barFill: { height: "100%", borderRadius: 3, background: BRAND },
-  barFillWarn: { background: "var(--dsw-alias-state-warn-primary)" },
-  barFillError: { background: "var(--dsw-alias-state-error-primary)" },
-  // Secondary bookkeeping (grant expiry, model coverage) folds away so a
-  // card's open state is just its name, the twin quotas, and nothing else.
-  details: { marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--dsw-alias-border-l1)" },
-  detailsSummary: { fontSize: 12, color: "var(--dsw-alias-label-secondary)", cursor: "pointer", userSelect: "none" },
-  detailsBody: { display: "flex", flexDirection: "column", gap: 10, marginTop: 10 },
-  grant: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" },
-  models: { display: "flex", flexWrap: "wrap", gap: 6 },
   modelTag: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 11, padding: "2px 6px", borderRadius: 6, background: "var(--dsw-alias-bg-layer-2)", border: "1px solid var(--dsw-alias-border-l1)" },
-  // The per-model consumption card: a label row over one horizontal-bar
-  // row per model. The bar is relative to the LARGEST consumer — the
-  // chart answers "which model is burning credits" — so the top model
-  // fills the track and the rest shrink proportionally; the absolute
-  // number stays right-aligned beside the model name.
-  trendHead: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, paddingBottom: 6, borderBottom: "1px solid var(--dsw-alias-border-l1)" },
-  trendHeadLabel: { fontSize: 12, color: "var(--dsw-alias-label-secondary)", fontWeight: 500 },
   trendRow: { display: "flex", flexDirection: "column", gap: 8, padding: "10px 0", borderBottom: "1px solid var(--dsw-alias-border-l1)" },
   trendRowHead: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, minWidth: 0 },
   trendModel: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   trendCredits: { fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums" },
-  // The trend card sits on layer-1 like the pool cards, so its bar track
-  // must be layer-2 (the quota bars invert this: layer-1 inside layer-2).
+  // 趋势卡的轨道用 layer-2，与卡片自身的 layer-1 形成一格台阶差。
   trendBar: { height: 6, borderRadius: 3, background: "var(--dsw-alias-bg-layer-2)", overflow: "hidden" },
   // The legend under the bars: quiet secondary text, lifted a little off
   // the last row's divider so it reads as a caption, not another data row.
@@ -158,8 +82,6 @@ export const S = {
   muted: { color: "var(--dsw-alias-label-secondary)" },
   error: { color: "var(--dsw-alias-state-error-primary)" },
   empty: { color: "var(--dsw-alias-label-secondary)", padding: "18px 0" },
-  field: { display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 },
-  fieldLabel: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" },
   input: {
     height: 32, padding: "0 10px", borderRadius: 8, fontSize: 13,
     border: "1px solid var(--dsw-alias-border-l2)",
@@ -173,8 +95,6 @@ export const S = {
     background: "var(--dsw-alias-button-primary-fill)",
     color: "var(--dsw-alias-label-primary-foreground)", cursor: "pointer"
   },
-  primaryHover: { background: "var(--dsw-alias-button-primary-hover)" },
-  primaryBusy: { opacity: 0.6, cursor: "default" },
   formError: { color: "var(--dsw-alias-state-error-primary)", fontSize: 12, margin: "10px 0 0" },
   formNote: { color: "var(--dsw-alias-label-secondary)", fontSize: 12, margin: "10px 0 0" },
   // The model picker: a search box, then one flat row per model. The section
@@ -195,17 +115,11 @@ export const S = {
   // `0 1 auto` (not `1 1 auto`): the name hugs the rate chip instead of
   // stretching to the right edge; the label shrinks, so ellipsis still works.
   modelName: { flex: "0 1 auto", minWidth: 0, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  modelRate: { flex: "none", fontSize: 11, color: "var(--dsw-alias-label-secondary)", fontVariantNumeric: "tabular-nums" },
   modelBadge: { flex: "none", fontSize: 11, padding: "1px 7px", borderRadius: 999, background: "var(--dsw-alias-bg-layer-2)", color: "var(--dsw-alias-label-secondary)" },
   // 推荐（deepseek/glm/qwen 三家）与「视觉」**同构**：同一枚 pill，不改行背景、
   // 不加左边线、不动名字字号——推荐是一个事实标签，不是一次整行高亮。整行染色
   // 把三行拉成「被选中的行」，而它们只是一批里的三批模型；标签只标这一条。
   modelBadgeFeatured: { flex: "none", fontSize: 11, padding: "1px 7px", borderRadius: 999, background: "var(--dsw-alias-bg-layer-2)", color: BRAND, fontWeight: 600 },
-  // The WorkBuddy-style parameter line: only per-model facts — the figures the
-  // platform declares (window, output ceiling) and the levels the selector
-  // offers. Provider-wide constants live in the header once, never here.
-  // Indented under the model name (15px checkbox + 10px gap = 25).
-  modelMeta: { paddingLeft: 25, fontSize: 11, lineHeight: "15px", color: "var(--dsw-alias-label-secondary)" },
   rosterFoot: { display: "flex", gap: 8, alignItems: "center", marginTop: 10 },
   // A roster's own frame — one step INSIDE the section card. The rule above
   // still holds (rows draw no box of their own; the divider separates them),
