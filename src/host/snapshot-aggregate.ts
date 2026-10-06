@@ -80,13 +80,24 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
   const shapeWarnings: string[] = [];
   const usageAnomaly = usageStore.anomaly();
   if (usageAnomaly !== null) shapeWarnings.push(usageAnomaly);
-  for (const path of [tokenState, daily, perModel, trend, events]) {
-    if (!path.ok) shapeWarnings.push(`usage-source failed (${path.code}): ${path.error}`);
+  // 逐路标注来源：token 不是「用量源」，混进同一句会让操作者去查错文件。
+  for (const [label, path] of [
+    ["token", tokenState],
+    ["daily", daily],
+    ["per-model", perModel],
+    ["trend", trend],
+    ["events", events]
+  ] as const) {
+    if (!path.ok) shapeWarnings.push(`${label} source failed (${path.code}): ${path.error}`);
   }
 
-  // 官方魔粒余额（头条数据源）：需要令牌；无令牌时静默缺席（error 置 null，
-  // 面板在「接入」tab 引导配令牌，而不是在「额度」tab 报一条假故障）。
-  const tokenPresent = tokenState.ok ? tokenState.value.present : false;
+  // 官方魔粒余额（头条数据源）：需要令牌；**确定没有令牌**时才静默缺席（error 置
+  // null，面板在「接入」tab 引导配令牌，而不是在「额度」tab 报一条假故障）。
+  //
+  // 判据只能是「读到了令牌状态、且它说没有」：令牌状态**读不到**时我们并不知道
+  // 有没有令牌，此时压掉余额错误等于替操作者断言「你没配令牌」——那是伪造，不是
+  // 降级（旧写法 `tokenState.ok ? present : false` 正是这样）。
+  const tokenKnownAbsent = tokenState.ok && tokenState.value.present === false;
   // 余额与目录互不依赖（余额要令牌、目录免认证），一起发。理由不是省延迟——
   // 目录走缓存键 coalescing，命中时近乎瞬时；真正的问题是**依赖方向反了**：
   // 免认证的目录取数原先排在要鉴权的余额取数之后，而后者最坏是整段 inference
@@ -101,7 +112,7 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     // 网络抖动不值得一条常驻警告（下一轮轮询自愈）；形状漂移值得。
     shapeWarnings.push(`models: ${models.error}`);
   }
-  if (tokenPresent && !balance.ok && balance.code !== "network_error") {
+  if (!tokenKnownAbsent && !balance.ok && balance.code !== "network_error") {
     shapeWarnings.push(`balance: ${balance.error}`);
   }
   if (providerNote.ok && providerNote.value !== null) {
@@ -150,7 +161,9 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     } satisfies Snapshot["provider"];
   })());
 
-  const usedLocal = daily.ok ? daily.value.calls : 0;
+  // 读不到就是 null（不是 0）：0 是可信的日常值，把「读不到」渲成 0 会让操作者以为
+  // 今天没调用过，而真相是他不知道。面板对 null 渲染「—」（见 wire.ts DailyUsage）。
+  const usedLocal = daily.ok ? daily.value.calls : null;
 
   return {
     ok: true,
@@ -160,11 +173,11 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     pollSeconds: settings.pollSeconds,
     cacheSeconds: settings.cacheSeconds,
     token: tokenState.ok
-      ? tokenState.value
-      : { present: false, source: "none", valid: null, checkedAt: null, ephemeral: true },
+      ? { ...tokenState.value, readError: null }
+      : { present: false, source: "none", valid: null, checkedAt: null, ephemeral: true, readError: tokenState.error },
     balance: balance.ok
       ? { available: balance.value.available, total: balance.value.total, frozen: balance.value.frozen, fetchedAt: balance.value.fetchedAt, error: null }
-      : { available: null, total: null, frozen: null, fetchedAt: null, error: tokenPresent ? balance.error : null },
+      : { available: null, total: null, frozen: null, fetchedAt: null, error: tokenKnownAbsent ? null : balance.error },
     quota: {
       // 只有本地次数，没有「上限」也没有「剩余」：官方改魔粒计费后，次数口径的
       // 推算是误导（README「三条事实」第 2 条）。头条数字是上面的 balance。

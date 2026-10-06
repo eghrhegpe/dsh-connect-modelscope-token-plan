@@ -47,6 +47,7 @@ export const zh = {
 
   "quota.headline": "今日 {calls} 次 · {models} 个模型",
   "quota.note": "本地口径：只统计经本插件的调用，直连魔搭的其它客户端不计入；消耗总量以官方魔粒余额为准。",
+  "quota.unavailable": "本地计数本次读不到：{error}",
 
   // 目录表与其行内 usage 试调已删除（见 panel-page.ts modelsBody 注释），
   // 所以只留 token 管理用的零额度 validity probe；models.none / models.loading
@@ -100,6 +101,7 @@ export const zh = {
   "token.ariaLabel": "魔搭访问令牌",
   "token.hint": "在魔搭「访问令牌」页生成。保存即生效（写入 DSH 凭据服务，不依赖重启）。环境变量 MODELSCOPE_API_KEY 只在 DSH 启动时读一次，且优先级高于此处保存的值——设了它就别再用面板存。",
   "token.ephemeral": "此 Host 没有凭据服务：面板保存的令牌重启即丢，请改用凭据服务或环境变量。",
+  "token.readError": "读不到凭据存储，无法确认令牌状态（不代表没配令牌）：{error}",
   "token.link": "打开魔搭访问令牌页 →",
   "source.credentials": "凭据服务",
   "source.env": "环境变量",
@@ -154,6 +156,7 @@ export const en: typeof zh = {
 
   "quota.headline": "Today {calls} calls · {models} models",
   "quota.note": "Local scope: only calls through this plugin are counted; clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
+  "quota.unavailable": "Local counters could not be read this time: {error}",
 
   // The catalog table and its per-row usage probe were removed (see the
   // panel-page.ts modelsBody comment), so models.none / models.loading were
@@ -208,6 +211,7 @@ export const en: typeof zh = {
   "token.ariaLabel": "ModelScope access token",
   "token.hint": "Generate one on the ModelScope access-token page. Saving takes effect immediately (written to the DSH credentials service, no restart needed). The MODELSCOPE_API_KEY environment variable is read once at DSH launch and ranks ABOVE a value saved here — set it and stop using the panel.",
   "token.ephemeral": "This Host has no credentials service: a token saved in the panel is lost on restart. Use the credentials service or an environment variable.",
+  "token.readError": "Could not read the credential store, so the token state is unknown (this does NOT mean no token is configured): {error}",
   "token.link": "Open the ModelScope access-token page →",
   "source.credentials": "credentials",
   "source.env": "environment",

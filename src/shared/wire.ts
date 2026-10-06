@@ -21,8 +21,14 @@ export const SNAPSHOT_VERSION = 1;
  * 「每日 N 次」，非官方数据，留着会让人以为面板能算「还剩几次」。
  */
 export interface DailyUsage {
-  /** 今日调用次数（本地口径）。 */
-  usedLocal: number;
+  /**
+   * 今日调用次数（本地口径）。
+   *
+   * `null` = **没读到**（本地计数文件读失败/损坏被拒），`0` = 确实一次都没有。
+   * 两者必须分开：0 是可信的日常值，把「读不到」渲染成 0 会让操作者以为今天
+   * 没调用过，而真相是他不知道。面板对 null 渲染「—」。
+   */
+  usedLocal: number | null;
 }
 
 /** 单模型本地用量（今日口径：calls 与 tokens 都跨日清零，见 usage-store）。 */
@@ -112,6 +118,14 @@ export interface TokenStatus {
   checkedAt: string | null;
   /** true = 这台 Host 没有凭据服务，面板保存的令牌重启即丢。 */
   ephemeral: boolean;
+  /**
+   * 读凭据存储失败的原因；`null`/缺席 = 读到了（此时 `present` 才可信）。
+   *
+   * 这一路失败原先被伪造成 `present: false, source: "none"`——对**有**令牌的
+   * 用户展示「未配置、去粘贴令牌」，并顺手把余额的错误也压成 null。`present`
+   * 是布尔量，表达不了「读不到」；这条字段就是那个缺失的第三态。
+   */
+  readError?: string | null;
 }
 
 /**
