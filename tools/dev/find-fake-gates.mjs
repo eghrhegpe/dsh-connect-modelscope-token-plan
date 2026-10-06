@@ -38,9 +38,14 @@ for (const t of tests) {
       body
     });
   }
-  const assertText = asserts.map((a) => a.body).join("\n");
+  // （assertText 已不再需要——A 类检测改为扫描全文件而非仅断言文本。）
 
-  // A. 变量声明后从未出现在任何断言里
+  // A. 变量声明后从未在**任何地方**被使用
+  //
+  // 原实现只检查变量是否出现在 assertText（所有 assert.* 的参数文本）里，
+  // 导致 makeReact / walk / makeReq 等工具函数被误报为「未使用」——它们被
+  // 测试的其他代码调用，但不在 assert.* 的参数里直接出现。修复：检查变量
+  // 是否在声明行之外的任何地方出现（包括函数调用、赋值、return 等）。
   const declRe = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/g;
   const declared = [];
   while ((m = declRe.exec(text))) {
@@ -49,36 +54,22 @@ for (const t of tests) {
     declared.push({ name, line: text.slice(0, m.index).split("\n").length });
   }
   for (const d of declared) {
-    // 在断言里找该标识符（排除声明自身与属性访问 obj.name）
-    const usedInAssert = new RegExp(`(^|[^.\\w$])${d.name.replace(/\$/g, "\\$")}\\b`).test(assertText);
-    // 也检查是否作为 for-of 的迭代变量、或被 return
-    const usedInLoop = new RegExp(`for\\s*\\([^)]*\\bof\\s+${d.name}\\b`).test(text);
-    if (!usedInAssert && !usedInLoop) {
-      // 排除：console.log 用它、throw 用它
-      const usedElsewhere = new RegExp(`(console\\.log|throw|return)[^\\n]*\\b${d.name}\\b`).test(text);
-      if (!usedElsewhere) {
-        findings.push(`  A  L${d.line}  变量 \`${d.name}\` 声明后从未出现在任何断言/循环/日志里`);
-      }
+    const withoutDeclLine = lines.slice(0, d.line - 1).concat(lines.slice(d.line)).join("\n");
+    if (!new RegExp(`\\b${d.name}\\b`).test(withoutDeclLine)) {
+      findings.push(`  A  L${d.line}  变量 \`${d.name}\` 声明后从未在任何地方使用`);
     }
   }
 
   // B/C. 断言里出现纯字面量（不含任何被测标识符）
+  //
+  // 原实现只检查第一个参数（逗号分割后的 parts[0]），导致
+  // `assert.equal(name, pkg.name)` 这类有效断言被误报——因为 `parts[0]`
+  // 只有 `name`，而 `pkg.name` 在 `parts[1]` 里。修复：检查整个 body。
   for (const a of asserts) {
     const b = a.body.trim();
-    // 去掉消息参数（最后一个顶层逗号之后）
-    const parts = [];
-    let depth = 0, cur = "";
-    for (const ch of b) {
-      if ("([{".includes(ch)) depth++;
-      if (")]}".includes(ch)) depth--;
-      if (ch === "," && depth === 0) { parts.push(cur); cur = ""; } else cur += ch;
-    }
-    parts.push(cur);
-    const expr = parts[0].trim();
-    if (!expr) continue;
-    // 表达式里没有任何标识符（纯字面量/纯字符串/纯数字比较）→ 恒真或测副本
-    if (!/[A-Za-z_$][\w$]*\s*[.(\[=!<>]/.test(expr) && !/[([][A-Za-z_$]/.test(expr)) {
-      findings.push(`  C  L${a.line}  断言表达式无被测标识符（恒真）: assert.${a.kind}(${expr.slice(0, 60)})`);
+    // 整个 body 里没有任何标识符 → 纯字面量比较（恒真或测副本）
+    if (!/[A-Za-z_$][\w$]*/.test(b)) {
+      findings.push(`  C  L${a.line}  断言表达式无被测标识符（恒真）: assert.${a.kind}(${b.slice(0, 60)})`);
     }
   }
 

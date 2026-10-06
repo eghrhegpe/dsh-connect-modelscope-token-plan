@@ -29,12 +29,12 @@ export const S = {
   // Two fixed perspectives — daily quota reading vs. one-off API wiring —
   // so the setup cards stop crowding the numbers the panel exists for.
   tabBar: { display: "flex", gap: 4, borderBottom: "1px solid var(--dsw-alias-border-l1)", marginBottom: 4 },
-  // `outline: none` because the shell stamps its own white focus ring on
-  // every clicked button — a second "active" language that fought this one:
-  // the tabs share the same underline language (lesson from the sister plugin fork:
-  // a second white-box accent fought this one). The underline + weight below IS the active state, visible
-  // without a ring; keyboard users keep the aria-selected semantics.
-  tab: { appearance: "none", background: "none", border: "none", borderBottom: "2px solid transparent", padding: "8px 12px", fontSize: 13, color: "var(--dsw-alias-label-secondary)", cursor: "pointer", outline: "none" },
+  // 焦点环与下划线是两种不同状态，不冲突：下划线说「当前选中」，焦点环说
+  // 「当前可操作」。早期版本写 `outline: "none"` 是想压掉外壳给被点击按钮盖的
+  // 白色焦点环（觉得那是第二种 active 语言），但内联样式的 outline: none 优先级
+  // 高于任何非 !important 规则——结果把键盘焦点环也一起压掉了，键盘用户扫到
+  // tab 时什么都看不到。这里改用 outlineOffset 把焦点环向内收一点，保留可见性。
+  tab: { appearance: "none", background: "none", border: "none", borderBottom: "2px solid transparent", padding: "8px 12px", fontSize: 13, color: "var(--dsw-alias-label-secondary)", cursor: "pointer", outlineOffset: -2 },
   tabActive: { color: "var(--dsw-alias-label-primary)", fontWeight: 600, borderBottom: `2px solid ${BRAND}` },
   title: { margin: 0, fontSize: 20, fontWeight: 600, lineHeight: "28px" },
   updated: { color: "var(--dsw-alias-label-secondary)", fontSize: 12 },

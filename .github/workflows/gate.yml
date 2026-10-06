@@ -30,7 +30,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # `22.x` 而非裸 `22`：明确锁定 22 大版本的最新补丁，engines 要求
+          # ^22.19.0 || >=24.0.0——裸 22 在 Actions 上解析到该大版本的最新 LTS，
+          # 语义上等价但不够显式。换大版本时用 workflow_dispatch 手动触发。
+          node-version: 22.x
           # 不要加 `cache: npm`：它要求工作区里有 package-lock.json，而本仓库的锁文件被
           # .gitignore 明确排除。2026-10-05 第一次远程运行就死在这里——setup-node 直接报
           # "Dependencies lock file is not found"，还没轮到 npm install。缓存那点收益换不来。

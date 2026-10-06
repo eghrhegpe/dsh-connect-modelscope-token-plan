@@ -3,7 +3,8 @@
  *
  * 这里的一切都跑在 Host 发行的 peer 上（`pi-ai`、`dsh-llm`、`dsh-llm-pi-ai`）——这
  * 正是 descriptor 映射要住在 peer-free 的 `llm-models.ts` 的原因：本模块不能被离线
- * 单测套件导入，所以它只装对运行时的装配，由 wiring/e2e 检查来测。
+ * 单测套件导入，**目前也没有测试覆盖**——原注释说「由 wiring/e2e 检查来测」，而那个
+ * e2e 还在 docs/ROADMAP.md 的 Backlog 里。改错本文件不会让任何门禁变红。
  *
  * 形状对齐已知可用的 qoder 适配器：
  *

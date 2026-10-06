@@ -6,7 +6,7 @@
  */
 import { count, format, isoTime } from "./format.ts";
 import { h, useEffect, useMemo, useState } from "./runtime.ts";
-import type { Tt } from "./runtime.ts";
+import type { DictionaryKey, Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
 import { HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, modelscopeModelUrl, FEATURED_OWNERS, catalogOwner } from "./const.ts";
 import { providerOf } from "./snapshot.ts";
@@ -147,7 +147,10 @@ export function TrendBars({ buckets, tt }: { buckets: TrendBucket[]; tt: Tt }): 
   );
 }
 
-const EVENT_KIND_KEY: Record<string, string> = { quota: "events.quota", rate_limit: "events.rate_limit", error: "events.error" };
+// kind → 字典键。`Record<string, DictionaryKey>` 而非 string：这样 tt() 的参数
+// 在编译期就是 DictionaryKey，不需要 as cast（原实现用 Record<string,string>，
+// 逼着调用点写 `as Parameters<Tt>[0]`，把类型系统的最后一道防线让掉了）。
+const EVENT_KIND_KEY: Record<string, DictionaryKey> = { quota: "events.quota", rate_limit: "events.rate_limit", error: "events.error" };
 
 /** 事件流（429/错误），Newest-first。 */
 export function EventsList({ events, tt }: { events: QuotaEvent[]; tt: Tt }): unknown {
@@ -159,7 +162,7 @@ export function EventsList({ events, tt }: { events: QuotaEvent[]; tt: Tt }): un
       "div",
       { key: `${event.at}-${index}`, style: S.trendRowHead },
       h("span", { style: S.quotaUsed }, isoTime(event.at)),
-      h("span", { style: S.modelTag }, tt((EVENT_KIND_KEY[event.kind] ?? "events.unknown") as Parameters<Tt>[0])),
+      h("span", { style: S.modelTag }, tt(EVENT_KIND_KEY[event.kind] ?? "events.unknown")),
       h("span", { style: { ...S.trendModel, flex: "1" }, title: event.message }, event.message)
     ))
   );
@@ -199,7 +202,7 @@ export function TokenForm({ token, busy, error, onSave, onForget, onVerify, veri
     h(
       "div",
       { style: S.rosterTools },
-      h("input", { style: S.input, type: "password", placeholder: tt("token.placeholder"), value, onChange: (event: unknown) => setValue(String((event as { target: { value: string } }).target.value ?? "")) }),
+      h("input", { style: S.input, type: "password", placeholder: tt("token.placeholder"), "aria-label": tt("token.ariaLabel"), value, onChange: (event: unknown) => setValue(String((event as { target: { value: string } }).target.value ?? "")) }),
       h("button", { type: "button", style: S.primary, disabled: busy, onClick: () => { onSave(value); setValue(""); } }, tt("token.save")),
       token?.present ? h("button", { type: "button", style: S.button, disabled: busy, onClick: onForget }, tt("token.forget")) : null,
       onVerify !== undefined ? h("button", { type: "button", style: S.button, disabled: busy, onClick: onVerify, title: verifyTitle }, tt("probe.validity")) : null
@@ -306,6 +309,7 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onRe
       onChange: () => onToggle(!enabled),
       busy,
       label: tt(enabled ? "provider.on" : "provider.off"),
+      busyLabel: tt("provider.busy"),
       title: tt("provider.enable")
     }),
     h("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary)" } }, tt(sourceKey))

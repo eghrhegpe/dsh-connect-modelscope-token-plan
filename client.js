@@ -14,7 +14,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 //#endregion
 //#region src/client/const.ts
 	function modelscopeModelUrl(id) {
-		return `${MODELSCOPE_MODEL_URL_BASE}/${encodeURI(id)}`;
+		return `${MODELSCOPE_MODEL_URL_BASE}/${id.split("/").map(encodeURIComponent).join("/")}`;
 	}
 	/** 从 `owner/model` 取 owner（无斜杠时整段作 owner）。 */
 	function catalogOwner(id) {
@@ -96,6 +96,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.enable": "把魔搭模型接入 DSH 模型选择器",
 			"provider.on": "已接入",
 			"provider.off": "未接入",
+			"provider.busy": "切换中…",
 			"provider.registered": "已注册（模型可在选择器里选用）",
 			"provider.notRegistered": "未注册",
 			"provider.llmMissing": "本机 Host 未提供 LLM 注册服务",
@@ -123,6 +124,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"token.save": "保存",
 			"token.forget": "忘掉已保存",
 			"token.placeholder": "粘贴 ms-… 访问令牌",
+			"token.ariaLabel": "魔搭访问令牌",
 			"token.hint": "在魔搭「访问令牌」页生成。保存即生效（写入 DSH 凭据服务，不依赖重启）。环境变量 MODELSCOPE_API_KEY 只在 DSH 启动时读一次，且优先级高于此处保存的值——设了它就别再用面板存。",
 			"token.ephemeral": "此 Host 没有凭据服务：面板保存的令牌重启即丢，请改用凭据服务或环境变量。",
 			"token.link": "打开魔搭访问令牌页 →",
@@ -183,6 +185,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.enable": "Register ModelScope models in the DSH model picker",
 			"provider.on": "On",
 			"provider.off": "Off",
+			"provider.busy": "Switching…",
 			"provider.registered": "Registered (models selectable in the picker)",
 			"provider.notRegistered": "Not registered",
 			"provider.llmMissing": "This Host exposes no LLM service",
@@ -210,6 +213,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"token.save": "Save",
 			"token.forget": "Forget saved",
 			"token.placeholder": "Paste an ms-… access token",
+			"token.ariaLabel": "ModelScope access token",
 			"token.hint": "Generate one on the ModelScope access-token page. Saving takes effect immediately (written to the DSH credentials service, no restart needed). The MODELSCOPE_API_KEY environment variable is read once at DSH launch and ranks ABOVE a value saved here — set it and stop using the panel.",
 			"token.ephemeral": "This Host has no credentials service: a token saved in the panel is lost on restart. Use the credentials service or an environment variable.",
 			"token.link": "Open the ModelScope access-token page →",
@@ -356,7 +360,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				fontSize: 13,
 				color: "var(--dsw-alias-label-secondary)",
 				cursor: "pointer",
-				outline: "none"
+				outlineOffset: -2
 			},
 			tabActive: {
 				color: "var(--dsw-alias-label-primary)",
@@ -785,8 +789,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			llmAvailable: p.llmAvailable === true,
 			registered: p.registered === true,
 			error: typeof p.error === "string" ? p.error : null,
-			modelCount: typeof p.modelCount === "number" ? p.modelCount : roster.length,
-			enabledCount: typeof p.enabledCount === "number" ? p.enabledCount : 0,
+			modelCount: typeof p.modelCount === "number" && Number.isFinite(p.modelCount) ? p.modelCount : roster.length,
+			enabledCount: typeof p.enabledCount === "number" && Number.isFinite(p.enabledCount) ? p.enabledCount : 0,
 			allowed: p.allowed === "none" ? "none" : p.allowed === "list" ? "list" : "all",
 			enabledIds: ids,
 			roster
@@ -1079,6 +1083,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			style: S.input,
 			type: "password",
 			placeholder: tt("token.placeholder"),
+			"aria-label": tt("token.ariaLabel"),
 			value,
 			onChange: (event) => setValue(String(event.target.value ?? ""))
 		}), h("button", {
@@ -1189,6 +1194,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			onChange: () => onToggle(!enabled),
 			busy,
 			label: tt(enabled ? "provider.on" : "provider.off"),
+			busyLabel: tt("provider.busy"),
 			title: tt("provider.enable")
 		}), h("span", { style: {
 			fontSize: 11,
@@ -1318,7 +1324,14 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			if (timer !== null) clearTimeout(timer);
 		}
 	}
-	/** POST 并解析 body；非 JSON 响应返回 null。 */
+	/**
+	* POST 并解析 body；非 JSON 响应返回 null。
+	*
+	* 这里**故意不**检查 `response.ok`（与 {@link getJson} 不同）：host 的写操作错误
+	* 响应体是 `{ok:false, code, error}`，调用方靠 `body.error` 给用户看具体原因
+	* （令牌格式错、额度耗尽、上游超时）。丢掉它就只能显示一句通用的「操作失败」，
+	* 用户无从下手。getJson 可以直接返回 null——读操作没有错误详情可展示。
+	*/
 	async function postJson(path, payload) {
 		return await (await fetchWithTimeout(path, {
 			method: "POST",

@@ -9,8 +9,9 @@
  * shape without importing that peer.
  *
  * The peer classifies a ModelScope 429 into two codes (`isQuotaExceededError` →
- * `rate.?limit` inside `classifyPiAiError`, pinned against the real source by
- * `test/peer-contract.test.mjs`):
+ * `rate.?limit` inside `classifyPiAiError`). That classification ORDER is not
+ * pinned by any test — verifying it needs the runtime peer, which is not
+ * vendored here (see docs/ROADMAP.md Backlog). Read on with that in mind:
  *
  *   - `QUOTA` / `ACCOUNT_QUOTA` — the Token Plan pool is depleted. Retrying
  *     cannot refill it, and the pool is SHARED across every model on this key,
@@ -81,10 +82,11 @@ export function retryableCodes() {
  * accepts (`mode: "normal"` → `{ mode, maxRetries, retryableCodes, backoff }`).
  * We pin it explicitly rather than passing `undefined` so a future change to
  * the peer's default policy cannot silently alter this provider's behaviour.
- * This module's shape is pinned by `test/retry.test.mjs`; the live peer's
- * `resolveRetryPolicy` contract is covered by `test/peer-contract.test.mjs`,
- * which needs the runtime peer (not vendored here) and is outside the offline
- * `npm test` gate.
+ * This module's shape is pinned by `test/retry.test.mjs`. The live peer's
+ * `resolveRetryPolicy` contract is NOT covered by any test: verifying it needs
+ * the runtime peer, which is not vendored here and so cannot run inside the
+ * offline `npm test` gate (docs/ROADMAP.md Backlog). If the peer ever changes
+ * its policy shape, this provider fails silently at runtime — no gate turns red.
  *
  * Tuned for ModelScope's daytime rate ceiling (rpm/tpm), which the peer mislabels
  * as `QUOTA` — `llm-error-fix.ts` pulls those back to `RATE_LIMIT` so they

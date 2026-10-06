@@ -12,7 +12,8 @@
  * 读取的凭据解析器——那是真正的领域差异。
  *
  * peer-dependent：import `pi-ai` / `dsh-llm` / `dsh-llm-pi-ai`，它们随 Host
- * 发行。与适配器本身一样，不能由离线单测套件导入，由 wiring/e2e 检查来测。
+ * 发行。与适配器本身一样，不能由离线单测套件导入，**目前也没有测试覆盖**
+ * （e2e 仍在 docs/ROADMAP.md 的 Backlog 里）。
  *
  * @module dsh-connect-modelscope-token-plan/llm-adapter-core
  */

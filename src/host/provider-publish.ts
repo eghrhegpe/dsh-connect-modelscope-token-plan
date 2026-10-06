@@ -172,6 +172,18 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
   });
 
   /**
+   * 空转守卫的公共判据：目录 offer 与额度耗尽集合是否都没变。
+   *
+   * 两处空转守卫（开关关着 / 开关开着）共用这个签名比对——公式与轮询同源
+   * （由 {@link syncSignaturesAfterPublish} 内部调用导出的 {@link catalogSignature}
+   * 与 {@link quotaSignatureOf}），不会漂移。提取成函数避免两处各写一遍。
+   * @returns {boolean} true = offer 没变，可以跳过这次 publish。
+   */
+  const offerUnchanged = (): boolean =>
+    state.signature === catalogSignature(state.entries, state.enabledIds) &&
+    state.quotaSignature === quotaSignatureOf(state.unavailableIds);
+
+  /**
    * 为一个目录/允许清单快照（重）构建并注册 provider。
    *
    * 重建并重注册而非原地改：`PiAiAdapter` 内部 memoize profiles 快照，只有新的注册
@@ -211,9 +223,7 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
       // 空转守卫：开关关着、且上次也确实没注册、签名也没漂（offer 没变），就别跑
       // unregister——否则每个轮询周期都做一次无意义（且会发 llm/adapters-updated
       // 事件的）注销。见 fix B：签名比对让「目录没变」的轮询不再 churn。
-      if (state.registered === false && state.error === null &&
-          state.signature === catalogSignature(state.entries, state.enabledIds) &&
-          state.quotaSignature === quotaSignatureOf(state.unavailableIds)) {
+      if (state.registered === false && state.error === null && offerUnchanged()) {
         return { ok: true, skipped: true };
       }
       const result = unregister({ state, release });
@@ -256,9 +266,7 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
     // 次重建出来的结果完全一致——就**不要重建** provider 对（否则每轮询周期都摘下再
     // 挂上同一个对，期间任何在途请求可能被打断）。见 fix B。注意只在「已成功注册」
     // 且「无错误」时跳过；失败态必须继续尝试重注册自愈。
-    if (state.registered === true && state.error === null &&
-        state.signature === catalogSignature(state.entries, state.enabledIds) &&
-        state.quotaSignature === quotaSignatureOf(state.unavailableIds)) {
+    if (state.registered === true && state.error === null && offerUnchanged()) {
       return { ok: true, skipped: true };
     }
     // ── 闸门第二次检查（承重，见下）──

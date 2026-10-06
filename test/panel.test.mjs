@@ -46,9 +46,11 @@ for (const code of panel.tables.FORM_EXCLUDED_CODES) {
 // fixture 必须**逐字含齐** SNAPSHOT_REQUIRED_KEYS 的每个键（§3b 会逐个删键验证
 // 补空形状，所以这里少一个键会让「完整 body」那一断言误报）。
 const okBody = { ok: true, name: "dsh-connect-modelscope-token-plan", version: "0.1.0", now: "2026-10-04T00:00:00Z", pollSeconds: 30, cacheSeconds: 60, token: { present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false }, balance: { available: 143, total: 143, frozen: 0, fetchedAt: null, error: null }, quota: { daily: { usedLocal: 0 }, perModel: [], countingNote: "local-counting" }, events: [], trend: { days: 14, buckets: [] }, models: { available: true, count: 35, sample: [], error: null }, provider: { enabled: false, source: "config", llmAvailable: false, registered: false, error: null, modelCount: 0, enabledCount: 0, allowed: "all", enabledIds: [], roster: [] }, shapeWarnings: [], quotaError: null };
-const read = panel.helpers.interpretSnapshot
-  ? null // helpers 不含 interpretSnapshot；真身在 panel 顶层
-  : null;
+// helpers 不含 interpretSnapshot，真身在 panel 顶层。原先这里是
+// `panel.helpers.interpretSnapshot ? null : null` —— 两支都是 null 且变量从未使用，
+// 是重构残留。现在把它变成真正钉住形状的断言：谁把函数挪进 helpers，
+// 下面第 52 行的 `panel.interpretSnapshot(okBody)` 就会炸。
+assert.equal(panel.helpers?.interpretSnapshot, undefined, "interpretSnapshot 住在 panel 顶层，不在 helpers 里");
 const interpreted = panel.interpretSnapshot(okBody);
 assert.equal(interpreted.data === null, false, "ok:true body 读出数据");
 const view = panel.viewOf(interpreted.data, null, (key) => zh[key]);
@@ -252,6 +254,38 @@ for (const suffix of new Set(clientSuffixes)) {
   for (const path of hostResolved) {
     assert.ok(clientResolved.has(path), `Host 注册了 ${path}，但 client 没有任何 const 指向它（死路由？）`);
   }
+}
+
+// §6c 哨兵字面量双端一致。`__hide_all__` 在 host/llm-models.ts 与
+// client/const.ts 各有一份拷贝——浏览器 bundle 无法从 host 模块 import，
+// 两份是设计意图（见 const.ts:35-38 的警告）。但它与路由路径不同：路由有
+// §6/§6b 双向钉住，哨兵一直只有 host 侧被 provider.test.mjs:28 钉死字面值，
+// client 侧零断言。改坏 client 那一份，npm test 全绿，而效果是「点全部隐藏」
+// 被当成普通模型 id 发给 filterByEnabled——匹配不到任何真实模型，「全部隐藏」
+// 静默变成「全部提供」。
+{
+  const hostLlm = readFileSync(new URL("../src/host/llm-models.ts", import.meta.url), "utf8");
+  const clientConst = readFileSync(new URL("../src/client/const.ts", import.meta.url), "utf8");
+  const sentinelOf = (src) => (src.match(/HIDE_ALL_MODELS\s*=\s*"([^"]+)"/) ?? [])[1];
+  const hostSentinel = sentinelOf(hostLlm);
+  const clientSentinel = sentinelOf(clientConst);
+  assert.equal(typeof hostSentinel, "string", "host/llm-models.ts 必须定义 HIDE_ALL_MODELS");
+  assert.equal(typeof clientSentinel, "string", "client/const.ts 必须定义 HIDE_ALL_MODELS");
+  assert.equal(clientSentinel, hostSentinel,
+    `双端哨兵必须同字面量：host="${hostSentinel}" client="${clientSentinel}"`);
+}
+
+// §6d locale 文件 key 集合一致。i18n.ts 的运行时字典（zh/en 各 85 键）由
+// `export const en: typeof zh` 在编译期钉死，但 locale/*.json 是另一套（给市场
+// 页用的 title/description），两边互不兜底。en.json 曾缺 meta.description，
+// 市场英文页简介空白而所有测试全绿。
+{
+  const flat = (obj, prefix = "") => Object.entries(obj).flatMap(([k, v]) =>
+    (v !== null && typeof v === "object") ? flat(v, `${prefix}${k}.`) : [`${prefix}${k}`]);
+  const zhJson = JSON.parse(readFileSync(new URL("../locale/zh.json", import.meta.url), "utf8"));
+  const enJson = JSON.parse(readFileSync(new URL("../locale/en.json", import.meta.url), "utf8"));
+  assert.deepEqual(flat(enJson).sort(), flat(zhJson).sort(),
+    "locale/en.json 与 zh.json 的 key 集合必须一致");
 }
 
 // §7 apply()：把字典与卡注册进 slots。

@@ -32,7 +32,14 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
   }
 }
 
-/** POST 并解析 body；非 JSON 响应返回 null。 */
+/**
+ * POST 并解析 body；非 JSON 响应返回 null。
+ *
+ * 这里**故意不**检查 `response.ok`（与 {@link getJson} 不同）：host 的写操作错误
+ * 响应体是 `{ok:false, code, error}`，调用方靠 `body.error` 给用户看具体原因
+ * （令牌格式错、额度耗尽、上游超时）。丢掉它就只能显示一句通用的「操作失败」，
+ * 用户无从下手。getJson 可以直接返回 null——读操作没有错误详情可展示。
+ */
 export async function postJson(path: string, payload: Record<string, unknown>): Promise<ApiBody | null> {
   const response = await fetchWithTimeout(path, {
     method: "POST",

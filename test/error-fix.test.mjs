@@ -1,7 +1,11 @@
 // llm-error-fix 离线套件：把"看似限频却被 peer 误判为 QUOTA 的 429"纠正回
-// RATE_LIMIT 的纯函数半边，peer-free。真 peer 的 classifyPiAiError 行为由
-// test/peer-contract.test.mjs 在 peer 可达时钉死（该 peer 未 vendored 本仓库）；
-// 这里只钉本模块自身的纠正判定与流改写，不依赖任何运行时 peer。
+// RATE_LIMIT 的纯函数半边，peer-free。这里只钉本模块自身的纠正判定与流改写，
+// 不依赖任何运行时 peer。
+//
+// 覆盖边界（不是覆盖）：真 peer 的 classifyPiAiError 行为**没有任何测试钉死**——
+// 验证它需要运行时 peer，而 peer 未 vendored 进本仓库，所以进不了离线门禁
+// （docs/ROADMAP.md Backlog）。本套件证明的是「给定 peer 那样的行为，我们的
+// 纠正是对的」，证明不了 peer 的行为本身没有漂移。
 import { strict as assert } from "node:assert";
 import { reclassifyFinish, looksLikeRateLimit, CODE } from "../src/host/llm-error-fix.ts";
 

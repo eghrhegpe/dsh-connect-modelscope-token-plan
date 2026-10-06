@@ -91,22 +91,32 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   });
 
   /**
-   * 一次目录轮询：拉目录 + 读落盘允许清单，再 publish 当前 offer。
+   * 当前允许清单：落盘优先，读不到回退内存最近一次 publish 的清单。
    *
-   * 允许清单必须走 `providerStore.enabledIds()`——清单是**落盘**的（provider-store
-   * 按 profile 分段持久化），重启后内存里的 `publisher.state.enabledIds` 早已清空，
-   * 若从它读，用户勾选的清单会随重启静默丢失（见 fix A）。
+   * 清单是**落盘**的（provider-store 按 profile 分段持久化），重启后内存里的
+   * `publisher.state.enabledIds` 早已清空——若只从它读，用户勾选的清单会随
+   * 重启静默丢失（见 fix A）。反过来，磁盘损坏/未初始化时回退内存值，不让
+   * 一次坏读把清单清成空（空清单 = 提供全部模型，比没有清单更危险）。
+   * @returns {Promise<string[]>}
+   */
+  const currentEnabledIds = async (): Promise<string[]> => {
+    const stored = await providerStore.enabledIds().catch(() => null);
+    if (Array.isArray(stored) && stored.length > 0) return stored;
+    return Array.isArray(publisher.state.enabledIds) ? publisher.state.enabledIds : [];
+  };
+
+  /**
+   * 一次目录轮询：拉目录，再 publish 当前 offer。
+   *
+   * 清单在 `fetchModels()` **之后**读（不是之前）——目录拉取可能耗时数百毫秒，
+   * 期间用户可能保存了新清单；读放在 fetch 之后、publish 之前，能捕获这段窗口
+   * 内的编辑。这是刻意的顺序，不是疏忽。
    * @returns {Promise<void>}
    */
   const runPoll = async (): Promise<void> => {
     try {
       const catalog = await inference.fetchModels();
-      // 落盘优先；读不到（磁盘损坏/未初始化）回退内存最近一次 publish 的清单。
-      const stored = await providerStore.enabledIds().catch(() => null);
-      const enabledIds = Array.isArray(stored) && stored.length > 0
-        ? stored
-        : (Array.isArray(publisher.state.enabledIds) ? publisher.state.enabledIds : []);
-      await publisher.publish(catalog.entries, enabledIds, []);
+      await publisher.publish(catalog.entries, await currentEnabledIds(), []);
     } catch {
       // 轮询失败不影响面板：下一轮再试，快照侧另有降级形状。
     }

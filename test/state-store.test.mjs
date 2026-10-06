@@ -95,15 +95,24 @@ const file = join(dir, "state.json");
 // TTL 周期都重跑（读一个不存在的旧文件）。
 {
   let reads = 0;
+  let now = 0;
   const cache = createStateReadCache(async () => {
     reads += 1;
     return { v: reads };
-  }, { ttlMs: 1_000_000 });
+  }, { ttlMs: 100, now: () => now });
   const a = await cache.read();
   const b = await cache.read();
   assert.deepEqual(a, b, "TTL 内返回同一个值（不重读）");
   assert.equal(reads, 1, "只读了一次");
-  assert.ok(cache !== null, "cache 对象存在");
+  // TTL 必须真的会过期——原先那句 `assert.ok(cache !== null)` 是恒真摆设，
+  // 它证明不了缓存会失效（前一行 await read() 成功就已经隐含对象存在）。
+  // 现在钉住「到期前不重读、到期后必重读」这对双向行为。
+  now = 99;
+  assert.equal(reads, 1, "TTL 未到期不重读");
+  now = 101;
+  const c = await cache.read();
+  assert.equal(reads, 2, "TTL 到期后重读盘");
+  assert.notDeepEqual(c, a, "重读拿到新值，不是旧缓存");
 
   // 恒返回 null 的读源：null 是「读过、没有」，而 adopt 只发生一次。
   let nullReads = 0;

@@ -130,12 +130,16 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由已注册");
 }
 
 // ── 坏 body：400 ──
+// 原先这里写的是 `status === 200 || status === 400`「皆可」——但实现是明确的
+// 400（routes/provider.ts:152-155：typeof body.enabled !== "boolean" 一律拒），
+// 与 roster 路由的 !Array.isArray(body.enabledIds) 同一口径。放宽等于放弃钉住
+// 校验失败路径：谁把 400 改成 200 静默接受错误类型，都不会红。
 {
   const res = makeRes();
   await handlers.get(PROVIDER_PATH)(makeReq("POST", { body: { enabled: "not-a-bool" } }), res);
-  // enabled 校验失败按路由实现处理：允许非布尔视为「未提供」或 400 皆可，这里只
-  // 钉死路由不炸、响应是合法 JSON。
-  assert.ok(res.status === 200 || res.status === 400, `校验失败不炸，返回 ${res.status}`);
+  assert.equal(res.status, 400, `enabled 非布尔必须是 400，实际 ${res.status}`);
+  assert.equal(res.body.ok, false, "响应体必须标 ok:false");
+  assert.equal(res.headers["cache-control"], "no-store", "错误响应不得被缓存");
 }
 
 console.log("provider-routes.test.mjs: all checks passed");

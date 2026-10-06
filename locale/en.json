@@ -1,5 +1,6 @@
 {
   "meta": {
-    "title": "ModelScope Quota Connect"
+    "title": "ModelScope Quota Connect",
+    "description": "ModelScope API-Inference free-quota panel: official Magicube balance, local call counts and trends, rate-limit event stream, auth-free model catalog and zero-quota token validation, plus optional registration of ModelScope as an OpenAI-compatible DSH provider (roadmap)."
   }
 }

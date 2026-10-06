@@ -19,6 +19,8 @@ dist/
 build/
 .build/
 *.tsbuildinfo
+# npm pack 的产物（本地打包验证用），不应进版本库
+*.tgz
 
 # lib/ 与根 client.js 是**受版本管理的产物**（与姊妹插件 sensenova/agnes 同款
 # 决策，ADR-005）：DSH 市场用 pnpm 安装，而 pnpm 对 git 依赖**一律拒绝执行构建

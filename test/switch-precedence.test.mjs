@@ -1,6 +1,8 @@
 // switch-precedence 离线套件：面板值 vs 配置默认 的唯一裁决方言，peer-free。
-// 注释里被引用（test/peer-contract.test.mjs 是真 peer 在位时才跑的契约钉，
-// 本仓库未 vendored 那份 peer，所以这里只钉本模块的纯函数行为）。
+// 这里只钉本模块的纯函数行为。
+//
+// 覆盖边界（不是覆盖）：peer 侧的开关裁决契约**没有测试覆盖**——它需要运行时
+// peer，peer 未 vendored 进本仓库（docs/ROADMAP.md Backlog）。
 import { strict as assert } from "node:assert";
 import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "../src/host/switch-precedence.ts";
 

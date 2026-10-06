@@ -19,7 +19,13 @@ M0–M4+ 全部落地，当前版本 0.2.0：
 
 ## Backlog（未做，按优先级）
 
+- **peer 契约的测试覆盖**（当前**完全为零**）：`@deepseek-ai/dsh-llm` 的 `resolveRetryPolicy` 形状、
+  `dsh-llm-pi-ai` 的 `classifyPiAiError` 判定顺序与措辞命中面、以及 `llm-adapter.ts` / `llm-adapter-core.ts`
+  的整条 peer-dependent 装配链，都没有任何测试钉住。验证它们需要运行时 peer，而 peer 未 vendored 进本仓库，
+  所以进不了 `npm test` 离线门禁。后果：peer 若改策略形状或分类顺序，本 provider 会在运行时静默失效，
+  没有门禁会红。这是本仓库最大的覆盖缺口，与下面的 e2e 是同一条路径的两种解法（vendored 假 peer，或真 Host e2e）。
 - **e2e**（真 Host + 假魔搭平台）进 CI 门禁；
+- **client hooks 的行为测试**（`use-polling-interval` 的 visibility 暂停 / 失败退避 / 卸载停止，`use-snapshot-polling` 的 generation guard 防乱序覆盖）：需要 React 测试框架（fake timers + DOM mock + `renderHook`），而本仓库的测试全部是离线裸 node（不引 React 测试依赖，`package.json` 里没有 jest/vitest/@testing-library）。当前 `panel.test.mjs` 的替身 React 能钉住组件的输出结构（卡片渲染了什么），钉不住 hooks 的时序行为（什么时候调 `setInterval`、什么时候 `clearInterval`）。后果：轮询节奏漂移、generation guard 失效、或卸载后仍有在途请求，都不会被任何门禁抓住。解法要么引入 React 测试框架（打破离线裸 node 的约束），要么用替身 React 模拟时序（工作量大且脆弱）。
 - **余额差值趋势**：usage-store 记录每日首末两次官方余额观察，日消耗 = 首减末——OpenAPI 无记录端点，只能这样做（见 [REFERENCES.md](REFERENCES.md)）；
 - `GET /users/me` 展示账号名（官方 OpenAPI 端点，端点家族盘点见 [REFERENCES.md](REFERENCES.md)）；
 - 「每日签到领魔粒」提醒：签到是**网页行为**（登录态访问 magicube/usage 页触发，非 API），只能做面板外链 + 待办提醒（见 [REFERENCES.md](REFERENCES.md) 的 userscripts 上游）；

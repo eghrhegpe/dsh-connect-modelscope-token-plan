@@ -1,6 +1,9 @@
 // llm-retry 离线套件：429 重试策略的纯函数半边，peer-free（不 import 任何运行时
-// peer；真 peer 的 resolveRetryPolicy 契约由 test/peer-contract.test.mjs 在 peer 可达
-// 时钉死，该 peer 未 vendored 本仓库）。这里只钉本模块自身导出的形状与语义。
+// peer）。这里只钉本模块自身导出的形状与语义。
+//
+// 覆盖边界（不是覆盖）：真 peer 的 resolveRetryPolicy 契约**没有测试覆盖**——
+// 它需要运行时 peer，peer 未 vendored 进本仓库，进不了离线门禁（docs/ROADMAP.md
+// Backlog）。peer 若改策略形状，本 provider 会在运行时静默失效，没有门禁会红。
 import { strict as assert } from "node:assert";
 import { buildRetryPolicyConfig, retryableCodes, QUOTA_CODES } from "../src/host/llm-retry.ts";
 

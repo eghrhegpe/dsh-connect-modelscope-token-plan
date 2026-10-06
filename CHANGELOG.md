@@ -2,6 +2,16 @@
 
 ## [未发布]
 
+**代码质量收敛**（内部重构 + 门禁强化，用户可见的只有 a11y 与两处防御性修正）
+
+- tab 键盘焦点不可见：`outline: "none"` 是内联样式，优先级高于外壳的焦点环，把键盘用户的焦点提示也一起压掉了。改为 `outlineOffset: -2`，保留可见性。
+- 令牌输入框缺 `aria-label`、ToggleSwitch 缺 `busyLabel`：屏幕阅读器读不出「正在切换」。补两条 i18n 键（zh/en 各 +1）。
+- `modelscopeModelUrl` 用 `encodeURI` 不转义 `#`/`?`，模型 id 含这些字符时 URL 语义被破坏。改为分段 `encodeURIComponent`。
+- `modelCount`/`enabledCount` 的 `typeof === "number"` 对 NaN 也返回 true，面板会显示「NaN 个模型」。补 `Number.isFinite`。
+- 嵌套降层：`swapRegistration` 的 rollback 路径从 4 层 try/catch 降到 2 层（提取 `restorePreviousPair`）；`publishProviderOnce` 两处空转守卫的重复签名比对提取为 `offerUnchanged()`；`runPoll` 的 fallback 逻辑提取为 `currentEnabledIds()`。
+- 新增 `docs.test.mjs` §11 引用有效性门禁：扫描 `src/` 与 `test/` 里所有 `test/*.test.mjs` 引用，文件不存在即失败。补 HIDE_ALL_MODELS 双端交叉断言与 locale key 集合一致性断言。三处恒真/死断言换成真断言。
+- 六处 `test/peer-contract.test.mjs` 虚假引用全删（文件从未存在，但注释声称 peer 契约被它钉死），改为诚实的缺口声明并记入 ROADMAP backlog。`find-fake-gates.mjs` 误报率从 200+ 降到 3 条。
+
 **发布状态机的两处自伤**（受控复制的分叉实证：兄弟仓各自持有对方缺的修复）
 
 - 工厂加载的 rejection 被 memo 死：`createAdapterFactoryResolver` memo 的对象是 promise 本身，一次失败的 `import()`（典型 `ERR_MODULE_NOT_FOUND`）把错误钉在槽里直到进程结束——此后每次 publish 重抛同一个错，provider 再也注册不上。要命的是 `describeBuildFailure` 的补救提示恰好叫人修安装，照提示修好依然无效、必须重启 Host。现在只 memo 成功，失败清槽、下一次 publish 真重试（与 `dsh-connect-sensenova-token-plan` 对齐）。钉子：`provider-publish.test.mjs` §9（阴性对照实测：旧代码第二次 publish `ok:false`）。

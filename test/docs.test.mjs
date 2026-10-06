@@ -323,4 +323,40 @@ const FACTS = [
   }
 }
 
+// ── §11 引用有效性：src/ 与 test/ 里引用的 test/*.test.mjs 必须真实存在 ────────
+//
+// §1/§5/§9 都查文档侧的引用，但查不到**代码注释与测试注释**里指向不存在测试的
+// 引用。事故：`test/peer-contract.test.mjs` 曾在 6 处注释里被当成既成事实引用
+// （src/host/llm-retry.ts 两处、llm-error-fix.ts、llm-adapter.ts、
+// test/error-fix.test.mjs、retry.test.mjs、switch-precedence.test.mjs），而该
+// 文件从未存在——它需要运行时 peer，peer 未 vendored 进本仓库。后果是注释声称
+// 「peer 契约被测试钉死」，后来者信以为真，认为 peer 行为漂移会被某个门禁抓住，
+// 实际没有。IMPLEMENTATION.md:149 已把这个事故记作「幽灵测试引用」，但当时只把
+// 措辞改成「在门禁之外」，引用字符串留在原地，幽灵就一直活着。
+// 判据机械：所有 `test/xxx.test.mjs` 形式的引用必须是磁盘上真实存在的文件。
+// docs/** 不在射程内（§1/§9 已管文档），docs/archive/** 也不扫（冻结历史）。
+{
+  const refRe = /\btest\/[A-Za-z0-9_.-]+\.test\.mjs(?::\d+)?\b/g;
+  // 本文件必须被排除——门禁定义文件需要能提到任何测试名（包括不存在的那个），
+  // 否则它没法描述自己的判据来源，会自我绊倒。
+  const scanned = [
+    ...tsFiles("src"),
+    ...walk("test", ".mjs").filter((f) => f !== "test/docs.test.mjs")
+  ];
+  for (const file of scanned) {
+    for (const m of read(file).matchAll(refRe)) {
+      const full = m[0];
+      // 带行号的引用是**跨仓库**的精确定位（如 release.test.mjs 引用姊妹仓
+      // agnes 的 test/package.test.mjs:58 事故溯源），指向的是另一个仓库的文件，
+      // 不是本仓的覆盖声称。本仓的声称形如「由 test/xxx.test.mjs 钉死」，不带行号。
+      if (/:\d+$/.test(full)) continue;
+      assert.ok(
+        existsSync(join(root, full)),
+        `${file}: 引用了 ${full}，但该测试文件不存在——声称有测试覆盖其实没有。` +
+          `要么实现它，要么把注释改成明确的缺口声明并记进 docs/ROADMAP.md 的 Backlog。`
+      );
+    }
+  }
+}
+
 console.log("docs.test.mjs: all checks passed");

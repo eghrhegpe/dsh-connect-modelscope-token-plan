@@ -180,8 +180,10 @@ export function providerOf(raw: unknown): ProviderStatus {
     llmAvailable: p.llmAvailable === true,
     registered: p.registered === true,
     error: typeof p.error === "string" ? p.error : null,
-    modelCount: typeof p.modelCount === "number" ? p.modelCount : roster.length,
-    enabledCount: typeof p.enabledCount === "number" ? p.enabledCount : 0,
+    // NaN 也是 "number"：`typeof NaN === "number"` 为 true，会把 NaN 渲成
+    // 「NaN 个模型」。Number.isFinite 一并挡掉 NaN / Infinity。
+    modelCount: typeof p.modelCount === "number" && Number.isFinite(p.modelCount) ? p.modelCount : roster.length,
+    enabledCount: typeof p.enabledCount === "number" && Number.isFinite(p.enabledCount) ? p.enabledCount : 0,
     allowed: p.allowed === "none" ? "none" : p.allowed === "list" ? "list" : "all",
     enabledIds: ids,
     roster

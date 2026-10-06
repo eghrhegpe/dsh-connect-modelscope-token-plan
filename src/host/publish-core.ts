@@ -367,19 +367,7 @@ export function swapRegistration({
     // failed re-registration restores the previous pair's identity too.
     onRollback?.();
     state.error = redactSecrets(errMsg(error));
-    // Restore the pair that was serving, if any.
-    if (previousBuilt !== null) {
-      try {
-        registerPair(llm, previousBuilt, state);
-        state.built = previousBuilt;
-        state.registered = true;
-      } catch {
-        state.built = null;
-        state.registered = false;
-      }
-    } else {
-      state.registered = false;
-    }
+    restorePreviousPair({ llm, previousBuilt, state, registerPair });
     return { ok: false, error };
   }
   state.built = built;
@@ -387,6 +375,35 @@ export function swapRegistration({
   state.error = null;
   emitAdaptersUpdated(emit);
   return { ok: true };
+}
+
+/**
+ * 注册失败后恢复先前在服务的 provider 对（如果有）。
+ *
+ * 从 {@link swapRegistration} 提取，把 catch 块里的嵌套从 4 层降到 2 层——
+ * 原实现里 `registerPair(llm, previousBuilt, ...)` 住在 try 内、try 住在
+ * catch 内，读起来要数四层缩进才能确认它在做什么。行为完全不变：先摘掉
+ * 新对（`release()` 已在调用方做过），再尝试挂回旧对；旧对也注册不上就
+ * 诚实地标 `registered: false`。
+ */
+function restorePreviousPair({ llm, previousBuilt, state, registerPair }: {
+  llm: any;
+  previousBuilt: any;
+  state: PublisherStateBase;
+  registerPair: (llm: any, built: any, target: PublisherStateBase) => void;
+}): void {
+  if (previousBuilt === null) {
+    state.registered = false;
+    return;
+  }
+  try {
+    registerPair(llm, previousBuilt, state);
+    state.built = previousBuilt;
+    state.registered = true;
+  } catch {
+    state.built = null;
+    state.registered = false;
+  }
 }
 
 /**

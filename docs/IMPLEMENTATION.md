@@ -147,9 +147,12 @@ deps 增加 `usage?: UsageSinks` 并透传给工厂 → `index.ts` 把上面那�
   调用」，但适配器路径没有挂计数钩子，本地计数只反映探测用量。已更正注释。
 
 **幽灵测试引用**：`switch-precedence.ts` / `llm-retry.ts` / `llm-error-fix.ts` 注释引用的
-`test/peer-contract.test.mjs` 依赖未vendored 进仓库的运行时 peer。改为说明该契约测试在
-`npm test` 离线门禁之外，并补上三个**纯函数**离线套件钉死本模块自身行为
-（`switch-precedence` / `retry` / `error-fix`）。
+`test/peer-contract.test.mjs` 依赖未 vendored 进仓库的运行时 peer。最初的处理是把措辞改成
+「该契约测试在 `npm test` 离线门禁之外」，但**引用字符串留在原地——幽灵就一直活着**，6 处
+注释继续声称 peer 契约被某个测试钉死。最终处理是删掉引用字符串本身，改成明确的缺口声明
+（「没有测试覆盖」+ 指向 docs/ROADMAP.md 的 Backlog），并补上三个**纯函数**离线套件钉死本
+模块自身行为（`switch-precedence` / `retry` / `error-fix`）。新增 `test/docs.test.mjs` §11
+钉住「所有 `test/*.test.mjs` 引用必须是磁盘上真实存在的文件」，防止下一个幽灵。
 
 **通用教训**：注释与 doc 里的「已实现」**不构成实现**。签名比对、落盘读取这类「设计意图里存在
 但没人接线」的东西，只有对照真实调用链逐条grep 才能发现。
@@ -242,8 +245,9 @@ bug 完全无效。新增**冷读**断言：另开一个空缓存 store 读同�
 
 **vision 判定为什么不用 models.dev**：`/v1/models` 仍无模态字段，但详情端点
 `Data.Tasks[].Name` 提供精确任务标签（`image-text-to-text`=图进文出=能吃图；
-`image-to-image` / `text-to-image`=图出，排除）。`fetchModels` 拿到目录 id 后**并行拉取**（有界
-并发 6、`Promise.allSettled`、单失败不影响整体）每个详情。免认证、零推理额度。
+`image-to-image` / `text-to-image`=图出，排除）。`fetchModels` 拿到目录 id 后**并行拉取**每个详情（有界并发 6，
+`mapWithConcurrency` 内部是 `Promise.all` 分批 + 逐项 `.catch(() => [])` 吞单失败，
+见 `inference-client.ts:30` 与 :197 的调用点）。免认证、零推理额度。
 详见 [REFERENCES.md](REFERENCES.md) 与 [REFERENCE-modelsdev.md](REFERENCE-modelsdev.md)——后者
 记录 `anomalyco/models.dev` 的编码方式及**为何不用作 drop-in 数据源**（它对魔搭仅收编 7 个纯
 文本模型，不含 `DeepSeek-V4.1-Flash` 等视觉模型）。
@@ -267,8 +271,9 @@ glm/ZhipuAI 在底）。新增 `FEATURED_OWNERS`（`deepseek-ai` / `ZhipuAI` / `
 ## 仓库起步与审核修复
 
 - **仓库起步**：清单 / 配置面 / 构建纪律（与姊妹插件同构）。`npm run build` 产物
-  （`lib/` + `client.js`）**入库**——`files` 白名单不含 `lib/`，不入库则 GitHub 直装的包没有
-  宿主入口。
+  （`lib/` + `client.js`）**入库**——`files` 白名单含 `lib`，但 git 依赖安装时跑不到构建脚本
+  （pnpm 的 `allowBuilds` 是装插件的用户没有的入口），所以产物必须随源码一起入库，新鲜度由
+  `test/build-gate.mjs` 用内容哈希逐字节比对钉住。
 - **`tools/doctor.mjs` 落地**（+`src/host/doctor.ts`）：只读盘点 `$DSH_HOME/state` 下各
   profile 的 usage.json（损坏/ 未知版本 → 症状）与 env 令牌在场性；**绝不写盘、绝不打印令牌值**。
   它的真正价值是抓「恒为 0 / 恒为空」这类不会报错的状态。
