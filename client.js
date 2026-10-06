@@ -1816,6 +1816,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			const panel = Object.freeze({
 				interpretSnapshot,
 				viewOf,
+				providerOf,
 				errorOfStatus,
 				dictionaries: Object.freeze({
 					zh,

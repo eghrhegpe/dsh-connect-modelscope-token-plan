@@ -41,7 +41,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "build:client": "tsdown -c tsdown.config.mjs",
     "duplicate-check": "jscpd src --min-tokens 70 --reporters console-full",
-    "test": "node test/wire.test.mjs && node test/config.test.mjs && node test/docs.test.mjs && node test/state-store.test.mjs && node test/usage-store.test.mjs && node test/routes.test.mjs && node test/provider.test.mjs && node test/inference-vision.test.mjs && node test/provider-routes.test.mjs && node test/provider-publish.test.mjs && node test/panel.test.mjs && node test/doctor.test.mjs && node test/catalog.test.mjs && node test/switch-precedence.test.mjs && node test/credentials.test.mjs && node test/codes.test.mjs && node test/retry.test.mjs && node test/error-fix.test.mjs && node test/usage-observer.test.mjs && node test/release.test.mjs && node test/build-gate.mjs",
+    "test": "node test/wire.test.mjs && node test/config.test.mjs && node test/docs.test.mjs && node test/state-store.test.mjs && node test/usage-store.test.mjs && node test/routes.test.mjs && node test/provider.test.mjs && node test/inference-vision.test.mjs && node test/provider-routes.test.mjs && node test/provider-publish.test.mjs && node test/panel.test.mjs && node test/snapshot.test.mjs && node test/doctor.test.mjs && node test/catalog.test.mjs && node test/switch-precedence.test.mjs && node test/credentials.test.mjs && node test/codes.test.mjs && node test/retry.test.mjs && node test/error-fix.test.mjs && node test/usage-observer.test.mjs && node test/release.test.mjs && node test/build-gate.mjs",
+    "test:mutate": "node tools/dev/mutate.mjs tools/dev/mutate-spec.json",
     "doctor": "node tools/doctor.mjs",
     "doctor:json": "node tools/doctor.mjs --json",
     "build": "tsdown -c tsdown.config.mjs",
@@ -99,7 +100,7 @@
   },
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^26.6.3",
+    "@types/node": "^22.19.0",
     "jscpd": "^5.4.0",
     "tsdown": "^0.23.0",
     "typescript": "5.9.3"

@@ -1,0 +1,56 @@
+[
+  {
+    "target": "src/client/snapshot.ts",
+    "test": "snapshot.test.mjs",
+    "mutants": [
+      {
+        "name": "删掉 modelCount 的 Number.isFinite 检查（NaN 会渲成「NaN 个模型」）",
+        "from": "typeof p.modelCount === \"number\" && Number.isFinite(p.modelCount)",
+        "to": "typeof p.modelCount === \"number\""
+      },
+      {
+        "name": "删掉 enabledCount 的 Number.isFinite 检查",
+        "from": "typeof p.enabledCount === \"number\" && Number.isFinite(p.enabledCount)",
+        "to": "typeof p.enabledCount === \"number\""
+      }
+    ]
+  },
+  {
+    "target": "src/client/const.ts",
+    "test": "snapshot.test.mjs",
+    "mutants": [
+      {
+        "name": "encodeURI 不转义 #/?，模型 id 含这些字符时 URL 语义被破坏",
+        "from": "id.split(\"/\").map(encodeURIComponent).join(\"/\")",
+        "to": "encodeURI(id)"
+      }
+    ]
+  },
+  {
+    "target": "src/host/publish-core.ts",
+    "test": "provider-publish.test.mjs",
+    "mutants": [
+      {
+        "name": "删掉 restorePreviousPair 调用（注册失败后旧对不会被恢复）",
+        "from": "    restorePreviousPair({ llm, previousBuilt, state, registerPair });",
+        "to": "    // restorePreviousPair removed"
+      }
+    ]
+  },
+  {
+    "target": "src/host/provider-publish.ts",
+    "test": "provider-publish.test.mjs",
+    "mutants": [
+      {
+        "name": "offerUnchanged 恒为 false（注册路径空转守卫失效，每次 publish 都重建 provider）",
+        "from": "state.registered === true && state.error === null && offerUnchanged()",
+        "to": "state.registered === true && state.error === null && false"
+      },
+      {
+        "name": "删掉 disposed 第二次闸门检查（teardown 与 publish 竞态 → 僵尸 provider）",
+        "from": "    if (queue.isDisposed()) return { ok: false, skipped: true };\n    // swap（连同背后的 rollback）是共享机制：失败的重新注册必须恢复先前在服务的对。",
+        "to": "    // ── 闸门第二次检查已移除 ──\n    // swap（连同背后的 rollback）是共享机制：失败的重新注册必须恢复先前在服务的对。"
+      }
+    ]
+  }
+]

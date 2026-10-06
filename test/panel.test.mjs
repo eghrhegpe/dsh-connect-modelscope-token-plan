@@ -119,6 +119,19 @@ assert.match(cfgView.guidance ?? "", /插件配置有误/);
   assert.equal(panel.interpretSnapshot({ name: "x" }).error?.code, "payload_error", "不可读载荷 → client 稳定码");
 }
 
+// §3b2 NaN 防护：`typeof NaN === "number"` 为 true，若不检查 isFinite，
+// Host 返回 NaN 时面板会显示「NaN 个模型」。
+{
+  const nanProvider = { ...okBody.provider, modelCount: NaN, enabledCount: NaN };
+  const result = panel.providerOf(nanProvider);
+  assert.equal(result.modelCount, nanProvider.roster.length, "NaN modelCount 回退为 roster.length");
+  assert.equal(result.enabledCount, 0, "NaN enabledCount 回退为 0");
+  // Infinity 也应被挡（typeof Infinity === "number"）。
+  const infProvider = { ...okBody.provider, modelCount: Infinity, enabledCount: -Infinity };
+  assert.equal(panel.providerOf(infProvider).modelCount, infProvider.roster.length, "Infinity modelCount 回退");
+  assert.equal(panel.providerOf(infProvider).enabledCount, 0, "-Infinity enabledCount 回退");
+}
+
 // §3c internal_error 必须有引导文案，且**不能**被导去「配令牌」。
 //
 // 回归用例：soft() 与 failureCode() 在错误无 code 时统一产出 internal_error，而

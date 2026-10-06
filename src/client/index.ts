@@ -15,7 +15,7 @@
  */
 import { inject, apply } from "./apply.ts";
 import { NS } from "./const.ts";
-import { interpretSnapshot, viewOf, errorOfStatus, GUIDANCE_BY_CODE, FORM_EXCLUDED_CODES } from "./snapshot.ts";
+import { interpretSnapshot, viewOf, providerOf, errorOfStatus, GUIDANCE_BY_CODE, FORM_EXCLUDED_CODES } from "./snapshot.ts";
 import { clockLong, count, errorText, format, isoTime, statedCadenceMs } from "./format.ts";
 import { provideClientReact } from "./runtime.ts";
 import { en, zh } from "./i18n.ts";
@@ -37,6 +37,7 @@ function clientFactory(loaderRequire: (specifier: string) => unknown): {
   const panel = Object.freeze({
     interpretSnapshot,
     viewOf,
+    providerOf,
     errorOfStatus,
     dictionaries: Object.freeze({ zh, en }),
     tables: Object.freeze({ GUIDANCE_BY_CODE, FORM_EXCLUDED_CODES }),
