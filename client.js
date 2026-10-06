@@ -1432,12 +1432,19 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const [cadenceMs, setCadenceMs] = useState(defaultCadenceMs);
 		/** Host 少给的顶层键（契约漂移）；透给面板当 shapeWarning，不静默。 */
 		const [missingKeys, setMissingKeys] = useState([]);
+		/**
+		* 每一次轮询尝试都加一，成功与失败都算。`updatedAt` 只在成功时变，而
+		* 面板的 provider 兜底 GET 需要的是「下一轮还会再来」这个信号——快照本身
+		* 失败的那一轮，恰好是兜底路径也应该再试的一轮。
+		*/
+		const [pollRevision, setPollRevision] = useState(0);
 		const generation = useRef(0);
 		const inFlight = useRef(null);
 		const cadenceRef = useRef(cadenceMs);
 		cadenceRef.current = cadenceMs;
 		const load = useCallback(async () => {
 			generation.current += 1;
+			setPollRevision((revision) => revision + 1);
 			const mine = generation.current;
 			const isCurrent = () => generation.current === mine;
 			inFlight.current?.abort?.();
@@ -1488,7 +1495,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			loadedOnce,
 			updatedAt,
 			load,
-			missingKeys
+			missingKeys,
+			pollRevision
 		};
 	}
 	var init_use_snapshot_polling = __esmMin((() => {
@@ -1502,7 +1510,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 //#endregion
 //#region src/client/panel-page.ts
 	function PanelPage({ tt, localeSubscribe }) {
-		const { data, error, updatedAt, load, missingKeys } = useSnapshotPolling();
+		const { data, error, updatedAt, load, missingKeys, pollRevision } = useSnapshotPolling();
 		const [, setLocaleRevision] = useState(0);
 		const [openSections, setOpenSections] = useState({
 			balance: true,
@@ -1537,7 +1545,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			return () => {
 				cancelled = true;
 			};
-		}, [hasProviderBlock]);
+		}, [hasProviderBlock, pollRevision]);
 		const [providerBusy, setProviderBusy] = useState(false);
 		const [providerError, setProviderError] = useState(null);
 		const writeErrorText = (reason, t) => reason instanceof Error && reason.name === "AbortError" ? t("common.timeout") : errorText(reason);

@@ -1,7 +1,8 @@
 /**
  * 快照轮询 hook（与姊妹插件 use-snapshot-polling.ts 受控复制）：generation
  * guard 防乱序覆盖、跟随 Host 声明的 cadence、隐藏页暂停（use-polling-interval）、
- * 失败退避、卸载即停。loadedOnce 门槛把首帧定为「加载中」而不是误闪的配置表单。
+ * 失败退避、卸载即停、每轮尝试计一次 `pollRevision`。loadedOnce 门槛把首帧定为
+ * 「加载中」而不是误闪的配置表单。
  * @module dsh-connect-modelscope-token-plan/use-snapshot-polling
  */
 import { useEffect, useCallback, useRef, useState } from "./runtime.ts";
@@ -19,6 +20,12 @@ export function useSnapshotPolling(defaultCadenceMs = 30_000) {
   const [cadenceMs, setCadenceMs] = useState(defaultCadenceMs);
   /** Host 少给的顶层键（契约漂移）；透给面板当 shapeWarning，不静默。 */
   const [missingKeys, setMissingKeys] = useState<readonly string[]>([]);
+  /**
+   * 每一次轮询尝试都加一，成功与失败都算。`updatedAt` 只在成功时变，而
+   * 面板的 provider 兜底 GET 需要的是「下一轮还会再来」这个信号——快照本身
+   * 失败的那一轮，恰好是兜底路径也应该再试的一轮。
+   */
+  const [pollRevision, setPollRevision] = useState(0);
 
   // generation guard：慢响应不许覆盖新响应；手动刷新可以顶掉在途的定时轮询。
   const generation = useRef(0);
@@ -31,6 +38,7 @@ export function useSnapshotPolling(defaultCadenceMs = 30_000) {
 
   const load = useCallback(async () => {
     generation.current += 1;
+    setPollRevision((revision) => revision + 1);
     const mine = generation.current;
     const isCurrent = () => generation.current === mine;
     inFlight.current?.abort?.();
@@ -89,5 +97,5 @@ export function useSnapshotPolling(defaultCadenceMs = 30_000) {
     inFlight.current?.abort?.();
   }, []);
 
-  return { data, error, loadedOnce, updatedAt, load, missingKeys };
+  return { data, error, loadedOnce, updatedAt, load, missingKeys, pollRevision };
 }

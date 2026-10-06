@@ -67,12 +67,13 @@ function providerDegraded(error: string): Snapshot["provider"] {
 export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "tokenStore" | "usageStore" | "inference" | "providerStore" | "publisher" | "logger">): Promise<Snapshot> {
   const { settings, tokenStore, usageStore, inference, providerStore, publisher } = wiring;
 
-  const [tokenState, daily, perModel, trend, events] = await Promise.all([
+  const [tokenState, daily, perModel, trend, events, providerNote] = await Promise.all([
     soft(tokenStore.state()),
     soft(usageStore.daily()),
     soft(usageStore.perModelToday()),
     soft(usageStore.trend(settings.trendDays)),
-    soft(usageStore.events())
+    soft(usageStore.events()),
+    soft(providerStore.versionNote())
   ]);
 
   const shapeWarnings: string[] = [];
@@ -85,9 +86,14 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
   // 官方魔粒余额（头条数据源）：需要令牌；无令牌时静默缺席（error 置 null，
   // 面板在「接入」tab 引导配令牌，而不是在「额度」tab 报一条假故障）。
   const tokenPresent = tokenState.ok ? tokenState.value.present : false;
-  const balance = await soft(inference.fetchBalance());
-  // 模型目录：免认证、零额度；失败降级为 available:false + error。
-  const models = await soft(inference.fetchModels());
+  // 余额与目录互不依赖（余额要令牌、目录免认证），一起发。理由不是省延迟——
+  // 目录走缓存键 coalescing，命中时近乎瞬时；真正的问题是**依赖方向反了**：
+  // 免认证的目录取数原先排在要鉴权的余额取数之后，而后者最坏是整段 inference
+  // 超时。令牌一过期，一条免费的请求就被拖满整个超时窗口。
+  const [balance, models] = await Promise.all([
+    soft(inference.fetchBalance()),
+    soft(inference.fetchModels())
+  ]);
   const modelIds = models.ok ? models.value.ids : [];
   const modelEntries = models.ok ? models.value.entries : [];
   if (!models.ok && models.code !== "network_error") {
@@ -96,6 +102,14 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
   }
   if (tokenPresent && !balance.ok && balance.code !== "network_error") {
     shapeWarnings.push(`balance: ${balance.error}`);
+  }
+  if (providerNote.ok && providerNote.value !== null) {
+    // provider.json 由更新的构建写入时，读侧是宽容的（读作「未设置」），所以这里
+    // 必须说出来：不说，面板会把「保存的开关与清单被忽略」呈现成「从未保存过」。
+    // 而「空清单 = 不过滤」恰好是那个方向上最危险的答案——用户勾了隐藏清单，
+    // 重启后变成全部提供，且没有任何一条警告能提示他。写侧的 ADR-006 守卫挡的是
+    // 覆盖，这条警告补的是读侧。
+    shapeWarnings.push(providerNote.value);
   }
 
   // ── provider 块（M4 §11）──

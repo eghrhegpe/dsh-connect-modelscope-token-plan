@@ -2,7 +2,7 @@
 // publish 队列/闸/回滚三条承重语义、provider 路由形状。peer-free：不 import
 // 任何 Host peer，裸 node 直接跑。
 import { strict as assert } from "node:assert";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,7 +14,8 @@ import {
   toPiDescriptor, filterByEnabled, isModelEnabled, buildDescriptors,
   rosterWithAvailability, summarizeCatalog
 } from "../src/host/llm-models.ts";
-import { createFileProviderStore, normalizeEnabledIds, PROVIDER_VERSION, KNOWN_PROVIDER_VERSIONS } from "../src/host/provider-store.ts";
+import { createFileProviderStore, normalizeEnabledIds, PROVIDER_VERSION, KNOWN_PROVIDER_VERSIONS, isKnownProviderVersion } from "../src/host/provider-store.ts";
+import { name } from "../src/host/host-config.ts";
 import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_SHAPE_ERROR } from "../src/host/publish-core.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -181,6 +182,23 @@ import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_S
   const dir = mkdtempSync(join(tmpdir(), "ms-provider-store-"));
   const store = createFileProviderStore({ dir });
 
+  // 版本判据的同源不变量：白名单必须包含当前写入版本。
+  // 这条是升级规程的门闸——`parseAt` 与 `describeProviderPayload` 问的都是白名单
+  // （都不是 PROVIDER_VERSION）。若升级时只把 PROVIDER_VERSION 加一、忘了往白名单
+  // 补新号，本构建会把自己的写入读作「未设置」，而 doctor/说明仍报 versionKnown，
+  // 读侧与说明互相打脸，静默塌缩复活。这里不测那个假设的未来值，只测不变量本身。
+  assert.ok(
+    KNOWN_PROVIDER_VERSIONS.includes(PROVIDER_VERSION),
+    "白名单必须包含当前写入版本（升级版本时两个都要改）"
+  );
+  // 单一谓词的四支：本构建版本认、外部版本不认、无版本号不认、字符串不认。
+  // `null` 必须返回 false —— 写侧用的是 isKnownStateVersion（额外放行「无文件」），
+  // 若这里也放行 null，读侧就会把「从来没存过」当成「认得但内容不认识」。
+  assert.equal(isKnownProviderVersion(PROVIDER_VERSION), true, "本构建版本 → 认");
+  assert.equal(isKnownProviderVersion(99), false, "外部版本 → 不认");
+  assert.equal(isKnownProviderVersion(null), false, "无版本号 → 不认（≠「无文件」）");
+  assert.equal(isKnownProviderVersion("1"), false, "字符串 → 不认");
+
   // 初始：未设置
   assert.equal(await store.enabled(), null, "未保存 → null（回退配置）");
   assert.equal((await store.enabledIds()).length, 0, "未保存清单 → 空 = 不过滤");
@@ -280,6 +298,115 @@ import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_S
     99,
     "原文件未被破坏（仍是版本 99）"
   );
+
+  // 读侧的另一半（§8c）：写侧守卫挡住了覆盖，读侧也必须把「文件在场、版本不
+  // 认识」说出来。否则「保存的值读不到」会被呈现成「从未保存过」——而对允许清
+  // 单，这两者读出的方向是危险的：空清单 = 不过滤 = 提供全部模型，用户勾了
+  // 隐藏清单却看到全量，且没有任何一条警告提示他。
+  {
+    const note = await future.versionNote();
+    assert.match(note ?? "", /version 99/, "未知版本必须有可读说明");
+    assert.match(note ?? "", /this build knows/, "说明里要带本构建认识哪些版本");
+    assert.equal(await future.enabled(), null, "未知版本宽容读作未设置");
+    assert.deepEqual(await future.enabledIds(), [], "未知版本宽容读作空清单");
+    assert.equal(await future.isSet(), false, "未知版本不算「保存过」");
+  }
+  // 本构建版本、文件缺失、损坏文件 → 无说明（都不是版本不符）
+  assert.equal(await store.versionNote(), null, "本构建版本 → 无说明");
+  assert.equal(await broken.versionNote(), null, "损坏文件 → 无说明（不是版本不符）");
+  {
+    // 「从未保存」不是故障，不该报一条警告——这条分支与上面的损坏分支必须分开
+    // 覆盖：两者都产出空载荷，但 version 一个是 null、一个是坏 JSON 读不出。
+    const absent = createFileProviderStore({ dir: mkdtempSync(join(tmpdir(), "ms-provider-absent-")) });
+    assert.equal(await absent.versionNote(), null, "文件缺失 → 无说明");
+    assert.equal(await absent.enabled(), null);
+    assert.deepEqual(await absent.enabledIds(), []);
+  }
+
+  // §8d 写后不得再用 TTL 缓存回读。
+  //
+  // 回归用例：save / saveEnabledIds / forget 曾各自在写完后 `readPayload()` 回读
+  // 另一半再 remember——那条回读走的是 TTL 缓存，拿到的是**写入前**的值。单进程
+  // 单 store 看不出来（同一个 store 刚写完），两个独立写入者共享一个目录就能把一个
+  // 较新的缓存项顶成旧值；而快照读的正是这个 store，于是面板显示「清单被清成
+  // 空」，直到 TTL 过期才自愈。
+  {
+    const twoDir = mkdtempSync(join(tmpdir(), "ms-provider-cache-"));
+    const writerA = createFileProviderStore({ dir: twoDir });
+    const writerB = createFileProviderStore({ dir: twoDir });
+    await writerB.enabledIds();               // 先填 B 的读缓存（此刻文件还不存在）
+    await writerA.saveEnabledIds(["k/One"]); // A 落盘
+    await writerB.save(true);                 // B 写开关
+    assert.equal(await writerB.enabled(), true, "开关可读");
+    assert.deepEqual(
+      await writerB.enabledIds(),
+      ["k/One"],
+      "A 保存的清单不能被 B 的写入顶成空（缓存必须反映刚写下的合并结果）"
+    );
+    assert.equal(
+      JSON.parse(readFileSync(join(twoDir, "provider.json"), "utf8")).enabled,
+      true,
+      "磁盘上开关也是 true（内存一致且不是假的）"
+    );
+  }
+
+  // §8e 旧布局（pre-§23 共享目录）的一次性继承，以及「显式 reset 不该被复活」。
+  //
+  // 这是 provider-store 里唯一没有别处覆盖的路径：继承只在 profile 自己的文件
+  // **根本不在场**时发生，而 `createFileProviderStore({ dir })` 的显式目录从不
+  // 继承——所以必须用真 profile + $DSH_HOME，不能用 dir。
+  // 它同时钉住 version 守卫的两种触发：foreign 版本（写必然被拒）与本构建写的
+  // 空文件（forget 的产物），两者都不该再尝试继承。
+  {
+    const home = mkdtempSync(join(tmpdir(), "ms-provider-adopt-"));
+    const shared = join(home, "state", name);
+    mkdirSync(shared, { recursive: true });
+    writeFileSync(
+      join(shared, "provider.json"),
+      JSON.stringify({ version: 1, enabled: true, enabledIds: ["legacy/L"] })
+    );
+    const previousHome = process.env.DSH_HOME;
+    process.env.DSH_HOME = home;
+    try {
+      const adopted = createFileProviderStore({ profile: "p-adopt" });
+      assert.equal(await adopted.enabled(), true, "自己的文件不在场 → 从共享布局继承");
+      assert.deepEqual(await adopted.enabledIds(), ["legacy/L"], "继承清单");
+      const ownFile = join(home, "state", "p-adopt", name, "provider.json");
+      assert.equal(
+        JSON.parse(readFileSync(ownFile, "utf8")).enabled,
+        true,
+        "继承值回写到 profile 自己的目录（下次读不再穿旧路径）"
+      );
+      // 显式「恢复默认」之后，旧布局的遗留值**不该**在下一次读时复活：一次明确的
+      // reset 不能被几年前的共享文件撤销。冷读（新 store = 空缓存）是必须的，
+      // 因为刚 forget 的那个 store 自己会记住空载荷。
+      await adopted.forget();
+      const cold = createFileProviderStore({ profile: "p-adopt" });
+      assert.equal(await cold.enabled(), null, "reset 后不被旧布局复活");
+      assert.deepEqual(await cold.enabledIds(), [], "reset 后不被旧布局复活（清单）");
+      // 反过来：一份 foreign 版本躺在 profile **自己的**目录上时，继承也不能把它
+      // 当空文件覆盖掉——ADR-006 挡写，而 version 守卫省掉那次注定被拒的尝试
+      // （旧行为是每个读 TTL 都试写一次、每次被拒、每次打一条 degraded 警告）。
+      const ownDir = join(home, "state", "p-future", name);
+      mkdirSync(ownDir, { recursive: true });
+      writeFileSync(
+        join(ownDir, "provider.json"),
+        JSON.stringify({ version: 99, enabled: true, enabledIds: ["future/F"] })
+      );
+      const foreign = createFileProviderStore({ profile: "p-future" });
+      assert.equal(await foreign.enabled(), null, "foreign 宽容读作未设置");
+      assert.match(await foreign.versionNote() ?? "", /version 99/, "foreign 仍有可读说明");
+      assert.equal(
+        JSON.parse(readFileSync(join(ownDir, "provider.json"), "utf8")).version,
+        99,
+        "foreign 文件未被继承写覆盖"
+      );
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      if (previousHome === undefined) delete process.env.DSH_HOME;
+      else process.env.DSH_HOME = previousHome;
+    }
+  }
 
   // normalizeEnabledIds 归一化
   assert.deepEqual(normalizeEnabledIds(["x", "x", 1, null, "y"]), ["x", "y"]);

@@ -114,11 +114,27 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
    * @returns {Promise<void>}
    */
   const runPoll = async (): Promise<void> => {
+    // 轮询失败不影响面板：下一轮再试，快照侧另有降级形状。但**原因不能丢**——
+    // 目录持续拉不到时，面板只会看到 models.available:false，没有任何一行说清是
+    // 上游拒了、还是网络断了、还是令牌过期；那条可观测性只能靠这里。两段**分开**
+    // 记：「目录拉到了但注册失败」与「目录根本没拉到」对操作员是完全不同的处置，
+    // 合成一条 "poll failed" 就把可诊断信息抹掉了。
+    // 脱敏在收口处做（与 snapshot-aggregate 的 soft() 同一纪律），不靠上游自觉。
+    let catalog: Awaited<ReturnType<typeof inference.fetchModels>> | null = null;
     try {
-      const catalog = await inference.fetchModels();
+      catalog = await inference.fetchModels();
+    } catch (error) {
+      ctx.logger?.warn?.(
+        `${name}: catalog fetch failed (${redactSecrets(errMsg(error))}) — the next poll retries; the panel keeps its degraded models block`
+      );
+      return;
+    }
+    try {
       await publisher.publish(catalog.entries, await currentEnabledIds(), []);
-    } catch {
-      // 轮询失败不影响面板：下一轮再试，快照侧另有降级形状。
+    } catch (error) {
+      ctx.logger?.warn?.(
+        `${name}: publish failed (${redactSecrets(errMsg(error))}) — the catalog is current, only the provider registration did not land`
+      );
     }
   };
 

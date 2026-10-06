@@ -275,7 +275,9 @@ glm/ZhipuAI 在底）。新增 `FEATURED_OWNERS`（`deepseek-ai` / `ZhipuAI` / `
   （pnpm 的 `allowBuilds` 是装插件的用户没有的入口），所以产物必须随源码一起入库，新鲜度由
   `test/build-gate.mjs` 用内容哈希逐字节比对钉住。
 - **`tools/doctor.mjs` 落地**（+`src/host/doctor.ts`）：只读盘点 `$DSH_HOME/state` 下各
-  profile 的 usage.json（损坏/ 未知版本 → 症状）与 env 令牌在场性；**绝不写盘、绝不打印令牌值**。
+  profile 的 usage.json 与 provider.json（损坏 / 未知版本 → 同一个症状，速览另标
+  `versionKnown:false` 区分「坏了」与「更新的构建写的」）与 env 令牌在场性；
+  **绝不写盘、绝不打印令牌值**。
   它的真正价值是抓「恒为 0 / 恒为空」这类不会报错的状态。
 - **快照失败线格式统一为 `{ok, code, error}`**：`wire.ts` 的 `SnapshotFailure` 此前声明
   `message`，与路由写入、client 读取漂移。

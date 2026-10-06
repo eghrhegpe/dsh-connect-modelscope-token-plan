@@ -21,7 +21,7 @@ export function PanelPage({ tt, localeSubscribe }: {
   tt: Tt;
   localeSubscribe?: unknown;
 }): unknown {
-  const { data, error, updatedAt, load, missingKeys } = useSnapshotPolling();
+  const { data, error, updatedAt, load, missingKeys, pollRevision } = useSnapshotPolling();
   const [, setLocaleRevision] = useState(0);
   const [openSections, setOpenSections] = useState({ balance: true, local: true, trend: true, events: false, provider: true, token: true });
   const [activeTab, setActiveTab] = useState<TabId>("quota");
@@ -55,9 +55,13 @@ export function PanelPage({ tt, localeSubscribe }: {
       .then((body) => {
         if (!cancelled && body !== null && body.ok === true) setFetchedProvider(providerOf(body));
       })
-      .catch(() => { /* 保持降级形状；快照轮询会再试。 */ });
+      .catch(() => { /* 保持降级形状；下一轮快照轮询会再试。 */ });
     return () => { cancelled = true; };
-  }, [hasProviderBlock]);
+    // pollRevision 是关键：没有它这个 effect 一生只跑一次，而快照轮询只轮
+    // SNAPSHOT_PATH、从不碰 PROVIDER_PATH，于是这一发一旦超时或失败，fetchedProvider
+    // 永远为 null，卡片会钉死在降级形状直到重挂——与 use-polling-interval 的
+    // 「失败后退避重试」相反，是全客户端唯一一条永不重试的路径。
+  }, [hasProviderBlock, pollRevision]);
 
   // 写盘统一入口：开关、允许清单、回到默认都 POST 到 provider 路由族。失败
   // 必须传播到面板（不静默吞）——这是用户的显式操作。成功即刷新快照，回显

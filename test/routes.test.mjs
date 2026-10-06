@@ -2,7 +2,7 @@
 // 全链路走一遍快照/目录/令牌/probe。HTTP 恒 200、失败即数据（ok:false +
 // code）的形状在这里钉死。
 import { strict as assert } from "node:assert";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply } from "../src/host/index.ts";
@@ -62,6 +62,69 @@ const call = async (handlers, path, req) => {
 const handlers = new Map();
 apply(makeCtx(handlers), {});
 assert.ok([SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, PROBE_PATH].every((p) => handlers.has(p)), "四条路由全部注册");
+
+// ── provider.json 版本不符：读侧宽容，但必须说出来 ──
+//
+// 写侧的 ADR-006 守卫已经挡住覆盖；读侧是**故意**宽容的（读作「未设置」），
+// 免得一份新构建留下的文件把整条快照搞挂。但宽容的代价是：「保存了隐藏清单」
+// 与「从未保存过」在读侧长得一模一样，而空清单 = 不过滤 = 提供全部模型——危险
+// 方向上更糟的那个答案。所以这一节钉的是「说出来」：警告必须进 shapeWarnings，
+// 面板才看得见。
+//
+// 这段用**第二个插件实例**而不是主 handlers：provider store 有 1s 读缓存，主实例
+// 在其它节里已经发过快照，缓存里那份空载荷会把 versionNote 顶成 null。新实例的
+// 缓存是冷的，首次读就是磁盘上这份外部版本——顺序无关，也不会给后面的节留一个
+// 「关于已删除文件的幽灵警告」（主实例的缓存全程不接触这份 v99）。
+// 状态目录（两节共用；每节结束时清空）。
+const stateDirPath = join(process.env.DSH_HOME, "state", name);
+
+{
+  mkdirSync(stateDirPath, { recursive: true });
+  writeFileSync(join(stateDirPath, "provider.json"), JSON.stringify({ version: 99, enabled: true, enabledIds: ["a/A"] }));
+  try {
+    const isolated = new Map();
+    apply(makeCtx(isolated), {});
+    const drifted = await call(isolated, SNAPSHOT_PATH, makeReq("GET"));
+    assert.equal(drifted.ok, true, "形状漂移不该让整条快照失败");
+    assert.ok(
+      drifted.shapeWarnings.some((warning) => warning.startsWith("provider-state:")),
+      "未知版本的 provider.json 必须进 shapeWarnings（宽容读 ≠ 静默）"
+    );
+    assert.match(drifted.shapeWarnings.find((warning) => warning.startsWith("provider-state:")) ?? "", /99/, "说明里带上磁盘上的版本号");
+    assert.equal(drifted.provider.enabled, false, "宽容读：开关按未设置回落到配置默认");
+    assert.equal(drifted.provider.source, "config", "回落来自配置而非面板");
+    assert.deepEqual(drifted.provider.enabledIds, [], "宽容读：清单读作空 = 不过滤");
+    assert.equal(drifted.provider.allowed, "all", "空清单的口径就是 all");
+    // 脱敏红线：说明是拼进 shapeWarnings 的，走聚合层的收口，不能带出令牌形状。
+    assert.ok(!drifted.shapeWarnings.join("").includes("ms-"), "shapeWarnings 不带令牌形状");
+  } finally {
+    rmSync(stateDirPath, { recursive: true, force: true });
+  }
+}
+
+// ── provider.json 损坏：**不**产生 provider-state 警告（反向也要钉）──
+//
+// 坏 JSON 被读作空载荷，version 是 null，所以 versionNote 无话可说——面板静默。
+// 这与 usage-store 的既有约定一致（面板不因损坏变红），损坏只有 doctor 报得出。
+// 把这条静默钉成**设计决定**，免得将来有人当成漏报去「修」。
+{
+  mkdirSync(stateDirPath, { recursive: true });
+  writeFileSync(join(stateDirPath, "provider.json"), "not json{{");
+  try {
+    const isolated = new Map();
+    apply(makeCtx(isolated), {});
+    const corrupted = await call(isolated, SNAPSHOT_PATH, makeReq("GET"));
+    assert.equal(corrupted.ok, true, "损坏的状态文件不该让快照失败");
+    assert.ok(
+      !corrupted.shapeWarnings.some((warning) => warning.startsWith("provider-state:")),
+      "损坏（非版本不符）→ 无 provider-state 警告；这条静默是刻意的"
+    );
+    assert.equal(corrupted.provider.enabled, false, "损坏读作未设置，回落配置默认");
+    assert.deepEqual(corrupted.provider.enabledIds, [], "损坏读作空清单 = 不过滤");
+  } finally {
+    rmSync(stateDirPath, { recursive: true, force: true });
+  }
+}
 
 // ── 信任围栏 ──
 {
