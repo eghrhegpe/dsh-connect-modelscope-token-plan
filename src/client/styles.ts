@@ -5,11 +5,11 @@
 /**
  * The plugin's brand color, spelled once. The shell may expose
  * `--modelscope-brand` (tabs under a branded theme); the hex fallback keeps the
- * accent identical in shells that do not. One literal, three consumers —
- * previously the fallback was re-spelled at each use, so a rebrand left a
- * third of the accent behind.
+ * accent identical in shells that do not. One literal, four consumers —
+ * previously the fallback was re-spelled at each use (including one bare hex in
+ * toggle-switch.ts), so a rebrand left a third of the accent behind.
  */
-const BRAND = "var(--modelscope-brand, #7B3FF2)";
+export const BRAND = "var(--modelscope-brand, #7B3FF2)";
 
 /** The shared button skin; `rosterBulk` reuses it one step taller so the bulk
  *  buttons sit level with the 32px roster search box. */

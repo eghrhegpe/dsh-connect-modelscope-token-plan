@@ -8,7 +8,7 @@
  * @module dsh-connect-modelscope-token-plan/routes/token
  */
 import { TOKEN_PATH, TOKEN_FORGET_PATH } from "./paths.ts";
-import { writeJson, refuseMethod, withOrigin, redactedError, readJsonBodyOr400 } from "./http.ts";
+import { writeJson, refuseMethod, withOrigin, respondError, readJsonBodyOr400 } from "./http.ts";
 import type { Wiring } from "../types.ts";
 
 /** 注册令牌路由（POST /token 保存，POST /token/forget 忘掉）。 */
@@ -31,7 +31,7 @@ export function registerTokenRoute(ctx: any, wiring: Pick<Wiring, "settings" | "
       await tokenStore.save(token);
       writeJson(response, 200, { ok: true, ...(await tokenStore.state()) }, { "cache-control": "no-store" });
     } catch (error) {
-      writeJson(response, 200, { ok: false, error: redactedError(error) }, { "cache-control": "no-store" });
+      respondError(response, error);
     }
   }, settings.allowedHosts);
 
@@ -44,7 +44,7 @@ export function registerTokenRoute(ctx: any, wiring: Pick<Wiring, "settings" | "
       await tokenStore.forget();
       writeJson(response, 200, { ok: true, ...(await tokenStore.state()) }, { "cache-control": "no-store" });
     } catch (error) {
-      writeJson(response, 200, { ok: false, error: redactedError(error) }, { "cache-control": "no-store" });
+      respondError(response, error);
     }
   }, settings.allowedHosts);
 

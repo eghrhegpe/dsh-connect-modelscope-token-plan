@@ -45,9 +45,9 @@ export function SectionCard({ title, open, onToggle, children, tt }: {
 }
 
 /** 官方魔粒余额头条：三格（可用/总额/冻结）+ 来源说明。null 渲染「—」。 */
-export function BalanceCard({ balance, tt }: { balance: BalanceData | null | unknown; tt: Tt }): unknown {
+export function BalanceCard({ balance, tt }: { balance: BalanceData | null; tt: Tt }): unknown {
   if (balance === null || typeof balance !== "object") return null;
-  const row = balance as BalanceData;
+  const row = balance;
   if (row.error !== null && row.error !== undefined) {
     return h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-error-primary)", margin: 0 } }, format(tt("balance.unavailable"), { error: row.error }));
   }
@@ -159,7 +159,7 @@ export function EventsList({ events, tt }: { events: QuotaEvent[]; tt: Tt }): un
       "div",
       { key: `${event.at}-${index}`, style: S.trendRowHead },
       h("span", { style: S.quotaUsed }, isoTime(event.at)),
-      h("span", { style: S.modelTag }, tt(EVENT_KIND_KEY[event.kind] as Parameters<Tt>[0])),
+      h("span", { style: S.modelTag }, tt((EVENT_KIND_KEY[event.kind] ?? "events.unknown") as Parameters<Tt>[0])),
       h("span", { style: { ...S.trendModel, flex: "1" }, title: event.message }, event.message)
     ))
   );
@@ -225,8 +225,12 @@ export function TokenForm({ token, busy, error, onSave, onForget, onVerify, veri
  *
  * 允许清单的语义（路由 §9 钉死）：空清单 = 不过滤 = 全部提供，所以「全部」
  * 发 `[]`；「全部隐藏」发哨兵 `HIDE_ALL_MODELS`（「什么都不提供」）。哨兵
- * 不是任何真实模型 id，所以同一套 `draft.includes(id)` 的勾选判断天然不会把
- * 它画成勾中——不需要特判。
+ * 是**独占态**：draft 含哨兵时整个清单就是「全部隐藏」——勾一个真实模型会
+ * 退出哨兵态（剔除哨兵），Host 落盘值带哨兵时只保留哨兵。**不能**让哨兵与
+ * 真实 id 混排：Host 的 resolveAllowedList 判「含哨兵即 none（全隐藏）」，而
+ * 面板若把混排清单里的真实 id 画成勾中、计数为 N，UI 就与落盘撒谎了。
+ * 曾踩过：点「全部隐藏」后复选框仍可勾，勾出的混排清单保存后「已启用 1/N」
+ * 而实际提供 0 个。
  *
  * 额度耗尽的模型保留在清单里（灰显、勾选框禁用），这是故意的：roster 是目录
  * 事实，picker 那边由 Host 自己丢掉它们，面板不替它删。
@@ -249,16 +253,28 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onRe
   const hostIds = status.enabledIds;
   const hostKey = useMemo(() => JSON.stringify(hostIds), [hostIds]);
   const [draft, setDraft] = useState<string[]>(() => hostIds.slice());
+  // 哨兵态是独占态：draft 含 HIDE_ALL_MODELS 时，整个清单就是「全部隐藏」
+  // （Host 的 resolveAllowedList 判「含哨兵即 none」）。勾选、计数与保存都
+  // 按这个口径，混排（哨兵 + 真实 id）不会出现。
+  const hideAllMode = draft.includes(HIDE_ALL_MODELS);
   // 只在 Host 值真正移动时跟过去（保存后由调用方 load() 回显，不靠本地乐观）。
   useEffect(() => {
-    setDraft(hostIds);
+    // 归一：Host 落盘值若带哨兵（旧版混排残留），只保留哨兵，别把真实 id
+    // 画成勾中——面板显示必须与 Host 的「含哨兵即 none」一致。
+    setDraft(hostIds.includes(HIDE_ALL_MODELS) ? [HIDE_ALL_MODELS] : hostIds);
     // 刻意只依赖 hostKey：hostIds 每次轮询都是新数组，列它会在每帧覆盖在编辑的勾选。
   }, [hostKey]);
 
   const roster = status.roster;
   const rosterIds = roster.map((row) => row.id);
-  const toggleOne = (id: string) => setDraft((current) => current.includes(id) ? current.filter((x) => x !== id) : [...current, id]);
-  const ticked = roster.filter((row) => draft.includes(row.id)).length;
+  // 勾一个真实模型 = 退出「全部隐藏」：哨兵是独占态，不能被真实 id 稀释成
+  // 混排清单（Host 会把混排判成 none，而面板会把它画成勾中——UI 与落盘撒谎）。
+  const toggleOne = (id: string) => setDraft((current) =>
+    current.includes(id)
+      ? current.filter((x) => x !== id)
+      : [...current.filter((x) => x !== HIDE_ALL_MODELS), id]
+  );
+  const ticked = hideAllMode ? 0 : roster.filter((row) => draft.includes(row.id)).length;
 
   // 状态行，顺序即优先级：具体失败 > 能力缺口 > 已注册 > 未注册。
   const degraded = status.error === "unavailable";
@@ -336,7 +352,7 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onRe
                   "label",
                   { style: { display: "flex", alignItems: "center", gap: 10, flex: "1 1 auto", minWidth: 0, cursor: busy || unusable ? "default" : "pointer" } },
                   h("input", {
-                    type: "checkbox", checked: draft.includes(id), disabled: busy || unusable,
+                    type: "checkbox", checked: !hideAllMode && draft.includes(id), disabled: busy || unusable,
                     onChange: () => toggleOne(id), style: S.modelCheck, "aria-label": id
                   }),
                   h("span", { style: S.modelName, title: id }, row.name)

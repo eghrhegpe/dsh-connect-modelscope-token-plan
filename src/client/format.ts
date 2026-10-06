@@ -31,7 +31,7 @@ export function count(value: unknown): string {
   return String(Math.round(number * 100) / 100);
 }
 
-/** 填 `{token}` 模板。 */
+/** 填 `{key}` 模板：vars 的每个键对应模板里的同名占位符。 */
 export function format(template: string, vars?: Record<string, unknown> | null): string {
   let text = template;
   for (const [key, value] of Object.entries(vars || {})) {

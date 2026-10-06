@@ -19,6 +19,11 @@ export const zh = {
   "panel.authError": "令牌被拒绝（401/403）。请到「接入」tab 更换访问令牌。",
   "panel.noToken": "还没有配置魔搭访问令牌。到「接入」tab 粘贴一枚 ms-… 令牌即可。",
   "panel.shapeDrift": "上游返回的结构可能有变：{detail}",
+  "panel.payloadError": "Host 返回了无法读取的响应（可能页面被登录墙或代理截获）。",
+  "shape.missingKeys": "Host 快照缺少必需的顶层键：{keys}",
+
+  "common.httpError": "无法读取 Host 响应（非预期响应，可能页面被登录墙截获）。",
+  "common.timeout": "请求超时，请重试。",
 
   "tab.quota": "额度",
   "tab.models": "模型",
@@ -43,8 +48,9 @@ export const zh = {
   "quota.headline": "今日 {calls} 次 · {models} 个模型",
   "quota.note": "本地口径：只统计经本插件的调用，直连魔搭的其它客户端不计入；消耗总量以官方魔粒余额为准。",
 
-  "models.none": "目录暂不可读：{error}",
-  "models.loading": "读取目录中…",
+  // 目录表与其行内 usage 试调已删除（见 panel-page.ts modelsBody 注释），
+  // 所以只留 token 管理用的零额度 validity probe；models.none / models.loading
+  // 两个旧键已随之删除（无消费方）。
   "probe.validity": "验令牌（零额度）",
   "probe.validOk": "令牌有效（HTTP {status}）",
   "probe.fail": "失败：{error}",
@@ -84,6 +90,7 @@ export const zh = {
   "events.quota": "额度",
   "events.rate_limit": "限频",
   "events.error": "错误",
+  "events.unknown": "未知",
 
   "token.status": "状态：{present}（来源 {source}，校验 {valid}）",
   "token.save": "保存",
@@ -117,6 +124,11 @@ export const en: typeof zh = {
   "panel.authError": "Token rejected (401/403). Replace the access token in the Access tab.",
   "panel.noToken": "No ModelScope access token configured yet. Paste an ms-… token in the Access tab.",
   "panel.shapeDrift": "Upstream shape may have changed: {detail}",
+  "panel.payloadError": "Host returned an unreadable response (a login wall or proxy may have intercepted it).",
+  "shape.missingKeys": "Host snapshot omitted required top-level key(s): {keys}",
+
+  "common.httpError": "Unexpected Host response (a login wall or proxy may have intercepted it).",
+  "common.timeout": "Request timed out; please retry.",
 
   "tab.quota": "Quota",
   "tab.models": "Models",
@@ -141,8 +153,9 @@ export const en: typeof zh = {
   "quota.headline": "Today {calls} calls · {models} models",
   "quota.note": "Local scope: only calls through this plugin are counted; clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
 
-  "models.none": "Catalog unavailable: {error}",
-  "models.loading": "Loading catalog…",
+  // The catalog table and its per-row usage probe were removed (see the
+  // panel-page.ts modelsBody comment), so models.none / models.loading were
+  // deleted together with it (no consumers left).
   "probe.validity": "Verify token (free)",
   "probe.validOk": "Token valid (HTTP {status})",
   "probe.fail": "Failed: {error}",
@@ -183,6 +196,7 @@ export const en: typeof zh = {
   "events.quota": "Quota",
   "events.rate_limit": "Rate limit",
   "events.error": "Error",
+  "events.unknown": "Unknown",
 
   "token.status": "Status: {present} (source {source}, check {valid})",
   "token.save": "Save",

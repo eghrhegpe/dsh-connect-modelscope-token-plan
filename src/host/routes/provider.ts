@@ -17,7 +17,7 @@ import { PROVIDER_PATH } from "./paths.ts";
 import { rosterWithAvailability, resolveAllowedList } from "../llm-models.ts";
 import { resolveSwitchEnabled, switchSource } from "../switch-precedence.ts";
 import { optional } from "../util.ts";
-import { writeJson, refuseMethod, withOrigin, readJsonBodyOr400, readJsonBody, redactedError, MAX_JSON_BODY_BYTES } from "./http.ts";
+import { writeJson, refuseMethod, withOrigin, readJsonBodyOr400, readJsonBody, respondError, redactedError, MAX_JSON_BODY_BYTES } from "./http.ts";
 
 /**
  * 本路由读到的 wiring 子集。
@@ -161,7 +161,7 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
         const entries = await readEntries(inference);
         await publisher.publish(entries, await readEnabledIds(providerStore, publisher.state.enabledIds), []);
       } catch (error) {
-        writeJson(response, 200, { ok: false, error: redactedError(error) }, { "cache-control": "no-store" });
+        respondError(response, error);
         return;
       }
       writeJson(response, 200, await snapshot(), { "cache-control": "no-store" });
@@ -193,7 +193,7 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
         const entries = await readEntries(inference);
         await publisher.publish(entries, ids, []);
       } catch (error) {
-        writeJson(response, 200, { ok: false, error: redactedError(error) }, { "cache-control": "no-store" });
+        respondError(response, error);
         return;
       }
       writeJson(response, 200, await snapshot(), { "cache-control": "no-store" });
@@ -221,7 +221,7 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
         const entries = await readEntries(inference);
         await publisher.publish(entries, [], []);
       } catch (error) {
-        writeJson(response, 200, { ok: false, error: redactedError(error) }, { "cache-control": "no-store" });
+        respondError(response, error);
         return;
       }
       writeJson(response, 200, await snapshot(), { "cache-control": "no-store" });

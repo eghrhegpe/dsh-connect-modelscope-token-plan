@@ -31,7 +31,16 @@ export const CODE = Object.freeze({
    * 「每个键必须在 CODE 里」），最需要人看的内部错误反而没有引导文案。
    * 正式收进码表，两端从此同一份真源。
    */
-  INTERNAL_ERROR: "internal_error"
+  INTERNAL_ERROR: "internal_error",
+  /**
+   * Client 自产码：Host 响应无法解读成快照（非 JSON / 缺 ok 字段）时，
+   * 面板用它走引导文案，而不是把裸英文串（"unexpected payload"）上屏。
+   *
+   * 本表是 `GUIDANCE_BY_CODE` 的键集真源（panel.test §2 钉「每个键必须在
+   * CODE 里」、§3c 钉「每个码必须有引导」）——新增 client 码必须同时进
+   * 这张表，两侧才同步。
+   */
+  PAYLOAD_ERROR: "payload_error"
 });
 
 export type CodeValue = (typeof CODE)[keyof typeof CODE];

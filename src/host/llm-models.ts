@@ -488,21 +488,31 @@ export function isModelEnabled(enabledIds: string[] | undefined, id: string): bo
  * @param {object[]} entries - 归一目录条目。
  * @returns {{id: string, name: string, vision: boolean, capability: ModelCapability}[]}
  */
-export function rosterOf(entries: unknown): { id: string; name: string; vision: boolean; capability: ModelCapability }[] {
+/**
+ * 构建一份去重 roster 的**共享循环骨架**：过滤 chat 模型 → 取 id → 投 row →
+ * position-map 去重（末次出现赢）。两个公开 roster 函数（rosterOf /
+ * rosterWithAvailability）只投各自的 row 形状，过滤/取 id/去重不再各写一遍
+ * ——它们曾各写一份相同的循环，jscpd 抓到 :493-504 ↔ :568-577。
+ *
+ * 语义承重，与 {@link buildDescriptors} 一致：同 id 末次出现赢；顺序为目录
+ * 首见序。这里分叉了，面板清单和注册结果就会就「哪些模型存在」说两套话。
+ * @template T - 一行 roster 的形状（由调用方投）。
+ * @param {object[]} entries - 归一目录条目。
+ * @param {(entry: CatalogEntry, id: string) => T} project - 条目 → 行。
+ * @returns {T[]}
+ */
+function buildRosterRows<T>(entries: unknown, project: (entry: CatalogEntry, id: string) => T): T[] {
   const position = new Map<string, number>();
-  const out: { id: string; name: string; vision: boolean; capability: ModelCapability }[] = [];
+  const out: T[] = [];
   for (const entry of Array.isArray(entries) ? entries : []) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const catalogEntry = entry as CatalogEntry;
     // 生图模型不是 chat 模型，不进 roster——与注册的 offer 保持一致，否则勾选的
     // 模型可能变成未注册的。
-    if (!isChatModel(entry as CatalogEntry)) continue;
-    const id = str((entry as CatalogEntry)?.id, "");
+    if (!isChatModel(catalogEntry)) continue;
+    const id = str(catalogEntry.id, "");
     if (id === "") continue;
-    const row = {
-      id,
-      name: str((entry as CatalogEntry)?.name, id),
-      vision: isVisionModel(entry as CatalogEntry),
-      capability: resolveModelCapability(entry as CatalogEntry)
-    };
+    const row = project(catalogEntry, id);
     if (position.has(id)) {
       out[position.get(id)!] = row;
     } else {
@@ -511,6 +521,27 @@ export function rosterOf(entries: unknown): { id: string; name: string; vision: 
     }
   }
   return out;
+}
+
+/**
+ * 面板用的 roster：每条可寻址 chat 条目一行。
+ *
+ * 刻意是投影而非原始条目：快照只带 picker 需要的（id、展示名、与 descriptor
+ * 相同的 vision 判定、以及供能力路由用的 capability），平台将来新增的目录字段
+ * 不会为了没理由泄到面板。
+ *
+ * 去重保留**末次出现**（与 {@link buildDescriptors} 一致）：同 id 更新的读取赢。
+ * 循环骨架见 {@link buildRosterRows}——过滤/取 id/去重是共享的一份。
+ * @param {object[]} entries - 归一目录条目。
+ * @returns {{id: string, name: string, vision: boolean, capability: ModelCapability}[]}
+ */
+export function rosterOf(entries: unknown): { id: string; name: string; vision: boolean; capability: ModelCapability }[] {
+  return buildRosterRows(entries, (entry, id) => ({
+    id,
+    name: str(entry.name, id),
+    vision: isVisionModel(entry),
+    capability: resolveModelCapability(entry)
+  }));
 }
 
 /**
@@ -564,34 +595,21 @@ export function buildDescriptors(entries: unknown, options: { providerId?: strin
  */
 export function rosterWithAvailability(entries: unknown, unavailableIds: string[]): { id: string; name: string; vision: boolean; capability: ModelCapability; available: boolean; quotaExhausted: boolean; contextWindow: number; maxOutputLength: number }[] {
   const blocked = new Set(Array.isArray(unavailableIds) ? unavailableIds : []);
-  const position = new Map<string, number>();
-  const out: { id: string; name: string; vision: boolean; capability: ModelCapability; available: boolean; quotaExhausted: boolean; contextWindow: number; maxOutputLength: number }[] = [];
-  for (const entry of Array.isArray(entries) ? entries : []) {
-    if (!isChatModel(entry as CatalogEntry)) continue;
-    const id = str((entry as CatalogEntry)?.id, "");
-    if (id === "") continue;
-    const row = {
-      id,
-      name: str((entry as CatalogEntry)?.name, id),
-      vision: isVisionModel(entry as CatalogEntry),
-      capability: resolveModelCapability(entry as CatalogEntry),
-      available: !blocked.has(id),
-      quotaExhausted: blocked.has(id),
-      // descriptor 自己会用的窗口：目录声明了就用，否则用 pi-ai 拿到的同一个
-      // 128k 兜底——徽章不会跟实际行为矛盾。
-      contextWindow: contextWindowOf(entry as CatalogEntry),
-      // 平台声明的输出上限（0 = 未知）。刻意把投影加宽：原始条目留在 Host 侧，
-      // 面板只引这两个参数值与 vision 判定。
-      maxOutputLength: maxOutputLengthOf(entry as CatalogEntry)
-    };
-    if (position.has(id)) {
-      out[position.get(id)!] = row;
-    } else {
-      position.set(id, out.length);
-      out.push(row);
-    }
-  }
-  return out;
+  // 循环骨架与 rosterOf 共用 buildRosterRows——只多投 5 个字段。
+  return buildRosterRows(entries, (entry, id) => ({
+    id,
+    name: str(entry.name, id),
+    vision: isVisionModel(entry),
+    capability: resolveModelCapability(entry),
+    available: !blocked.has(id),
+    quotaExhausted: blocked.has(id),
+    // descriptor 自己会用的窗口：目录声明了就用，否则用 pi-ai 拿到的同一个
+    // 128k 兜底——徽章不会跟实际行为矛盾。
+    contextWindow: contextWindowOf(entry),
+    // 平台声明的输出上限（0 = 未知）。刻意把投影加宽：原始条目留在 Host 侧，
+    // 面板只引这两个参数值与 vision 判定。
+    maxOutputLength: maxOutputLengthOf(entry)
+  }));
 }
 
 /**

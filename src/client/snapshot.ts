@@ -21,6 +21,15 @@ export interface PanelFailure {
   code?: unknown;
 }
 
+/**
+ * Client 自产的稳定码（Host `codes.ts` CODE 表的同名副本，值由 panel.test
+ * §2/§3c 钉住必须在 Host 表内）。唯一用途：Host 响应**无法解读成快照**时
+ * 走 GUIDANCE_BY_CODE 的引导文案，而不是把裸英文串上屏。
+ */
+export const CLIENT_CODE = Object.freeze({
+  PAYLOAD_ERROR: "payload_error"
+});
+
 /** (data, error) 对：恰好一边非空。 */
 export interface SnapshotRead {
   data: Snapshot | null;
@@ -103,9 +112,19 @@ export interface SnapshotView {
 export function interpretSnapshot(body: unknown): SnapshotRead {
   const payload = body as { ok?: unknown; error?: unknown; code?: unknown } | null | undefined;
   if (payload && payload.ok === false) {
-    return { data: null, error: { message: payload.error || "unexpected payload", code: payload.code } };
+    // ok:false 的失败码由 Host 给（auth_error 等）；缺码时用 client 自产的
+    // 稳定码，消息保留 Host 原文（可能缺席——有引导文案时 message 不上屏）。
+    const code = typeof payload.code === "string" && payload.code !== "" ? payload.code : CLIENT_CODE.PAYLOAD_ERROR;
+    return {
+      data: null,
+      error: { message: typeof payload.error === "string" && payload.error !== "" ? payload.error : null, code }
+    };
   }
-  if (!payload || payload.ok !== true) return { data: null, error: "unexpected payload" };
+  if (!payload || payload.ok !== true) {
+    // 整个载荷不可读（非 JSON / 登录墙 HTML / 缺 ok 字段）：不猜内容，只给
+    // 稳定码 + 引导文案。曾经这里是裸英文串 "unexpected payload"——i18n 泄漏。
+    return { data: null, error: { message: null, code: CLIENT_CODE.PAYLOAD_ERROR } };
+  }
   const raw = payload as unknown as Record<string, unknown>;
   const missingKeys = SNAPSHOT_REQUIRED_KEYS.filter((key) => raw[key] === undefined);
   // provider 块原样透传：它就是 body 上的顶层字段，裸 cast 已经带上；缺失时由
@@ -188,12 +207,15 @@ export const GUIDANCE_BY_CODE: Readonly<Record<string, keyof typeof zh>> = Objec
   // 曾经漏在这里：最需要人看的内部错误反而没有引导文案，且因为不在
   // FORM_EXCLUDED_CODES 里，needsSetup 会算成 true——把一个内部错误引导去「配
   // 令牌」，方向完全反了。
-  internal_error: "panel.internalError"
+  internal_error: "panel.internalError",
+  // Client 自产码（CLIENT_CODE，Host codes.ts 表内同名值）：响应无法解读成
+  // 快照时的引导文案，替代曾经上屏的裸英文 "unexpected payload"。
+  payload_error: "panel.payloadError"
 });
 
 /** 这些码不是「配令牌」能修的：引导行不是去贴令牌，而是等/修配置。 */
 export const FORM_EXCLUDED_CODES: ReadonlySet<string> = Object.freeze(
-  new Set(["config_error", "network_error", "timeout_error", "upstream_error", "rate_limited", "quota_exceeded", "internal_error"])
+  new Set(["config_error", "network_error", "timeout_error", "upstream_error", "rate_limited", "quota_exceeded", "internal_error", "payload_error"])
 );
 
 /**
@@ -222,7 +244,9 @@ export function viewOf(
       : tt(guidanceKey);
   const shapeWarnings = Array.isArray(data?.shapeWarnings) ? [...(data.shapeWarnings as string[])] : [];
   if (missingKeys.length > 0) {
-    shapeWarnings.push(`snapshot: Host omitted required key(s): ${missingKeys.join(", ")}`);
+    // 曾经是英文原句（"snapshot: Host omitted required key(s): …"），绕过了
+    // 「键即编译错误」的字典纪律直接上屏。现在由字典翻译，键名列表保留裸值。
+    shapeWarnings.push(format(tt("shape.missingKeys"), { keys: missingKeys.join(", ") }));
   }
   return { failure, needsSetup, guidanceKey, guidance, shapeWarnings };
 }

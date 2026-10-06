@@ -50,8 +50,8 @@ export function useSnapshotPolling(defaultCadenceMs = 30_000) {
       // Host 挂掉时（反向代理/登录墙）响应的 `ok` 仍可能是 true 而 body 是
       // HTML ——裸 `json()` 会抛 SyntaxError，而 `errorText` 对 Error 返回
       // `.message`，于是那段 HTML 源码会被整个塞进面板正文。解析失败一律读作
-      // null，交给 interpretSnapshot 的 "unexpected payload" 分支（同仓http.ts
-      // 的 postJson 早就是这么做的，这里是漏）。
+      // null，交给 interpretSnapshot 的 payload_error 分支（同仓 http.ts 的
+      // postJson 早就是这么做的，这里是漏）。
       const body = await response.json().catch(() => null);
       if (!isCurrent()) return;
       const read = interpretSnapshot(body);

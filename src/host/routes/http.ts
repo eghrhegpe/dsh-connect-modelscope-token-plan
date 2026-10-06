@@ -71,6 +71,20 @@ export function redactedError(error: unknown): string {
   return text.trim() === "" ? "request failed" : text;
 }
 
+/**
+ * 写盘/操作失败的统一响应：HTTP 恒 200、成败看 body（与快照路由同一语义，
+ * 一次写失败不许顺着渲染树炸穿）。**用户显式操作的失败必须上屏**，所以
+ * 调用方不吞、这里只负责脱敏后的标准形状。provider 开关/清单/reset 与
+ * token save/forget 五处 catch 曾各写一遍这个 writeJson——集中成一份，
+ * 措辞与形状不会漂移。
+ * @param {object} response - webServer 的响应对象。
+ * @param {unknown} error - catch 到的任意值（未必是 Error）。
+ * @returns {void}
+ */
+export function respondError(response: any, error: unknown): void {
+  writeJson(response, 200, { ok: false, error: redactedError(error) }, { "cache-control": "no-store" });
+}
+
 /** 读并校验 JSON body，失败时写 400 并返回 null（调用方的停手信号）。 */
 export async function readJsonBodyOr400(request: any, response: any, limit = MAX_JSON_BODY_BYTES): Promise<Record<string, unknown> | null> {
   const body = await readJsonBody(request, limit);

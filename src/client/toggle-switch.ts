@@ -4,7 +4,8 @@
  * 为什么不做原生 checkbox：provider 开关的标签是「把魔搭模型接入 DSH 模型
  * 选择器」一整句，塞进复选框后面读起来像一行带方框的散文，而不是开关；
  * 说明文字应该待在 tooltip 里做它该做的事。这段实现照抄姊妹插件的
- * `toggle-switch.ts`，只把品牌色换成魔搭的 `#7B3FF2`。
+ * `toggle-switch.ts`，品牌色从本插件 `styles.ts` 的 `BRAND` 取——同一处字面量
+ * （曾在两处各写一遍 `#7B3FF2`，改品牌色要改两处，已收敛）。
  *
  * 隐藏的 `<input type="checkbox">` 不是装饰，它是承重的三处：
  *   - 真正的控件：键盘焦点、空格翻转、浏览器自己的 checked 语义都从它来；
@@ -19,6 +20,7 @@
  */
 
 import { h } from "./runtime.ts";
+import { BRAND } from "./styles.ts";
 
 /** 轨道 30×17，12px 滑块走 13px——姊妹插件/Qoder 的形状。 */
 const TRACK_W = 30;
@@ -77,8 +79,8 @@ export function ToggleSwitch({ checked, onChange, label, busyLabel, busy = false
           "aria-hidden": "true",
           style: {
             position: "absolute", inset: 0, borderRadius: 999, pointerEvents: "none",
-            border: `1px solid ${on ? "var(--modelscope-brand, #7B3FF2)" : "var(--dsw-alias-border-l2, #36373b)"}`,
-            background: on ? "var(--modelscope-brand, #7B3FF2)" : "var(--dsw-alias-bg-layer-2, #2a2b31)",
+            border: `1px solid ${on ? BRAND : "var(--dsw-alias-border-l2, #36373b)"}`,
+            background: on ? BRAND : "var(--dsw-alias-bg-layer-2, #2a2b31)",
             transition: "background .15s, border-color .15s"
           }
         },

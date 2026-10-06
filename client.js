@@ -62,6 +62,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"panel.authError": "令牌被拒绝（401/403）。请到「接入」tab 更换访问令牌。",
 			"panel.noToken": "还没有配置魔搭访问令牌。到「接入」tab 粘贴一枚 ms-… 令牌即可。",
 			"panel.shapeDrift": "上游返回的结构可能有变：{detail}",
+			"panel.payloadError": "Host 返回了无法读取的响应（可能页面被登录墙或代理截获）。",
+			"shape.missingKeys": "Host 快照缺少必需的顶层键：{keys}",
+			"common.httpError": "无法读取 Host 响应（非预期响应，可能页面被登录墙截获）。",
+			"common.timeout": "请求超时，请重试。",
 			"tab.quota": "额度",
 			"tab.models": "模型",
 			"tab.access": "接入",
@@ -81,8 +85,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"balance.unavailable": "魔粒余额暂不可读：{error}",
 			"quota.headline": "今日 {calls} 次 · {models} 个模型",
 			"quota.note": "本地口径：只统计经本插件的调用，直连魔搭的其它客户端不计入；消耗总量以官方魔粒余额为准。",
-			"models.none": "目录暂不可读：{error}",
-			"models.loading": "读取目录中…",
 			"probe.validity": "验令牌（零额度）",
 			"probe.validOk": "令牌有效（HTTP {status}）",
 			"probe.fail": "失败：{error}",
@@ -116,6 +118,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"events.quota": "额度",
 			"events.rate_limit": "限频",
 			"events.error": "错误",
+			"events.unknown": "未知",
 			"token.status": "状态：{present}（来源 {source}，校验 {valid}）",
 			"token.save": "保存",
 			"token.forget": "忘掉已保存",
@@ -146,6 +149,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"panel.authError": "Token rejected (401/403). Replace the access token in the Access tab.",
 			"panel.noToken": "No ModelScope access token configured yet. Paste an ms-… token in the Access tab.",
 			"panel.shapeDrift": "Upstream shape may have changed: {detail}",
+			"panel.payloadError": "Host returned an unreadable response (a login wall or proxy may have intercepted it).",
+			"shape.missingKeys": "Host snapshot omitted required top-level key(s): {keys}",
+			"common.httpError": "Unexpected Host response (a login wall or proxy may have intercepted it).",
+			"common.timeout": "Request timed out; please retry.",
 			"tab.quota": "Quota",
 			"tab.models": "Models",
 			"tab.access": "Access",
@@ -165,8 +172,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"balance.unavailable": "Magicube balance temporarily unreadable: {error}",
 			"quota.headline": "Today {calls} calls · {models} models",
 			"quota.note": "Local scope: only calls through this plugin are counted; clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
-			"models.none": "Catalog unavailable: {error}",
-			"models.loading": "Loading catalog…",
 			"probe.validity": "Verify token (free)",
 			"probe.validOk": "Token valid (HTTP {status})",
 			"probe.fail": "Failed: {error}",
@@ -200,6 +205,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"events.quota": "Quota",
 			"events.rate_limit": "Rate limit",
 			"events.error": "Error",
+			"events.unknown": "Unknown",
 			"token.status": "Status: {present} (source {source}, check {valid})",
 			"token.save": "Save",
 			"token.forget": "Forget saved",
@@ -248,7 +254,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		if (number >= 1e4) return Math.round(number).toLocaleString();
 		return String(Math.round(number * 100) / 100);
 	}
-	/** 填 `{token}` 模板。 */
+	/** 填 `{key}` 模板：vars 的每个键对应模板里的同名占位符。 */
 	function format(template, vars) {
 		let text = template;
 		for (const [key, value] of Object.entries(vars || {})) text = text.split(`{${key}}`).join(String(value));
@@ -729,16 +735,22 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	*/
 	function interpretSnapshot(body) {
 		const payload = body;
-		if (payload && payload.ok === false) return {
-			data: null,
-			error: {
-				message: payload.error || "unexpected payload",
-				code: payload.code
-			}
-		};
+		if (payload && payload.ok === false) {
+			const code = typeof payload.code === "string" && payload.code !== "" ? payload.code : CLIENT_CODE.PAYLOAD_ERROR;
+			return {
+				data: null,
+				error: {
+					message: typeof payload.error === "string" && payload.error !== "" ? payload.error : null,
+					code
+				}
+			};
+		}
 		if (!payload || payload.ok !== true) return {
 			data: null,
-			error: "unexpected payload"
+			error: {
+				message: null,
+				code: CLIENT_CODE.PAYLOAD_ERROR
+			}
 		};
 		const raw = payload;
 		const missingKeys = SNAPSHOT_REQUIRED_KEYS.filter((key) => raw[key] === void 0);
@@ -805,7 +817,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const guidanceKey = failure === null ? null : GUIDANCE_BY_CODE[failure.code] ?? null;
 		const guidance = guidanceKey === null ? null : guidanceKey === "panel.configError" ? format(tt(guidanceKey), { error: failure?.message }) : tt(guidanceKey);
 		const shapeWarnings = Array.isArray(data?.shapeWarnings) ? [...data.shapeWarnings] : [];
-		if (missingKeys.length > 0) shapeWarnings.push(`snapshot: Host omitted required key(s): ${missingKeys.join(", ")}`);
+		if (missingKeys.length > 0) shapeWarnings.push(format(tt("shape.missingKeys"), { keys: missingKeys.join(", ") }));
 		return {
 			failure,
 			needsSetup,
@@ -814,10 +826,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			shapeWarnings
 		};
 	}
-	var DEGRADED_PROVIDER, GUIDANCE_BY_CODE, FORM_EXCLUDED_CODES;
+	var CLIENT_CODE, DEGRADED_PROVIDER, GUIDANCE_BY_CODE, FORM_EXCLUDED_CODES;
 	var init_snapshot = __esmMin((() => {
 		init_format();
 		init_wire();
+		CLIENT_CODE = Object.freeze({ PAYLOAD_ERROR: "payload_error" });
 		DEGRADED_PROVIDER = Object.freeze({
 			enabled: false,
 			source: "config",
@@ -838,7 +851,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			upstream_error: "panel.upstream",
 			rate_limited: "panel.upstream",
 			quota_exceeded: "panel.upstream",
-			internal_error: "panel.internalError"
+			internal_error: "panel.internalError",
+			payload_error: "panel.payloadError"
 		});
 		FORM_EXCLUDED_CODES = Object.freeze(/* @__PURE__ */ new Set([
 			"config_error",
@@ -847,7 +861,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"upstream_error",
 			"rate_limited",
 			"quota_exceeded",
-			"internal_error"
+			"internal_error",
+			"payload_error"
 		]));
 	}));
 
@@ -899,8 +914,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				inset: 0,
 				borderRadius: 999,
 				pointerEvents: "none",
-				border: `1px solid ${on ? "var(--modelscope-brand, #7B3FF2)" : "var(--dsw-alias-border-l2, #36373b)"}`,
-				background: on ? "var(--modelscope-brand, #7B3FF2)" : "var(--dsw-alias-bg-layer-2, #2a2b31)",
+				border: `1px solid ${on ? BRAND : "var(--dsw-alias-border-l2, #36373b)"}`,
+				background: on ? BRAND : "var(--dsw-alias-bg-layer-2, #2a2b31)",
 				transition: "background .15s, border-color .15s"
 			}
 		}, h("span", { style: {
@@ -921,6 +936,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	var TRACK_W, TRACK_H, THUMB, TRAVEL;
 	var init_toggle_switch = __esmMin((() => {
 		init_runtime();
+		init_styles();
 		TRACK_W = 30;
 		TRACK_H = 17;
 		THUMB = 12;
@@ -1041,7 +1057,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		return h("div", null, events.map((event, index) => h("div", {
 			key: `${event.at}-${index}`,
 			style: S.trendRowHead
-		}, h("span", { style: S.quotaUsed }, isoTime(event.at)), h("span", { style: S.modelTag }, tt(EVENT_KIND_KEY[event.kind])), h("span", {
+		}, h("span", { style: S.quotaUsed }, isoTime(event.at)), h("span", { style: S.modelTag }, tt(EVENT_KIND_KEY[event.kind] ?? "events.unknown")), h("span", {
 			style: {
 				...S.trendModel,
 				flex: "1"
@@ -1109,8 +1125,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	*
 	* 允许清单的语义（路由 §9 钉死）：空清单 = 不过滤 = 全部提供，所以「全部」
 	* 发 `[]`；「全部隐藏」发哨兵 `HIDE_ALL_MODELS`（「什么都不提供」）。哨兵
-	* 不是任何真实模型 id，所以同一套 `draft.includes(id)` 的勾选判断天然不会把
-	* 它画成勾中——不需要特判。
+	* 是**独占态**：draft 含哨兵时整个清单就是「全部隐藏」——勾一个真实模型会
+	* 退出哨兵态（剔除哨兵），Host 落盘值带哨兵时只保留哨兵。**不能**让哨兵与
+	* 真实 id 混排：Host 的 resolveAllowedList 判「含哨兵即 none（全隐藏）」，而
+	* 面板若把混排清单里的真实 id 画成勾中、计数为 N，UI 就与落盘撒谎了。
+	* 曾踩过：点「全部隐藏」后复选框仍可勾，勾出的混排清单保存后「已启用 1/N」
+	* 而实际提供 0 个。
 	*
 	* 额度耗尽的模型保留在清单里（灰显、勾选框禁用），这是故意的：roster 是目录
 	* 事实，picker 那边由 Host 自己丢掉它们，面板不替它删。
@@ -1121,13 +1141,14 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const hostIds = status.enabledIds;
 		const hostKey = useMemo(() => JSON.stringify(hostIds), [hostIds]);
 		const [draft, setDraft] = useState(() => hostIds.slice());
+		const hideAllMode = draft.includes(HIDE_ALL_MODELS);
 		useEffect(() => {
-			setDraft(hostIds);
+			setDraft(hostIds.includes("__hide_all__") ? [HIDE_ALL_MODELS] : hostIds);
 		}, [hostKey]);
 		const roster = status.roster;
 		const rosterIds = roster.map((row) => row.id);
-		const toggleOne = (id) => setDraft((current) => current.includes(id) ? current.filter((x) => x !== id) : [...current, id]);
-		const ticked = roster.filter((row) => draft.includes(row.id)).length;
+		const toggleOne = (id) => setDraft((current) => current.includes(id) ? current.filter((x) => x !== id) : [...current.filter((x) => x !== HIDE_ALL_MODELS), id]);
+		const ticked = hideAllMode ? 0 : roster.filter((row) => draft.includes(row.id)).length;
 		const degraded = status.error === "unavailable";
 		let statusNode;
 		if (!degraded && typeof status.error === "string" && status.error !== "") statusNode = h("div", {
@@ -1228,7 +1249,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				cursor: busy || unusable ? "default" : "pointer"
 			} }, h("input", {
 				type: "checkbox",
-				checked: draft.includes(id),
+				checked: !hideAllMode && draft.includes(id),
 				disabled: busy || unusable,
 				onChange: () => toggleOne(id),
 				style: S.modelCheck,
@@ -1284,9 +1305,22 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 
 //#endregion
 //#region src/client/http.ts
-/** POST 并解析 body；非 JSON 响应返回 null。 */
+/** 一次带超时的 fetch；内部 controller，调用方无需传 signal。 */
+	async function fetchWithTimeout(url, init) {
+		const controller = typeof AbortController === "function" ? new AbortController() : null;
+		const timer = controller === null ? null : setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+		try {
+			return await fetch(url, {
+				...init,
+				...controller === null ? {} : { signal: controller.signal }
+			});
+		} finally {
+			if (timer !== null) clearTimeout(timer);
+		}
+	}
+	/** POST 并解析 body；非 JSON 响应返回 null。 */
 	async function postJson(path, payload) {
-		return await (await fetch(path, {
+		return await (await fetchWithTimeout(path, {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
@@ -1298,14 +1332,17 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	}
 	/** GET 同源 JSON；非 2xx 或非 JSON 返回 null（调用方决定怎么降级）。 */
 	async function getJson(path) {
-		const response = await fetch(path, {
+		const response = await fetchWithTimeout(path, {
 			headers: { accept: "application/json" },
 			cache: "no-store"
 		});
 		if (!response.ok) return null;
 		return await response.json().catch(() => null);
 	}
-	var init_http = __esmMin((() => {}));
+	var FETCH_TIMEOUT_MS;
+	var init_http = __esmMin((() => {
+		FETCH_TIMEOUT_MS = 2e4;
+	}));
 
 //#endregion
 //#region src/client/use-polling-interval.ts
@@ -1452,7 +1489,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 //#endregion
 //#region src/client/panel-page.ts
 	function PanelPage({ tt, localeSubscribe }) {
-		const { data, error, loadedOnce, updatedAt, load, missingKeys } = useSnapshotPolling();
+		const { data, error, updatedAt, load, missingKeys } = useSnapshotPolling();
 		const [, setLocaleRevision] = useState(0);
 		const [openSections, setOpenSections] = useState({
 			balance: true,
@@ -1473,8 +1510,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				[key]: !current[key]
 			}));
 		}, []);
-		const { failure, needsSetup, guidance, shapeWarnings } = viewOf(data, error, tt, missingKeys);
-		const showSetup = needsSetup && loadedOnce;
+		const { failure, guidance, shapeWarnings } = viewOf(data, error, tt, missingKeys);
 		const rawProvider = data?.provider;
 		const hasProviderBlock = rawProvider !== void 0 && rawProvider !== null;
 		const [fetchedProvider, setFetchedProvider] = useState(null);
@@ -1491,21 +1527,25 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, [hasProviderBlock]);
 		const [providerBusy, setProviderBusy] = useState(false);
 		const [providerError, setProviderError] = useState(null);
+		const writeErrorText = (reason, t) => reason instanceof Error && reason.name === "AbortError" ? t("common.timeout") : errorText(reason);
 		const runProviderWrite = useCallback(async (path, payload) => {
 			setProviderBusy(true);
 			setProviderError(null);
 			try {
 				const body = await postJson(path, payload);
-				if (body === null || body.ok !== true) throw new Error(typeof body?.error === "string" ? body.error : "HTTP error");
+				if (body === null || body.ok !== true) throw new Error(typeof body?.error === "string" ? body.error : tt("common.httpError"));
 				load();
 			} catch (reason) {
-				setProviderError(format(tt("provider.error"), { error: errorText(reason) }));
+				setProviderError(format(tt("provider.error"), { error: writeErrorText(reason, tt) }));
 			} finally {
 				setProviderBusy(false);
 			}
 		}, [load, tt]);
 		const toggleProvider = useCallback((enabled) => void runProviderWrite(PROVIDER_PATH, { enabled }), [runProviderWrite]);
-		const saveRoster = useCallback((enabledIds) => void runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds }), [runProviderWrite]);
+		const saveRoster = useCallback((enabledIds) => {
+			const normalized = enabledIds.includes("__hide_all__") ? [HIDE_ALL_MODELS] : enabledIds.filter((id) => id !== HIDE_ALL_MODELS);
+			runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds: normalized });
+		}, [runProviderWrite]);
 		const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
 		const [tokenBusy, setTokenBusy] = useState(false);
 		const [tokenError, setTokenError] = useState(null);
@@ -1514,14 +1554,14 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			setTokenError(null);
 			try {
 				const body = await postJson(TOKEN_PATH, { token: value });
-				if (body === null || body.ok !== true) throw new Error(typeof body?.error === "string" ? body.error : "HTTP error");
+				if (body === null || body.ok !== true) throw new Error(typeof body?.error === "string" ? body.error : tt("common.httpError"));
 				load();
 			} catch (reason) {
-				setTokenError(errorText(reason));
+				setTokenError(writeErrorText(reason, tt));
 			} finally {
 				setTokenBusy(false);
 			}
-		}, [load]);
+		}, [load, tt]);
 		const forgetToken = useCallback(async () => {
 			setTokenBusy(true);
 			setTokenError(null);
@@ -1529,11 +1569,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				await postJson(TOKEN_FORGET_PATH, {});
 				load();
 			} catch (reason) {
-				setTokenError(errorText(reason));
+				setTokenError(writeErrorText(reason, tt));
 			} finally {
 				setTokenBusy(false);
 			}
-		}, [load]);
+		}, [load, tt]);
 		const tokenState = data?.token ?? null;
 		const sampleModel = data?.models?.sample?.[0] ?? null;
 		const [verifyBusy, setVerifyBusy] = useState(false);
@@ -1546,19 +1586,15 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			try {
 				const body = await postJson(PROBE_PATH, { modelId });
 				if (body !== null && body.ok === true) setVerifyNote(format(tt("probe.validOk"), { status: Number(body.status ?? 0) }));
-				else setVerifyError(typeof body?.error === "string" ? body.error : "HTTP error");
+				else setVerifyError(typeof body?.error === "string" ? body.error : tt("common.httpError"));
 			} catch (reason) {
-				setVerifyError(errorText(reason));
+				setVerifyError(writeErrorText(reason, tt));
 			} finally {
 				setVerifyBusy(false);
 			}
 		}, [tt]);
 		const quotaBody = () => {
 			if (data === null) return h("div", { style: S.empty }, failure === null ? tt("panel.loading") : h("div", { role: "alert" }, guidance ?? format(tt("panel.error"), { error: failure.message })));
-			if (showSetup && failure !== null) return h("div", {
-				style: S.empty,
-				role: "alert"
-			}, guidance ?? format(tt("panel.error"), { error: failure.message }));
 			const snap = data;
 			return h("div", null, snap.token?.present === false ? h("div", {
 				style: S.formNote,

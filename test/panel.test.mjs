@@ -101,16 +101,20 @@ assert.match(cfgView.guidance ?? "", /插件配置有误/);
   }
 
   // 缺失要冒到面板上（不静默：Host 少给键是双端漂移，用户该看见）。
+  // 2026-10-06：文案改为走字典键（shape.missingKeys），此处断言翻译后的中文
+  // 文本 + 键名列表，不再钉旧英文原句。
   const drifted = panel.interpretSnapshot({ ...complete, models: undefined });
   const driftView = panel.viewOf(drifted.data, null, (key) => zh[key], drifted.missingKeys);
   assert.ok(
-    driftView.shapeWarnings.some((w) => /omitted required key/.test(w) && /models/.test(w)),
-    "缺失键进入 shapeWarnings"
+    driftView.shapeWarnings.some((w) => /顶层键/.test(w) && /models/.test(w)),
+    "缺失键进入 shapeWarnings（经字典翻译）"
   );
 
-  // ok 缺失是另一回事：不是「少了个块」，而是整个载荷不合法。
+  // ok 缺失是另一回事：不是「少了个块」，而是整个载荷不合法。曾经返回裸英文
+  // "unexpected payload"，现在给 client 自产稳定码 payload_error（引导文案走
+  // GUIDANCE_BY_CODE），断言钉码而非钉字符串。
   assert.equal(panel.interpretSnapshot({ name: "x" }).data, null, "缺 ok → data 为 null");
-  assert.match(String(panel.interpretSnapshot({ name: "x" }).error), /unexpected payload/);
+  assert.equal(panel.interpretSnapshot({ name: "x" }).error?.code, "payload_error", "不可读载荷 → client 稳定码");
 }
 
 // §3c internal_error 必须有引导文案，且**不能**被导去「配令牌」。

@@ -4,7 +4,7 @@
  * @module dsh-connect-modelscope-token-plan/client/panel-page
  */
 import { SectionCard, BalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm, ProviderCard } from "./cards.ts";
-import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH } from "./const.ts";
+import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, HIDE_ALL_MODELS } from "./const.ts";
 import { format, errorText, isoTime } from "./format.ts";
 import { getJson, postJson } from "./http.ts";
 import { viewOf, providerOf, DEGRADED_PROVIDER } from "./snapshot.ts";
@@ -21,7 +21,7 @@ export function PanelPage({ tt, localeSubscribe }: {
   tt: Tt;
   localeSubscribe?: unknown;
 }): unknown {
-  const { data, error, loadedOnce, updatedAt, load, missingKeys } = useSnapshotPolling();
+  const { data, error, updatedAt, load, missingKeys } = useSnapshotPolling();
   const [, setLocaleRevision] = useState(0);
   const [openSections, setOpenSections] = useState({ balance: true, local: true, trend: true, events: false, provider: true, token: true });
   const [activeTab, setActiveTab] = useState<TabId>("quota");
@@ -35,8 +35,10 @@ export function PanelPage({ tt, localeSubscribe }: {
     setOpenSections((current) => ({ ...current, [key]: !current[key as keyof typeof current] }));
   }, []);
 
-  const { failure, needsSetup, guidance, shapeWarnings } = viewOf(data, error, tt, missingKeys);
-  const showSetup = needsSetup && loadedOnce;
+  const { failure, guidance, shapeWarnings } = viewOf(data, error, tt, missingKeys);
+  // 注：needsSetup/showSetup 已随「data===null 提前 return」的不可达分支删除——
+  // viewOf 的 needsSetup 只在 data===null 时为 true，而 quotaBody 对 data===null
+  // 已经提前渲染加载/错误态，所以「data 非空且 needsSetup」恒为 false（死码）。
 
   // 接入为 DSH 模型：快照的 `provider` 块是首选；wire 已声明它，但旧 Host 或
   // 过渡期可能不给——所以读成 unknown，由 providerOf 归一，缺失时用 GET
@@ -62,21 +64,33 @@ export function PanelPage({ tt, localeSubscribe }: {
   // Host 实际落盘的值（不做乐观更新）。
   const [providerBusy, setProviderBusy] = useState(false);
   const [providerError, setProviderError] = useState<string | null>(null);
+  // 写路径的错误文本：postJson 内部超时 abort 时给字典文案（"This operation
+  // was aborted" 是浏览器英文），其余用 errorText。三处写回调共用一份。
+  const writeErrorText = (reason: unknown, t: Tt) =>
+    reason instanceof Error && reason.name === "AbortError" ? t("common.timeout") : errorText(reason);
+
   const runProviderWrite = useCallback(async (path: string, payload: Record<string, unknown>) => {
     setProviderBusy(true);
     setProviderError(null);
     try {
       const body = await postJson(path, payload);
-      if (body === null || body.ok !== true) throw new Error(typeof body?.error === "string" ? body.error : "HTTP error");
+      if (body === null || body.ok !== true) throw new Error(typeof body?.error === "string" ? body.error : tt("common.httpError"));
       void load();
     } catch (reason) {
-      setProviderError(format(tt("provider.error"), { error: errorText(reason) }));
+      setProviderError(format(tt("provider.error"), { error: writeErrorText(reason, tt) }));
     } finally {
       setProviderBusy(false);
     }
   }, [load, tt]);
   const toggleProvider = useCallback((enabled: boolean) => void runProviderWrite(PROVIDER_PATH, { enabled }), [runProviderWrite]);
-  const saveRoster = useCallback((enabledIds: string[]) => void runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds }), [runProviderWrite]);
+  const saveRoster = useCallback((enabledIds: string[]) => {
+    // 哨兵独占态归一（与 ProviderCard 同一口径，防御任何绕过它的调用方）：
+    // 含哨兵 → 只留哨兵（全隐藏）；否则剔除可能混进的哨兵（空 = 全部提供）。
+    const normalized = enabledIds.includes(HIDE_ALL_MODELS)
+      ? [HIDE_ALL_MODELS]
+      : enabledIds.filter((id) => id !== HIDE_ALL_MODELS);
+    void runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds: normalized });
+  }, [runProviderWrite]);
   const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
 
   // 令牌保存 / 忘掉。
@@ -87,14 +101,14 @@ export function PanelPage({ tt, localeSubscribe }: {
     setTokenError(null);
     try {
       const body = await postJson(TOKEN_PATH, { token: value });
-      if (body === null || body.ok !== true) throw new Error(typeof body?.error === "string" ? body.error : "HTTP error");
+      if (body === null || body.ok !== true) throw new Error(typeof body?.error === "string" ? body.error : tt("common.httpError"));
       void load();
     } catch (reason) {
-      setTokenError(errorText(reason));
+      setTokenError(writeErrorText(reason, tt));
     } finally {
       setTokenBusy(false);
     }
-  }, [load]);
+  }, [load, tt]);
   const forgetToken = useCallback(async () => {
     setTokenBusy(true);
     setTokenError(null);
@@ -102,11 +116,11 @@ export function PanelPage({ tt, localeSubscribe }: {
       await postJson(TOKEN_FORGET_PATH, {});
       void load();
     } catch (reason) {
-      setTokenError(errorText(reason));
+      setTokenError(writeErrorText(reason, tt));
     } finally {
       setTokenBusy(false);
     }
-  }, [load]);
+  }, [load, tt]);
 
   const tokenState = data?.token ?? null;
   // 验令牌（validity probe）需要一个 model id——鉴权与模型无关，取目录样本的
@@ -130,10 +144,10 @@ export function PanelPage({ tt, localeSubscribe }: {
       if (body !== null && body.ok === true) {
         setVerifyNote(format(tt("probe.validOk"), { status: Number(body.status ?? 0) }));
       } else {
-        setVerifyError(typeof body?.error === "string" ? body.error : "HTTP error");
+        setVerifyError(typeof body?.error === "string" ? body.error : tt("common.httpError"));
       }
     } catch (reason) {
-      setVerifyError(errorText(reason));
+      setVerifyError(writeErrorText(reason, tt));
     } finally {
       setVerifyBusy(false);
     }
@@ -146,9 +160,6 @@ export function PanelPage({ tt, localeSubscribe }: {
         failure === null
           ? tt("panel.loading")
           : h("div", { role: "alert" }, guidance ?? format(tt("panel.error"), { error: failure.message })));
-    }
-    if (showSetup && failure !== null) {
-      return h("div", { style: S.empty, role: "alert" }, guidance ?? format(tt("panel.error"), { error: failure.message }));
     }
     const snap: Snapshot = data;
     return h(

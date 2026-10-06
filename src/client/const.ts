@@ -5,14 +5,19 @@ export const NS = "dsh-connect-modelscope-token-plan";
 
 /**
  * The plugin slug：REGISTRATION.id、日志前缀、data-dsh-plugin 标记、以及下面
- * 每条路由都从它派生——slug 改名只有这一个家。test/config.test.mjs 钉住
- * 这些字面量与 Host 半边的 paths.ts 一致。
+ * 每条路由都从它派生——slug 改名只有这一个家。这些字面量由 test/panel.test.mjs
+ * §6/§6b 双向钉住与 Host 半边的 paths.ts 一致（config.test.mjs 钉的是
+ * host-config ↔ cordis.patch.yml 的配置面，不是路由面）。
  */
 export const PANEL_ID = NS;
 
 /** Host 快照路由（相对、同源）。 */
 export const SNAPSHOT_PATH = `/api/${NS}/snapshot`;
-/** Host 模型目录路由。 */
+/**
+ * Host 模型目录路由。**面板已不消费**（模型清单由快照的 provider 块承担，
+ * 见 panel-page.ts modelsBody 注释）——Host 侧仍注册、test/routes.test.mjs 仍
+ * 钉着，此处保留以兼容任何旧面。别误以为它是活的消费方。
+ */
 export const MODELS_PATH = `/api/${NS}/models`;
 /** 令牌保存路由。 */
 export const TOKEN_PATH = `/api/${NS}/token`;

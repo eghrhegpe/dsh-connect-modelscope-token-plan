@@ -49,12 +49,13 @@ export type DictionaryKey = keyof typeof zh;
  *
  * Two escapes stay open on purpose, and both are visible at the call site:
  *   - a table whose VALUES are dictionary keys (`GUIDANCE_BY_CODE`,
- *     `REFUSAL_TEXT`) is typed as `Record<string, DictionaryKey>`, so its
+ *     `EVENT_KIND_KEY`) is typed as `Record<string, DictionaryKey>`, so its
  *     lookup needs no cast at all;
- *   - a template family the HOST enumerates (`llm.level.…`, `llm.src.…`) cannot
- *     be listed here, so its call site casts to `DictionaryKey` explicitly —
- *     the cast is the admission that compile-time cannot see it, and
- *     `test/panel.test.mjs` F6 still scans those families at runtime.
+ *   - a family this plugin cannot list statically (values the HOST enumerates,
+ *     e.g. the wire error codes) casts to `DictionaryKey` explicitly — the cast
+ *     is the admission that compile-time cannot see it, and
+ *     `test/panel.test.mjs` pins the value tables against the host CODE table
+ *     so a key that drifts out of existence fails the suite.
  */
 export type Tt = (key: DictionaryKey) => string;
 
