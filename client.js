@@ -85,6 +85,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"balance.unavailable": "魔粒余额暂不可读：{error}",
 			"quota.headline": "今日 {calls} 次 · {models} 个模型",
 			"quota.note": "本地口径：只统计经本插件的调用，直连魔搭的其它客户端不计入；消耗总量以官方魔粒余额为准。",
+			"quota.unavailable": "本地计数本次读不到（原因见上方提示）",
 			"probe.validity": "验令牌（零额度）",
 			"probe.validOk": "令牌有效（HTTP {status}）",
 			"probe.fail": "失败：{error}",
@@ -127,6 +128,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"token.ariaLabel": "魔搭访问令牌",
 			"token.hint": "在魔搭「访问令牌」页生成。保存即生效（写入 DSH 凭据服务，不依赖重启）。环境变量 MODELSCOPE_API_KEY 只在 DSH 启动时读一次，且优先级高于此处保存的值——设了它就别再用面板存。",
 			"token.ephemeral": "此 Host 没有凭据服务：面板保存的令牌重启即丢，请改用凭据服务或环境变量。",
+			"token.readError": "读不到凭据存储，无法确认令牌状态（不代表没配令牌）：{error}",
 			"token.link": "打开魔搭访问令牌页 →",
 			"source.credentials": "凭据服务",
 			"source.env": "环境变量",
@@ -174,6 +176,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"balance.unavailable": "Magicube balance temporarily unreadable: {error}",
 			"quota.headline": "Today {calls} calls · {models} models",
 			"quota.note": "Local scope: only calls through this plugin are counted; clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
+			"quota.unavailable": "Local counters could not be read this time (reason in the notices above)",
 			"probe.validity": "Verify token (free)",
 			"probe.validOk": "Token valid (HTTP {status})",
 			"probe.fail": "Failed: {error}",
@@ -216,6 +219,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"token.ariaLabel": "ModelScope access token",
 			"token.hint": "Generate one on the ModelScope access-token page. Saving takes effect immediately (written to the DSH credentials service, no restart needed). The MODELSCOPE_API_KEY environment variable is read once at DSH launch and ranks ABOVE a value saved here — set it and stop using the panel.",
 			"token.ephemeral": "This Host has no credentials service: a token saved in the panel is lost on restart. Use the credentials service or an environment variable.",
+			"token.readError": "Could not read the credential store, so the token state is unknown (this does NOT mean no token is configured): {error}",
 			"token.link": "Open the ModelScope access-token page →",
 			"source.credentials": "credentials",
 			"source.env": "environment",
@@ -686,7 +690,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				source: "none",
 				valid: null,
 				checkedAt: null,
-				ephemeral: true
+				ephemeral: true,
+				readError: null
 			};
 			case "balance": return {
 				available: null,
@@ -696,7 +701,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				error: null
 			};
 			case "quota": return {
-				daily: { usedLocal: 0 },
+				daily: { usedLocal: null },
 				perModel: [],
 				countingNote: "local-counting"
 			};
@@ -1002,12 +1007,17 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	*/
 	function LocalDailyCard({ snapshot, tt }) {
 		const quota = snapshot.quota;
-		const daily = quota?.daily ?? { usedLocal: 0 };
+		const daily = quota?.daily ?? { usedLocal: null };
 		const perModel = Array.isArray(quota?.perModel) ? quota.perModel : [];
+		const unknownUsed = !(typeof daily.usedLocal === "number" && Number.isFinite(daily.usedLocal));
+		const usedText = unknownUsed ? "—" : count(daily.usedLocal);
 		return h("div", { style: S.card }, h("div", { style: S.poolName }, format(tt("quota.headline"), {
-			calls: count(daily.usedLocal),
+			calls: usedText,
 			models: count(perModel.length)
-		})), h(ModelUsageTable, {
+		})), unknownUsed ? h("div", { style: {
+			...S.formNote,
+			color: "var(--dsw-alias-state-warn-primary)"
+		} }, tt("quota.unavailable")) : null, h(ModelUsageTable, {
 			rows: perModel,
 			tt
 		}), h("div", { style: S.trendLegend }, tt("quota.note")));
@@ -1039,21 +1049,25 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	/** 近 N 天本地调用趋势（天桶；缺桶 = 该日 0 次，真实零）。 */
 	function TrendBars({ buckets, tt }) {
 		if (!Array.isArray(buckets) || buckets.length === 0) return h("div", { style: S.trendLegend }, tt("trend.none"));
-		const max = Math.max(0, ...buckets.map((b) => Math.max(0, b.calls)));
-		return h("div", null, buckets.map((bucket) => h("div", {
-			key: bucket.dateKey,
+		const rows = buckets.map((bucket) => ({
+			dateKey: bucket.dateKey,
+			calls: Number.isFinite(bucket.calls) ? Math.max(0, bucket.calls) : 0
+		}));
+		const max = Math.max(0, ...rows.map((row) => row.calls));
+		return h("div", null, rows.map((row) => h("div", {
+			key: row.dateKey,
 			style: S.trendRowHead
-		}, h("span", { style: S.trendModel }, bucket.dateKey), h("div", {
+		}, h("span", { style: S.trendModel }, row.dateKey), h("div", {
 			style: {
 				...S.trendBar,
 				flex: "1",
 				marginLeft: 10
 			},
 			"aria-hidden": "true"
-		}, max > 0 && bucket.calls > 0 ? h("div", { style: {
+		}, max > 0 && row.calls > 0 ? h("div", { style: {
 			...S.barFill,
-			width: `${bucket.calls / max * 100}%`
-		} }) : null), h("span", { style: S.quotaUsed }, String(bucket.calls)))), h("div", { style: S.trendLegend }, tt("trend.legend")));
+			width: `${row.calls / max * 100}%`
+		} }) : null), h("span", { style: S.quotaUsed }, String(row.calls)))), h("div", { style: S.trendLegend }, tt("trend.legend")));
 	}
 	/** 事件流（429/错误），Newest-first。 */
 	function EventsList({ events, tt }) {
@@ -1075,7 +1089,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const source = token?.source ?? "none";
 		const sourceKey = source === "credentials" ? "source.credentials" : source === "env" ? "source.env" : source === "memory" ? "source.memory" : "source.none";
 		const validKey = token?.valid === true ? "validity.yes" : "validity.no";
-		return h("div", null, h("div", { style: S.quotaUsed }, format(tt("token.status"), {
+		return h("div", null, token?.readError ? h("div", { style: {
+			...S.formNote,
+			color: "var(--dsw-alias-state-warn-primary)"
+		} }, format(tt("token.readError"), { error: token.readError })) : h("div", { style: S.quotaUsed }, format(tt("token.status"), {
 			present: token?.present ? tt("present.yes") : tt("present.no"),
 			source: tt(sourceKey),
 			valid: tt(validKey)

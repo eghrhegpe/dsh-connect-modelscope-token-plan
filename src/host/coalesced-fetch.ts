@@ -43,14 +43,21 @@ export const MAX_CACHE_AGE_MS = 3600_000;
  * flight's answer would be served to the account that just signed in.
  * Hanging the counters off the map makes every instance over that map share
  * one generation state, so the guard holds no matter how the caller builds it.
+ *
+ * `seq` is the ONE monotonic source both bumps draw from (see
+ * {@link clearCoalescedFetch}): `global` is a high-water mark that only a global
+ * clear moves, and `keys` holds one absolute number per individually-cleared
+ * key. `keys` is therefore bounded by the number of distinct keys cleared since
+ * the last global clear — not swept, because a per-key number must outlive any
+ * in-flight flight born under it, while a later global clear wipes them all.
  */
-const GENERATIONS = new WeakMap<object, { global: number; keys: Map<string, number> }>();
+const GENERATIONS = new WeakMap<object, { global: number; seq: number; keys: Map<string, number> }>();
 
 /** The (created-on-demand) generation state belonging to one cache map. */
 function generationsOf(cache: object) {
   let state = GENERATIONS.get(cache);
   if (state === undefined) {
-    state = { global: 0, keys: new Map<string, number>() };
+    state = { global: 0, seq: 0, keys: new Map<string, number>() };
     GENERATIONS.set(cache, state);
   }
   return state;
@@ -75,15 +82,23 @@ export function clearCoalescedFetch(
   key?: string
 ): void {
   const gens = generationsOf(cache);
+  // 世代号只能取自**一条**单调序列（`seq`）。per-key 与 global 各自 +1 会让两个数值域
+  // 撞号：clear("k") 得 1 → 飞行以 born=1 起飞 → 随后全局 clear 把 global 也变成 1，
+  // 而 keys.clear() 让 genOf("k") 落回 global=1 ⇒ 那次 pre-clear 的答案又被当成有效
+  // 缓存读出来，`clear()` 的承诺（clear 之前的飞行结果永不可再被读到）不成立。
+  // `seq` 只增不减，所以任何一次 bump 之后 genOf 都严格大于此前任何飞行捕获的值。
+  gens.seq += 1;
   if (key === undefined) {
-    gens.global += 1;
+    // 全局清理：高水位抬到 seq（所有没有 per-key 号的 key 都随之变高）。
+    gens.global = gens.seq;
     cache.clear();
     // A pre-clear flight must not be joinable by the next read either.
     inflight.clear();
+    // per-key 号必须清掉：留着它们会让 genOf 落到比 global **更低**的旧值上。
     gens.keys.clear();
     return;
   }
-  gens.keys.set(key, (gens.keys.get(key) ?? gens.global) + 1);
+  gens.keys.set(key, gens.seq);
   cache.delete(key);
   inflight.delete(key);
 }

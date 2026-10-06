@@ -92,7 +92,14 @@ function withReclassifiedStream(inner: object): object {
       // 里包；其余（image、resolveApiKey 等）原样透传。
       if (prop === "stream") {
         const stream = (target as { stream: (options: unknown) => AsyncIterableIterator<unknown> }).stream;
-        return (options: unknown) => reclassifyStream(stream(options));
+        // `stream.call(target, …)` 而不是裸调：peer 的 `PiAiAdapter.stream` 是**原型
+        // 方法**且解引用 `this`（`stream(options) { return this.streamWithSnapshot(
+        // options, this.current()); }`，见 dsh-llm-pi-ai 的 lib/index.js 与 adapter.d.ts）。
+        // 裸调时 `this` 是 undefined → 必抛 TypeError。当前宿主的分发只走
+        // `prepareCall(...).stream`（那条箭头在闭包里绑好了 this，下面分支处理），所以
+        // 这条分支今天走不到——但 `stream` 是 `LlmAdapter` 的公开抽象方法，任何未来
+        // 或第三方的调用方走到它，本 provider 的每一次请求都会立刻炸。
+        return (options: unknown) => reclassifyStream(stream.call(target, options));
       }
       if (typeof value === "function" && prop === "prepareCall") {
         const prepare = (target as { prepareCall: (...args: unknown[]) => unknown }).prepareCall;

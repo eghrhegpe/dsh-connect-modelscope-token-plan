@@ -93,12 +93,18 @@ export function LocalDailyCard({ snapshot, tt }: { snapshot: Snapshot; tt: Tt })
   // 绝不抛。曾经这里是裸解构，quota 一旦缺失就TypeError——而本文件头部就写着
   // 「形状不对的数据渲染『空』，绝不抛」，自己没做到。
   const quota = snapshot.quota;
-  const daily = quota?.daily ?? { usedLocal: 0 };
+  const daily = quota?.daily ?? { usedLocal: null };
   const perModel = Array.isArray(quota?.perModel) ? quota.perModel : [];
+  // 读不到 ≠ 0：null（Host 那一路软失败）渲染「—」并附一行提示，原因在面板上方的
+  // shapeWarnings 里（「daily source failed (…)」）。把「读不到」画成 0 会让操作者
+  // 以为今天没调用过——真相是他不知道。
+  const unknownUsed = !(typeof daily.usedLocal === "number" && Number.isFinite(daily.usedLocal));
+  const usedText = unknownUsed ? "—" : count(daily.usedLocal as number);
   return h(
     "div",
     { style: S.card },
-    h("div", { style: S.poolName }, format(tt("quota.headline"), { calls: count(daily.usedLocal), models: count(perModel.length) })),
+    h("div", { style: S.poolName }, format(tt("quota.headline"), { calls: usedText, models: count(perModel.length) })),
+    unknownUsed ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("quota.unavailable")) : null,
     h(ModelUsageTable, { rows: perModel, tt }),
     h("div", { style: S.trendLegend }, tt("quota.note"))
   );
@@ -132,16 +138,24 @@ export function ModelUsageTable({ rows, tt }: { rows: Array<{ modelId: string; c
 /** 近 N 天本地调用趋势（天桶；缺桶 = 该日 0 次，真实零）。 */
 export function TrendBars({ buckets, tt }: { buckets: TrendBucket[]; tt: Tt }): unknown {
   if (!Array.isArray(buckets) || buckets.length === 0) return h("div", { style: S.trendLegend }, tt("trend.none"));
-  const max = Math.max(0, ...buckets.map((b) => Math.max(0, b.calls)));
+  // 脏数据归一，与 ModelUsageTable 同口径：这里曾经直接 `Math.max(0, b.calls)` 与
+  // `String(b.calls)`——一条 NaN 桶既把 max 变成 NaN（所有条都不画），又把字面量
+  // "NaN" 画上屏。缺桶 = 该日 0 次是**真实零**，但 NaN 不是零，它是坏数据；归零是
+  // 唯一安全的画法（Number.isFinite 顺带挡掉 Infinity，`Number(x) || 0` 挡不住）。
+  const rows = buckets.map((bucket) => ({
+    dateKey: bucket.dateKey,
+    calls: Number.isFinite(bucket.calls) ? Math.max(0, bucket.calls) : 0
+  }));
+  const max = Math.max(0, ...rows.map((row) => row.calls));
   return h(
     "div",
     null,
-    buckets.map((bucket) => h(
+    rows.map((row) => h(
       "div",
-      { key: bucket.dateKey, style: S.trendRowHead },
-      h("span", { style: S.trendModel }, bucket.dateKey),
-      h("div", { style: { ...S.trendBar, flex: "1", marginLeft: 10 }, "aria-hidden": "true" }, max > 0 && bucket.calls > 0 ? h("div", { style: { ...S.barFill, width: `${(bucket.calls / max) * 100}%` } }) : null),
-      h("span", { style: S.quotaUsed }, String(bucket.calls))
+      { key: row.dateKey, style: S.trendRowHead },
+      h("span", { style: S.trendModel }, row.dateKey),
+      h("div", { style: { ...S.trendBar, flex: "1", marginLeft: 10 }, "aria-hidden": "true" }, max > 0 && row.calls > 0 ? h("div", { style: { ...S.barFill, width: `${(row.calls / max) * 100}%` } }) : null),
+      h("span", { style: S.quotaUsed }, String(row.calls))
     )),
     h("div", { style: S.trendLegend }, tt("trend.legend"))
   );
@@ -193,11 +207,16 @@ export function TokenForm({ token, busy, error, onSave, onForget, onVerify, veri
   return h(
     "div",
     null,
-    h("div", { style: S.quotaUsed }, format(tt("token.status"), {
-      present: token?.present ? tt("present.yes") : tt("present.no"),
-      source: tt(sourceKey),
-      valid: tt(validKey)
-    })),
+    // 读不到凭据存储时**不**渲染「状态：无（来源 无）」——那是对「没配令牌」的断言，
+    // 而我们并不知道（见 wire.ts TokenStatus.readError）。这一行代替它，并说清它不
+    // 代表没配令牌。
+    token?.readError
+      ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, format(tt("token.readError"), { error: token.readError }))
+      : h("div", { style: S.quotaUsed }, format(tt("token.status"), {
+          present: token?.present ? tt("present.yes") : tt("present.no"),
+          source: tt(sourceKey),
+          valid: tt(validKey)
+        })),
     token?.ephemeral ? h("div", { style: S.formNote }, tt("token.ephemeral")) : null,
     h(
       "div",

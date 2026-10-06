@@ -47,7 +47,7 @@ export const zh = {
 
   "quota.headline": "今日 {calls} 次 · {models} 个模型",
   "quota.note": "本地口径：只统计经本插件的调用，直连魔搭的其它客户端不计入；消耗总量以官方魔粒余额为准。",
-  "quota.unavailable": "本地计数本次读不到：{error}",
+  "quota.unavailable": "本地计数本次读不到（原因见上方提示）",
 
   // 目录表与其行内 usage 试调已删除（见 panel-page.ts modelsBody 注释），
   // 所以只留 token 管理用的零额度 validity probe；models.none / models.loading
@@ -156,7 +156,7 @@ export const en: typeof zh = {
 
   "quota.headline": "Today {calls} calls · {models} models",
   "quota.note": "Local scope: only calls through this plugin are counted; clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
-  "quota.unavailable": "Local counters could not be read this time: {error}",
+  "quota.unavailable": "Local counters could not be read this time (reason in the notices above)",
 
   // The catalog table and its per-row usage probe were removed (see the
   // panel-page.ts modelsBody comment), so models.none / models.loading were

@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply } from "../src/host/index.ts";
+import { buildSnapshotBody } from "../src/host/snapshot-aggregate.ts";
 import { name, resolveSettings } from "../src/host/host-config.ts";
 import { registerProbeRoute } from "../src/host/routes/probe.ts";
 import { SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH } from "../src/host/routes/paths.ts";
@@ -394,6 +395,67 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   assert.equal(unreadable.body.ok, true, "令牌状态读失败不得把已成功的探测报成失败");
   assert.equal(unreadable.body.tokenState, null, "读不到就回落 null（与失败分支的 .catch 同形）");
   assert.equal(unreadable.events.length, 0, "更不得往事件流写一条假 error");
+}
+
+// ── 聚合层不得伪造值：读不到就说读不到 ──
+//
+// token 状态读失败曾被伪造成 `{present:false, source:"none"}`，还顺手把余额错误压成
+// null；天桶读失败被渲染成真实的「今日 0 次」。两者都违反 wire.ts 的 null≠0 基线：
+// 0 与「没有令牌」都是**可信的日常值**，把「读不到」画成它们，操作者会据此做错判断
+// （以为今天没调用过 / 以为自己没配令牌）。这里直接驱动聚合器，用会拒绝的桩造出那两
+// 条失败路径（挂载的真实 store 造不出「读的时候抛」）。
+{
+  const body = await buildSnapshotBody({
+    settings: resolveSettings({}).settings,
+    tokenStore: { state: async () => { throw new Error("credentials service unavailable"); } },
+    usageStore: {
+      daily: async () => { throw new Error("usage.json unreadable"); },
+      perModelToday: async () => [],
+      trend: async () => [],
+      events: async () => [],
+      anomaly: () => null
+    },
+    inference: {
+      fetchModels: async () => ({ ids: [], entries: [] }),
+      fetchBalance: async () => { throw new Error("balance endpoint refused"); }
+    },
+    providerStore: { enabled: async () => null, enabledIds: async () => [], versionNote: async () => null },
+    publisher: { state: { enabledIds: [], llmAvailable: false, registered: false, error: null } },
+    logger: { warn: () => {} }
+  });
+
+  assert.equal(body.quota.daily.usedLocal, null, "本地计数读不到 → null，绝不是 0");
+  assert.equal(body.token.present, false, "形状保持可渲染");
+  assert.equal(typeof body.token.readError, "string", "令牌状态读失败必须显式说明，而不是静默 present:false");
+  assert.notEqual(body.balance.error, null, "令牌状态读不到时不得把余额错误压成 null（我们并不知道有没有令牌）");
+  assert.ok(body.shapeWarnings.some((w) => w.startsWith("token source failed")), "警告按来源标注（token 不是「用量源」）");
+  assert.ok(body.shapeWarnings.some((w) => w.startsWith("daily source failed")), "警告按来源标注");
+}
+
+// ── coalesced 缓存：clear() 之后的 pre-clear 答案不得复活 ──
+//
+// 世代号必须取自**一条**单调序列。曾经 per-key 与 global 各自 +1，两个数值域会撞号：
+// 先 clear("k") 得 1 → 飞行以 born=1 起飞 → 随后全局 clear 把 global 也变成 1，而
+// keys.clear() 让 genOf("k") 落回 1 ⇒ 那次 clear 之前的答案被当成有效缓存读出来，
+// 与 clear() 自己的承诺（clear 之前的飞行结果永不可再被读到）相反。
+{
+  const { createCoalescedFetch, clearCoalescedFetch } = await import("../src/host/coalesced-fetch.ts");
+  const cache = new Map();
+  const inflight = new Map();
+  const fetch = createCoalescedFetch({ cache, inflight });
+
+  clearCoalescedFetch(cache, inflight, "k");     // 先抬高该键的世代号
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const pre = fetch.read("k", async () => { await gate; return "PRE-CLEAR"; }, 60_000);
+  clearCoalescedFetch(cache, inflight);          // 紧接着全局 clear（旧代码在这里撞号）
+  release();
+  assert.equal(await pre, "PRE-CLEAR", "在途调用自身仍拿到它要的答案（clear 不取消在途）");
+
+  let produced = 0;
+  const after = await fetch.read("k", async () => { produced += 1; return "FRESH"; }, 60_000);
+  assert.equal(after, "FRESH", "clear 之后的读必须重取：pre-clear 的答案不得复活");
+  assert.equal(produced, 1, "确实重新拉了一次");
 }
 
 console.log("routes.test.mjs: all checks passed");

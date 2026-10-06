@@ -351,4 +351,37 @@ for (const suffix of new Set(clientSuffixes)) {
   );
 }
 
+// §5b TrendBars：脏数据（NaN/Infinity）不得把字面量 "NaN" 画上屏。
+//
+// 曾经 `Math.max(0, b.calls)` 对 NaN 仍是 NaN（于是 max 变 NaN、所有条都不画），而
+// `String(b.calls)` 直接把 "NaN" 渲染出来。同文件的 ModelUsageTable 一直有
+// `Number(r.calls) || 0` 守卫，这里补上同口径的归一。
+{
+  const zhOnly = (key) => zh[key];
+  const dirty = panel.components.TrendBars({
+    buckets: [
+      { dateKey: "2026-10-04", calls: Number.NaN },
+      { dateKey: "2026-10-05", calls: Number.POSITIVE_INFINITY },
+      { dateKey: "2026-10-06", calls: 3 }
+    ],
+    tt: zhOnly
+  });
+  const text = JSON.stringify(dirty);
+  assert.ok(!text.includes("NaN"), "NaN 不得上屏");
+  assert.ok(!text.includes("Infinity"), "Infinity 不得上屏");
+  assert.ok(text.includes("2026-10-06"), "正常天桶照常渲染");
+}
+
+// §5c LocalDailyCard：读不到 ≠ 0。usedLocal 为 null 时渲染「—」并提示，不得画成
+// 「今日 0 次」——0 是可信的日常值，操作者会据此判断今天没调用过。
+{
+  const zhOnly = (key) => zh[key];
+  const snapshotOf = (usedLocal) => ({ quota: { daily: { usedLocal }, perModel: [], countingNote: "local-counting" } });
+  const unknown = JSON.stringify(panel.components.LocalDailyCard({ snapshot: snapshotOf(null), tt: zhOnly }));
+  assert.ok(unknown.includes("—"), "读不到渲染「—」");
+  assert.ok(!unknown.includes("今日 0 次"), "读不到不得画成 0 次");
+  const known = JSON.stringify(panel.components.LocalDailyCard({ snapshot: snapshotOf(0), tt: zhOnly }));
+  assert.ok(known.includes("今日 0 次"), "真实 0 仍照实渲染 0");
+}
+
 console.log("panel.test.mjs: all checks passed");

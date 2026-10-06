@@ -153,4 +153,31 @@ assert.equal((await future.state()).readOnly, true);
 // §8 localDateKey 是本地时区日历天。
 assert.equal(localDateKey(new Date(2026, 9, 4)), "2026-10-04");
 
+// §9 两个 store 实例共用同一个状态目录（两个 Host 进程是同一件事）：写基线必须来自
+// **磁盘上的当前值**，不能是各自内存里的陈旧快照。
+//
+// 曾经写路径是 `loaded ? current : …`——首次落盘之后再也不读盘，于是 A 的第二次写会用
+// 自己那份旧载荷把 B 刚写下的**整份**数据覆盖掉：丢的不只是计数，还有 events 与趋势
+// 天桶，而且没有任何日志。provider-store 的 patchPayload 一直是「临界区内重新读盘」，
+// 这条用例把 usage-store 拉回同一条纪律。
+{
+  const shared = "cross-instance";
+  const a = makeStore({ profile: shared });
+  const b = makeStore({ profile: shared });
+  const sharedFile = join(home, "state", shared, PLUGIN_ID, "usage.json");
+
+  await a.recordCall({ modelId: "a/A", tokens: 1, at: clock });
+  await b.recordCall({ modelId: "b/B", tokens: 7, at: clock });   // B 首次写：读盘合并（旧代码也对）
+  await a.recordCall({ modelId: "a/A", tokens: 1, at: clock });   // A 第二次写：基线若取内存就会覆盖 B
+
+  const sharedOnDisk = JSON.parse(readFileSync(sharedFile, "utf8"));
+  assert.deepEqual(
+    Object.keys(sharedOnDisk.models).sort(),
+    ["a/A", "b/B"],
+    "B 写下的模型不得被 A 的陈旧基线整份覆盖"
+  );
+  assert.equal(sharedOnDisk.models["a/A"].calls, 2, "A 自己的计数照常累加");
+  assert.equal(sharedOnDisk.models["b/B"].tokens, 7, "B 的计数保持");
+}
+
 console.log("usage-store.test.mjs: all checks passed");

@@ -236,7 +236,10 @@ export function withUsageObserver(inner: object, sinks: UsageSinks): object {
       const value = Reflect.get(target, prop, receiver);
       if (prop === "stream") {
         const stream = (target as { stream: (options: unknown) => AsyncIterableIterator<unknown> }).stream;
-        return typeof stream === "function" ? (options: unknown) => wrapStream(stream, options) : value;
+        // 绑定后再传，理由与 llm-adapter-core 同款：peer 的 `stream` 是原型方法、解引用
+        // `this`，裸调必抛 TypeError。`bind` 对本来就是箭头函数的 `stream`（内层已包过的
+        // 重分类 Proxy）无害，所以这一层不必区分目标的形态。
+        return typeof stream === "function" ? (options: unknown) => wrapStream(stream.bind(target), options) : value;
       }
       if (typeof value === "function" && prop === "prepareCall") {
         const prepare = (target as { prepareCall: (...args: unknown[]) => unknown }).prepareCall;

@@ -265,4 +265,30 @@ async function* of(chunks) {
   assert.equal(r11.events[0].kind, "rate_limit");
 }
 
+{
+  // `stream` 是**原型方法且解引用 this** 时必须绑定调用。peer 的 `PiAiAdapter.stream`
+  // 正是这个形状：`stream(options) { return this.streamWithSnapshot(options,
+  // this.current()); }`（见 dsh-llm-pi-ai 的 lib/index.js 与 adapter.d.ts）。观察层
+  // 曾经写成 `const stream = target.stream; … stream(options)`——裸调用，`this` 是
+  // undefined，一旦有调用方走 `adapter.stream(...)` 就必抛 TypeError（不是降级，是每
+  // 一次请求都炸）。宿主当前的分发只走 `prepareCall(...).stream`（下面那条已覆盖），
+  // 所以这条分支在生产里还没被走到——正因如此才需要一条用例守着它。
+  class PrototypeStreamAdapter {
+    constructor() { this.tag = "this-was-bound"; }
+    stream() {
+      return of([
+        { type: "usage", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } },
+        { type: "text-delta", index: 0, text: this.tag },
+      ]);
+    }
+  }
+  const r7b = recorder();
+  const wrapped = withUsageObserver(new PrototypeStreamAdapter(), r7b.sinks);
+  const out = [];
+  for await (const chunk of wrapped.stream({ model: "m/x" })) out.push(chunk.type);
+  assert.deepEqual(out, ["usage", "text-delta"], "流经观察层原样透出（裸调会在进入前就抛）");
+  assert.equal(r7b.calls.length, 1, "记账照常");
+  assert.equal(r7b.calls[0].tokens, 2);
+}
+
 console.log("usage-observer.test.mjs: all assertions passed");

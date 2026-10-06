@@ -234,7 +234,13 @@ export function createFileUsageStore({ name, profile = null, trendDays = 14, max
       // diskVersionBlocksWrites 的注释：这个 await 之后才可能发生写入，所以
       // 判据必须落在同一个 await 链上，中间不能隔任何东西。
       if (await diskVersionBlocksWrites()) return;
-      const fromDisk = loaded ? current : ((await cache.read()) ?? null);
+      // 写基线**每次都从磁盘重读**（readThrough 直读，不走 TTL 缓存），也不复用内存里
+      // 的 `current`：两个 Host 进程可以共用一个状态目录（本仓自己的前提，见
+      // state-store / provider-store 的文件头），而把基线钉在内存里的写法会让后写者用
+      // 一整份陈旧载荷覆盖对方——丢的不只是计数，还有 events 与趋势天桶。这与
+      // provider-store 的 patchPayload 是同一条纪律：读-改-写必须在临界区里重新读。
+      // 读盘失败/损坏时回退内存态：宁可退回旧行为，也不让一次坏读把计数清零。
+      const fromDisk = (await readThrough()) ?? (loaded ? current : null);
       const payload: UsagePayload = fromDisk ?? { version: STATE_VERSION, days: {}, models: {}, events: [] };
       mutate(payload);
       current = payload;

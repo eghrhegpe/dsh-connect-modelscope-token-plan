@@ -54,11 +54,13 @@ export interface SnapshotRead {
 function emptyBlock(key: string): unknown {
   switch (key) {
     case "token":
-      return { present: false, source: "none", valid: null, checkedAt: null, ephemeral: true };
+      return { present: false, source: "none", valid: null, checkedAt: null, ephemeral: true, readError: null };
     case "balance":
       return { available: null, total: null, frozen: null, fetchedAt: null, error: null };
     case "quota":
-      return { daily: { usedLocal: 0 }, perModel: [], countingNote: "local-counting" };
+      // 缺键 = **未知**，不是「零次」：usedLocal 用 null，面板渲染「—」，与 Host
+      // 软失败时的形状同构（wire.ts DailyUsage：null = 没读到，0 = 确实为零）。
+      return { daily: { usedLocal: null }, perModel: [], countingNote: "local-counting" };
     case "events":
       return [];
     case "trend":
