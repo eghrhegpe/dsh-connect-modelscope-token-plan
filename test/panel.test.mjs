@@ -318,4 +318,37 @@ for (const suffix of new Set(clientSuffixes)) {
   assert.ok(calls.length >= 2, "挂载副作用已登记");
 }
 
+// §8 写路径判定收口：`ok !== true` 一律算失败，且 Host 给的原因必须透出来。
+//
+// 「忘掉令牌」曾经整条丢掉 body.ok：Host 侧的 forget 失败是**刻意传播**的
+// （凭据文件只读时 ms-auth 抛错，其文件头写着「谎报成功比失败更糟——用户以为凭据
+// 已删干净」），客户端却直接往下走，界面上表现为「什么都没发生」。三个写回调收敛到
+// 同一个判据之后，这条分支不会再各自漂移。
+{
+  const { writeFailure } = panel.helpers;
+  assert.equal(typeof writeFailure, "function", "writeFailure 必须能从 helpers 测到");
+  assert.equal(writeFailure({ ok: true }, "fallback"), null, "ok:true → 成功");
+  assert.equal(writeFailure(null, "fallback")?.message, "fallback", "没有 body（非 JSON）→ 兜底文案");
+  assert.equal(
+    writeFailure({ ok: false, error: "credentials file is read-only" }, "fallback")?.message,
+    "credentials file is read-only",
+    "域失败必须把 Host 的原因透出来（这正是原先被丢掉的那条）"
+  );
+  assert.equal(writeFailure({ ok: false }, "fallback")?.message, "fallback", "没有原因字符串 → 兜底");
+  assert.equal(writeFailure({ ok: false, error: "   " }, "fallback")?.message, "fallback", "空白原因 → 兜底");
+}
+
+// §8b 三个写回调必须真的走统一判据——只钉住 writeFailure 本身不够：这次的缺陷形态
+// 是「有一条路径**绕过**了它」（忘掉令牌直接 await postJson 就往下走）。
+{
+  const panelSrc = readFileSync(new URL("../src/client/panel-page.ts", import.meta.url), "utf8");
+  assert.match(panelSrc, /postWrite\(path, payload\)/, "provider 开关/清单写入必须走 postWrite");
+  assert.match(panelSrc, /postWrite\(TOKEN_PATH/, "保存令牌必须走 postWrite");
+  assert.match(panelSrc, /postWrite\(TOKEN_FORGET_PATH/, "忘掉令牌必须走 postWrite——它正是原先整条丢掉 body.ok 的那条");
+  assert.ok(
+    !/await postJson\(TOKEN_FORGET_PATH/.test(panelSrc),
+    "忘掉令牌不得再直接 postJson（那会让 Host 刻意传播的失败在界面上变成「什么都没发生」）"
+  );
+}
+
 console.log("panel.test.mjs: all checks passed");

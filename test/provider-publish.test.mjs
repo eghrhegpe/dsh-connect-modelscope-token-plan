@@ -348,4 +348,122 @@ function makePublisher({ llm, panel = true, gate } = {}) {
   assert.equal(llm.adapters.has("modelscope-token-plan"), false, "适配器已从 Host 摘下");
 }
 
+// §11 回滚成功之后，`error` 只在「请求的 offer 确实没兑现」时才留。
+//
+// 现场：注册失败 → 回滚恢复旧对。若旧对服务的 offer 与本次请求的 offer **相同**
+// （重建同一份 offer 时注册抖了一下），留着 error 会让两处空转守卫永远跳过不了：
+// 每个轮询周期把同一对摘下再挂上（fix B 明确要避免的「期间在途请求可能被打断」），
+// 而面板还挂着一个已经不成立的错误。offer **不同**时错误必须留——那正是「你保存的
+// 清单没生效」这件操作者必须知道的事。两个方向都在这里钉住。
+{
+  const adapters = new Map();
+  let failTag = null;                     // 下一次构建出的适配器命中该 tag → 注册时抛一次
+  const llm = {
+    service: {
+      registerAdapter(providerIds, adapter) {
+        if (failTag !== null && adapter?.tag === failTag) {
+          failTag = null;                 // 只抖一次
+          throw new Error("transient registration failure");
+        }
+        const owned = new Set(providerIds);
+        for (const p of owned) adapters.set(p, adapter);
+        return () => { for (const p of owned) adapters.delete(p); };
+      }
+    }
+  };
+  const publisher = createProviderPublisher({
+    settings: { registerProvider: true },
+    panelSwitch: async () => true,
+    getLlm: () => llm.service,
+    loadAdapterModule: async () => ({
+      createModelScopeAdapter: async ({ enabledIds }) => ({
+        adapter: { tag: (enabledIds ?? []).join(",") },
+        providerIds: ["modelscope-token-plan"]
+      })
+    }),
+    resolveApiKey: async () => "ms-3f2a1b8c1111222233334444555566"
+  });
+
+  // 1) 先让 ["a"] 稳稳注册上。
+  assert.equal((await publisher.publish(ENTRIES, ["a"], [])).ok, true, "offer A 注册成功");
+  assert.equal(publisher.state.error, null);
+
+  // 2) 请求 ["b"] 时抖一下 → 回滚恢复 ["a"]；这次请求**没兑现**，error 必须留。
+  failTag = "b";
+  const second = await publisher.publish(ENTRIES, ["b"], []);
+  assert.equal(second.ok, false, "注册抖动 → ok:false");
+  assert.equal(publisher.state.registered, true, "旧对已恢复");
+  assert.deepEqual(publisher.state.enabledIds, ["a"], "目录身份回到恢复后的那份");
+  assert.notEqual(publisher.state.error, null, "请求的 offer 没兑现 → error 必须留着");
+  assert.equal(adapters.get("modelscope-token-plan")?.tag, "a", "Host 里服务的仍是旧对");
+
+  // 3) 请求 ["a"]（= 正在服务的 offer）时再抖一下 → 回滚后 offer 一致，error 必须清。
+  failTag = "a";
+  const third = await publisher.publish(ENTRIES, ["a"], []);
+  assert.equal(third.ok, false, "这一次注册同样失败");
+  assert.deepEqual(publisher.state.enabledIds, ["a"], "回滚后服务的 offer 仍是 a");
+  assert.equal(
+    publisher.state.error,
+    null,
+    "回滚后服务的 offer 与请求一致 → error 必须清（否则空转守卫永远跳过不了）"
+  );
+
+  // 4) 再请求同一份 offer：必须走空转跳闸，而不是又摘又挂。
+  const fourth = await publisher.publish(ENTRIES, ["a"], []);
+  assert.equal(fourth.ok, true);
+  assert.equal(fourth.skipped, true, "offer 未变且无错误 → 空转跳过（fix B 要的正是这个）");
+}
+
+// §12 恢复旧对时若「挂目录行」抛错，必须把已成功的注册 release 掉。
+//
+// `registerProviderPair` 的次序是**先 registerAdapter 再 registerConfigurableProviders**，
+// 所以后者抛错时 `state.releaseAdapter` 已经握着一次**成功的**注册。原先那个 catch
+// 只清 `built`/`registered`，于是出现「面板说不注册、Host 里却还在路由」——绕开的是
+// release 路径，不是注册本身。这里把那次失败真实造出来。
+{
+  const adapters = new Map();
+  let dirCalls = 0;
+  const llm = {
+    service: {
+      registerAdapter(providerIds, adapter) {
+        if (adapter?.tag === "new") throw new Error("the new pair is refused");
+        const owned = new Set(providerIds);
+        for (const p of owned) adapters.set(p, adapter);
+        return () => { for (const p of owned) adapters.delete(p); };
+      },
+      registerConfigurableProviders() {
+        dirCalls += 1;
+        if (dirCalls >= 2) throw new Error("directory row registration refused");   // 只有回滚那次抛
+        return () => {};
+      }
+    }
+  };
+  const publisher = createProviderPublisher({
+    settings: { registerProvider: true },
+    panelSwitch: async () => true,
+    getLlm: () => llm.service,
+    loadAdapterModule: async () => ({
+      createModelScopeAdapter: async ({ enabledIds }) => ({
+        adapter: { tag: (enabledIds ?? []).join(",") },
+        providerIds: ["modelscope-token-plan"]
+      })
+    }),
+    resolveApiKey: async () => "ms-3f2a1b8c1111222233334444555566"
+  });
+
+  const up = await publisher.publish(ENTRIES, ["a"], []);
+  assert.equal(up.ok, true, "先注册一对成功的（目录行第 1 次调用成功）");
+  assert.equal(adapters.size, 1);
+
+  const down = await publisher.publish(ENTRIES, ["new"], []);
+  assert.equal(down.ok, false, "新对被拒 → 失败");
+  assert.equal(publisher.state.registered, false, "恢复也失败 → 登记为未注册");
+  assert.equal(
+    publisher.state.releaseAdapter,
+    null,
+    "恢复失败路径必须 release：否则 releaseAdapter 握着一只活的注册却对面板说未注册"
+  );
+  assert.equal(adapters.size, 0, "Host 里不得留下任何适配器（面板口径与 Host 事实必须一致）");
+}
+
 console.log("provider-publish.test.mjs: all checks passed");

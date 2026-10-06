@@ -2,7 +2,7 @@
 // publish 队列/闸/回滚三条承重语义、provider 路由形状。peer-free：不 import
 // 任何 Host peer，裸 node 直接跑。
 import { strict as assert } from "node:assert";
-import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,7 +14,7 @@ import {
   toPiDescriptor, filterByEnabled, isModelEnabled, buildDescriptors,
   rosterWithAvailability, summarizeCatalog
 } from "../src/host/llm-models.ts";
-import { createFileProviderStore, normalizeEnabledIds, PROVIDER_VERSION, KNOWN_PROVIDER_VERSIONS, isKnownProviderVersion } from "../src/host/provider-store.ts";
+import { createFileProviderStore, normalizeEnabledIds, resolveEnabledIds, PROVIDER_VERSION, KNOWN_PROVIDER_VERSIONS, isKnownProviderVersion } from "../src/host/provider-store.ts";
 import { name } from "../src/host/host-config.ts";
 import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_SHAPE_ERROR } from "../src/host/publish-core.ts";
 
@@ -478,6 +478,60 @@ import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_S
   assert.equal(state.registered, true, "恢复旧对后仍 registered");
   assert.equal(state.built, oldBuilt, "恢复旧对 identity");
   assert.match(state.error, /did not return/, "失败原因进 state.error");
+}
+
+// §9 允许清单的**唯一判据**：可读清单（含空清单）优先，只有读抛错才回退内存。
+//
+// 三处消费者曾各写一套，而轮询侧那套把「空清单」读成「没有答案」：操作者按
+// versionNote 的建议删掉 provider.json（正是它给的 reset 手段）之后，面板说
+// allowed:"all"（enabledCount 数上全部模型），轮询却继续按内存里的旧清单注册——
+// 面板与 Host 对「正在提供什么」各说一套。判据收进 resolveEnabledIds 一份，这里把
+// 它的每一支钉住，尤其「空清单」那一支（漂移就发生在这里）。
+{
+  assert.deepEqual(resolveEnabledIds(["a", "b"], ["x"]), ["a", "b"], "可读清单优先");
+  assert.deepEqual(resolveEnabledIds([], ["x"]), [], "空清单是「不过滤」，不是「没有答案」——这一支曾漂移");
+  assert.deepEqual(resolveEnabledIds([HIDE_ALL_MODELS], ["x"]), [HIDE_ALL_MODELS], "哨兵清单同样优先");
+  assert.deepEqual(resolveEnabledIds(null, ["x"]), ["x"], "读抛错（null）才回退内存");
+  assert.deepEqual(resolveEnabledIds(undefined, []), [], "两边都没有 → 空");
+  assert.deepEqual(resolveEnabledIds("nonsense", "nonsense"), [], "形状不对一律读作空");
+}
+
+// §10 「存在但读不出」的状态文件必须让写守卫**拒写**（ADR-006 不得 fail-open）。
+//
+// readStateVersion 只把 ENOENT 读作「没有文件」；其余 fs 错误抛出来，写守卫据此
+// 拒绝覆盖。造法同 state-store.test.mjs：目录占住文件路径。
+{
+  const dir = mkdtempSync(join(tmpdir(), "ms-provider-unreadable-"));
+  const blocked = join(dir, "provider.json");
+  mkdirSync(blocked);
+  const store = createFileProviderStore({ dir, logger: { warn: () => {} } });
+  let refusal = null;
+  await store.save(true).catch((error) => { refusal = error; });
+  assert.notEqual(refusal, null, "读不出 provider.json 时保存必须失败，而不是把它覆盖掉");
+  assert.match(refusal.message, /refusing to overwrite/, "拒绝理由要写明是拒写");
+  assert.equal(existsSync(blocked), true, "原路径未被破坏");
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// §11 三处消费者必须**真的用上**共用判据。
+//
+// 上一节钉的是 resolveEnabledIds 的分支；但这次的缺陷形态是「同一个问题在三处各写
+// 一套」，所以还要钉住三个调用点没有偷偷写回自己的规则——尤其是 index.ts 那条
+// `stored.length > 0`（把可读的空清单当成「没有答案」）。源码级断言在本仓已有先例
+// （credentials.test.mjs 钉脱敏表达式），这里用同一种手法守住这一行。
+{
+  for (const file of ["src/host/index.ts", "src/host/snapshot-aggregate.ts", "src/host/routes/provider.ts"]) {
+    const text = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+    assert.ok(
+      text.includes("resolveEnabledIds("),
+      `${file} 必须走共用的 resolveEnabledIds，不得自带一套空清单规则`
+    );
+  }
+  const index = readFileSync(new URL("../src/host/index.ts", import.meta.url), "utf8");
+  assert.ok(
+    !index.includes("Array.isArray(stored) && stored.length > 0"),
+    "index.ts 不得再把「空清单」读成「没有答案」（那正是面板与轮询各说一套的来源）"
+  );
 }
 
 console.log("provider.test.mjs: all checks passed");

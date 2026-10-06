@@ -308,7 +308,7 @@ export function summarizeCatalog(entries: unknown): { modelCount: number; vision
      emit: (e) => ctx.emit?.(e), logger: ctx.logger })`；
   3. `registerRoutes(ctx, wiring)` 里加 provider 路由；
   4. `ctx.effect` 里注册**目录轮询 + seed** 的副作用（见 fix A/C 与 fix B）：
-     - 挂载时立即 oid runPoll()（fire-and-forget）：一次 inference.fetchModels() + 读**落盘**的允许清单（providerStore.enabledIds()，读不到回退内存 publisher.state.enabledIds），再 publish——重启的 Host 用用户保存的清单注册而非空清单（见 fix A/C）；
+     - 挂载时立即 oid runPoll()（fire-and-forget）：一次 inference.fetchModels() + 读**落盘**的允许清单（`providerStore.enabledIds()` 经共用的 `resolveEnabledIds` 解析：可读清单优先、**空清单 = 不过滤**，只有读抛错才回退内存 `publisher.state.enabledIds`），再 publish——重启的 Host 用用户保存的清单注册而非空清单（见 fix A/C）；
      - setInterval 轮询 unPoll()（间隔取 pollSeconds）；publishProviderOnce 内部按 catalogSignature / quotaSignatureOf 比对，未变则空转不重建 provider 对（见 fix B）；开关翻转、清单保存由 provider 路由直接 publish；
        路由直接 `publish`；
      - `ctx.effect` 的清理函数里 `clearInterval` + `publisher.dispose()` +

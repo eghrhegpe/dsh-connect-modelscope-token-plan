@@ -24,7 +24,7 @@ import { BalanceCard, EventsList, LocalDailyCard, ModelUsageTable, ProviderCard,
 import { PanelPage } from "./panel-page.ts";
 import { usePollingInterval } from "./use-polling-interval.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
-import { getJson, postJson } from "./http.ts";
+import { getJson, postJson, writeFailure } from "./http.ts";
 
 function clientFactory(loaderRequire: (specifier: string) => unknown): {
   inject: string[];
@@ -53,6 +53,7 @@ function clientFactory(loaderRequire: (specifier: string) => unknown): {
       useSnapshotPolling,
       getJson,
       postJson,
+      writeFailure,
     }),
     components: Object.freeze({
       BalanceCard,

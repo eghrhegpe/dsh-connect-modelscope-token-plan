@@ -292,6 +292,10 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
     // swap（连同背后的 rollback）是共享机制：失败的重新注册必须恢复先前在服务的对。
     // 在这边被恢复的是目录身份——entries、允许清单与额度耗尽集合（不能还指着一个
     // 我们没能发布的集合）。
+    //
+    // `requestedSignature` 必须在 swap **之前**取：此刻 state.entries/enabledIds 还是
+    // 本次请求的值（上一段刚写入），swap 失败时 onRollback 会把它们换成恢复后的那份。
+    const requestedSignature = catalogSignature(state.entries, state.enabledIds);
     const result = swapRegistration({
       llm,
       built,
@@ -310,6 +314,14 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
     // 内部调用导出的 catalogSignature/quotaSignatureOf，不会漂移）。失败的 publish 上
     // onRollback 已经恢复了之前的字段，这里同步的也是恢复后的正确基准。
     syncSignaturesAfterPublish(state);
+    // 回滚成功、且**回滚后在服务的 offer 与本次请求的 offer 相等**时，error 必须清掉：
+    // 这说明前面那次成功注册的正是同一份 offer，此刻没有任何未兑现的承诺，而
+    // error!==null 只会让两处空转守卫永远跳过不了——每个轮询周期把同一对摘下再挂上
+    // （fix B 明确要避免的「期间在途请求可能被打断」），面板还挂着一个已不成立的错误。
+    // offer **不同**时错误必须留着：那正是「你保存的清单没生效」这件操作者要知道的事。
+    if (result.ok === false && state.registered === true && state.signature === requestedSignature) {
+      state.error = null;
+    }
     return result;
   };
 

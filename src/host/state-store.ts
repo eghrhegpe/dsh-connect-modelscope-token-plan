@@ -389,22 +389,49 @@ export async function readStateJson(file: string) {
 }
 
 /**
- * Read the persisted `version` field of one state file, or `null` when it is
- * absent, unreadable, non-JSON, or carries no numeric `version`.
+ * Read the persisted `version` field of one state file.
  *
  * This is the ADR-006 write-side guard's probe: a writer must know what it is
- * about to overwrite. "No version" is the same as "no record" (nothing to
- * protect), while a NUMERIC version this build does not recognise means the
- * file was written by a NEWER build and must not be clobbered.
+ * about to overwrite. Three outcomes, and the difference between the first two
+ * is load-bearing:
+ *
+ *   - `null` — ABSENT (ENOENT), non-JSON, or carrying no numeric `version`.
+ *     Nothing here the guard could protect, so a write belongs: a corrupt file
+ *     must stay replaceable, or an operator would be stuck with it forever.
+ *   - a number — the version on disk. One this build does not recognise was
+ *     written by a NEWER build and must not be clobbered.
+ *   - **throws** — the path EXISTS but could not be read (EACCES/EBUSY/EIO, or a
+ *     directory sitting at the path). The guard must read that as "there is
+ *     something here and I cannot see it", never as "nothing stored": collapsing
+ *     it into `null` made the anti-clobber guard fail OPEN, so the very
+ *     downgrade it exists to prevent came through that seam.
  *
  * Kept apart from `readStateJson` on purpose: the guard needs the version even
- * when the rest of the payload is unparseable, and it must not depend on any
- * store's parse semantics.
+ * when the rest of the payload is unparseable, it must not depend on any store's
+ * parse semantics, and it must NOT inherit the read path's deliberate "anything
+ * unrecognised reads as not set" permissiveness — that permissiveness is right
+ * for a reader and wrong for a writer.
  * @param {string} file - the state file path.
- * @returns {Promise<number|null>} the persisted version, or `null`.
+ * @returns {Promise<number|null>} the persisted version, or `null` when absent/unusable.
+ * @throws when the path exists but cannot be read — callers must refuse to write.
  */
 export async function readStateVersion(file: string): Promise<number | null> {
-  const raw = await readStateJson(file);
+  let text: string;
+  try {
+    text = await readFile(file, "utf8");
+  } catch (error) {
+    // ENOENT 是唯一「没有东西要保护」的 fs 错误（写是恢复手段）。其余一律抛给
+    // 写守卫：readFile 的其它 errno 都意味着文件在那儿而我们看不见它。
+    if ((error as { code?: unknown } | null)?.code === "ENOENT") return null;
+    throw error;
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    // 损坏 / 半截 JSON：没有可保护的版本号，允许覆盖（这也是操作者的恢复手段）。
+    return null;
+  }
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
   const version = (raw as Record<string, unknown>).version;
   return typeof version === "number" ? version : null;

@@ -17,7 +17,7 @@ import { strict as assert } from "node:assert";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeStateFile, temporaryOf, ensureStateDir, STATE_READ_TTL_MS, createStateReadCache } from "../src/host/state-store.ts";
+import { writeStateFile, temporaryOf, ensureStateDir, STATE_READ_TTL_MS, createStateReadCache, readStateVersion } from "../src/host/state-store.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "state-store-"));
 const file = join(dir, "state.json");
@@ -124,6 +124,40 @@ const file = join(dir, "state.json");
   assert.equal(await nullCache.read(), null, "再次读仍是 null");
   assert.ok(nullReads >= 1, "至少读过一次");
   assert.ok(STATE_READ_TTL_MS >= 1, "默认 TTL 是正数（0 会让每次都重读盘）");
+}
+
+// §6 版本探针的**三态**：「不存在」可写、「读不出」必须抛。
+//
+// 它是 ADR-006 写守卫的唯一输入，而守卫的全部意义在于「不覆盖读不懂的文件」。
+// 曾经它把所有读异常都折成 null，于是「文件在那儿、只是读不出来」（EACCES /
+// Windows 占用 / EIO）被判成「没有文件、可以写」——守卫在自己的方向上 fail-open，
+// 它要防的那次降级覆盖正好从这条缝进来。三支必须分开钉，尤其不能把第三支并回第一支。
+{
+  const absent = join(dir, "absent.json");
+  assert.equal(await readStateVersion(absent), null, "不存在（ENOENT）→ null：写是恢复手段");
+
+  const corrupted = join(dir, "corrupt-version.json");
+  writeFileSync(corrupted, "not json{{");
+  assert.equal(await readStateVersion(corrupted), null, "损坏 JSON → null：坏文件必须仍可被覆盖修复");
+
+  const versioned = join(dir, "versioned.json");
+  writeFileSync(versioned, JSON.stringify({ version: 1 }));
+  assert.equal(await readStateVersion(versioned), 1, "已知版本照读");
+  writeFileSync(versioned, JSON.stringify({ version: "1" }));
+  assert.equal(await readStateVersion(versioned), null, "非数字 version → null（无版本号可保护）");
+
+  // 「存在但读不出」：用目录占住文件路径（POSIX 是 EISDIR，Windows 上同为「无法按
+  // 文件读取」）。关键是**不许**返回 null——返回 null 就等于放行覆盖。
+  const unreadable = join(dir, "unreadable.json");
+  mkdirSync(unreadable);
+  let threw = null;
+  try {
+    await readStateVersion(unreadable);
+  } catch (error) {
+    threw = error;
+  }
+  assert.notEqual(threw, null, "存在却读不出 → 必须抛（否则写守卫把「读不到」当成「可写」）");
+  assert.notEqual(threw?.code, "ENOENT", "抛出的不是 ENOENT——ENOENT 才是「没有文件」");
 }
 
 console.log("state-store.test.mjs: all checks passed");

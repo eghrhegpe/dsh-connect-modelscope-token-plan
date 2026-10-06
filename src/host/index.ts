@@ -20,7 +20,7 @@
 import { createTokenStore } from "./ms-auth.ts";
 import { createFileUsageStore } from "./usage-store.ts";
 import { createInferenceClient } from "./inference-client.ts";
-import { createFileProviderStore } from "./provider-store.ts";
+import { createFileProviderStore, resolveEnabledIds } from "./provider-store.ts";
 import { createProviderPublisher } from "./provider-publish.ts";
 import { profileSegment } from "./state-store.ts";
 import { registerRoutes } from "./routes.ts";
@@ -93,17 +93,20 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   /**
    * 当前允许清单：落盘优先，读不到回退内存最近一次 publish 的清单。
    *
-   * 清单是**落盘**的（provider-store 按 profile 分段持久化），重启后内存里的
-   * `publisher.state.enabledIds` 早已清空——若只从它读，用户勾选的清单会随
-   * 重启静默丢失（见 fix A）。反过来，磁盘损坏/未初始化时回退内存值，不让
-   * 一次坏读把清单清成空（空清单 = 提供全部模型，比没有清单更危险）。
+   * 判据与另外两个消费者（`snapshot-aggregate.ts` 的面板块、`routes/provider.ts`
+   * 的 GET）**共用** {@link resolveEnabledIds}——空清单是「不过滤，提供全部模型」，
+   * 那是 provider-store 的契约，不是「没有答案」。本函数曾经自己写成
+   * `stored.length > 0` 才算数，于是**可读的空清单**（操作者按 versionNote 的建议
+   * 删掉 provider.json，或清单被保存为空）会让面板说 all、轮询却继续按内存里的旧
+   * 清单注册：面板与 Host 对「正在提供什么」各说一套。只有读**抛错**（`.catch`
+   * → null）才回退内存。
    * @returns {Promise<string[]>}
    */
-  const currentEnabledIds = async (): Promise<string[]> => {
-    const stored = await providerStore.enabledIds().catch(() => null);
-    if (Array.isArray(stored) && stored.length > 0) return stored;
-    return Array.isArray(publisher.state.enabledIds) ? publisher.state.enabledIds : [];
-  };
+  const currentEnabledIds = async (): Promise<string[]> =>
+    resolveEnabledIds(
+      await providerStore.enabledIds().catch(() => null),
+      publisher.state.enabledIds
+    );
 
   /**
    * 一次目录轮询：拉目录，再 publish 当前 offer。

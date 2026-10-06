@@ -40,7 +40,7 @@
  *
  * @module dsh-connect-modelscope-token-plan/provider-store
  */
-import { obj, degrade } from "./util.ts";
+import { obj, degrade, errMsg, redactSecrets } from "./util.ts";
 import { join } from "node:path";
 import { name } from "./host-config.ts";
 import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, readStateVersion, isKnownStateVersion, createStateReadCache, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
@@ -162,6 +162,34 @@ export function normalizeEnabledIds(raw: unknown): string[] | null {
 }
 
 /**
+ * Resolve the allow-list to publish/display, from the persisted value and the
+ * list this process last published.
+ *
+ * THE single answer to "which list wins", so that every consumer asks it the
+ * same way: a READABLE persisted list wins — including an EMPTY one, because
+ * this module's contract defines `[]` as "no filter, offer every model" — and
+ * the in-memory list is consulted only when the persisted side could not be read
+ * at all (the caller's `.catch` turns a rejection into `null`).
+ *
+ * The three call sites used to spell this out separately, and two of them had
+ * drifted: `snapshot-aggregate.ts` and `routes/provider.ts` honoured an empty
+ * persisted list, while `index.ts` treated it as "no answer" and republished the
+ * remembered list. So after the operator deleted `provider.json` (the reset
+ * `versionNote` itself recommends) the panel reported `allowed: "all"` — its
+ * `enabledCount` counting every model — while the poller kept registering the
+ * OLD restriction: the panel and the Host disagreeing about what is served,
+ * which is precisely what the publish queue and the idle guards exist to
+ * prevent. One copy now, asked by all three.
+ * @param {unknown} stored - the persisted list, or `null` when unreadable.
+ * @param {unknown} remembered - `publisher.state.enabledIds` (last published).
+ * @returns {string[]} the list to use.
+ */
+export function resolveEnabledIds(stored: unknown, remembered: unknown): string[] {
+  if (Array.isArray(stored)) return stored as string[];
+  return Array.isArray(remembered) ? (remembered as string[]) : [];
+}
+
+/**
  * The file-backed provider switch + allow-list.
  * @param {object} [options]
  * @param {string} [options.dir] - override the state directory (tests).
@@ -192,7 +220,17 @@ export function createFileProviderStore(options: StoreOptions = {}) {
    *   decides whether to surface the refusal to a user.
    */
   const writePayload = async (body: object): Promise<string | null> => {
-    const existing = await readStateVersion(filePath);
+    let existing: number | null;
+    try {
+      existing = await readStateVersion(filePath);
+    } catch (error) {
+      // 文件在那儿却读不出来（EACCES/EBUSY/EIO）：正是本守卫要拦的那类覆盖。
+      // `readStateVersion` 只把 ENOENT 读作「没有文件」，其余 fs 错误一律抛出来，
+      // 这里据此拒写——「读不到」不等于「没有东西要保护」。
+      const reason = `provider: refusing to overwrite provider.json (cannot read it: ${redactSecrets(errMsg(error))})`;
+      degrade(reason, null, logger, null);
+      return reason;
+    }
     if (!isKnownStateVersion(existing, KNOWN_PROVIDER_VERSIONS)) {
       const reason = `provider: refusing to overwrite provider.json holding version ${existing} (this build knows ${KNOWN_PROVIDER_VERSIONS.join("/")})`;
       degrade(reason, null, logger, null);

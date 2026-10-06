@@ -2,6 +2,15 @@
 
 ## [未发布]
 
+**写守卫与注册状态机的六处修正**（每条都做了阴性对照：把修复前的源码放回去，新用例确实红）
+
+- **允许清单三处判据漂移**：`snapshot-aggregate.ts` 与 `routes/provider.ts` 把**可读的空清单**当「不过滤」（正确），而 `index.ts` 的轮询写成 `stored.length > 0` 才算数、否则回退内存——于是操作者按 `versionNote` 给的建议删掉 `provider.json`（或清单被保存为空）之后，面板说 `allowed:"all"` 且 `enabledCount` 数上全部模型，轮询却继续按内存里的旧清单注册：面板与 Host 对「正在提供什么」各说一套。判据收进 `provider-store.resolveEnabledIds` 一份，三处共用（只有读**抛错**才回退内存）。钉子：`provider.test.mjs` §9/§11（阴性对照：旧源码下 §11 的源码级断言直接红）。
+- **版本守卫 fail-open**：`readStateVersion` 把 EACCES/EBUSY/EIO（以及路径被目录占住）与「文件不存在」一起折成 `null`，而写守卫只把 `null` 读作「没有东西要保护」——ADR-006「绝不覆盖读不懂的文件」在自己那一侧漏了：**存在却读不出**的文件被判为可写。现在只有 ENOENT 返回 `null`（写是恢复手段），其余 fs 错误抛给写守卫；`provider-store` / `usage-store` 据此拒写并说明理由（usage 侧复用既有的只读闩锁，文件恢复可读即复位）。钉子：`state-store.test.mjs` §6、`provider.test.mjs` §10（阴性对照：`notStrictEqual` 红）。
+- **回滚路径漏 release**：`restorePreviousPair` 的 catch 只清 `built`/`registered`，而 `registerProviderPair` 是**先 registerAdapter 再挂目录行**——后者抛错时 `state.releaseAdapter` 已经握着一次成功的注册，于是「面板说不注册、Host 里却还在路由」。现在那条 catch 先 `release()`。钉子：`provider-publish.test.mjs` §12。
+- **回滚成功后 `error` 不清，空转守卫形同不存在**：注册失败回滚恢复旧对之后，若恢复出来的 offer 与本次请求**相同**，`error !== null` 会让两处空转守卫永远跳过不了——每个轮询周期把同一对摘下再挂上（fix B 明确要避免的「期间在途请求可能被打断」），面板还挂着一个已不成立的错误。现在只有「请求的 offer 确实没兑现」才留 `error`。钉子：`provider-publish.test.mjs` §11（阴性对照：`actual 'transient registration failure'` / `expected null`）。
+- **成功的 probe 被报成失败**：成功分支里 `await tokenStore.state()` 住在 try 内，凭据服务读状态一抛错就落进 catch——一次已成功的验令牌回报 `ok:false`，还往面板事件流写一条假 `error`（事件流是该面板的独家数据源）。补 `.catch(() => null)`，与失败分支同形。钉子：`routes.test.mjs` 的 probe 节（阴性对照：`actual false` / `expected true`）。
+- **「忘掉令牌」整条丢掉 body.ok**：`postJson` 只把 HTTP/解析失败折成 `null`，域失败是 `{ok:false, error}`；`saveToken` 与 provider 写入都检查了，唯独「忘掉令牌」直接往下走。而 Host 侧 `ms-auth.forget` 的失败是**刻意传播**的（凭据文件只读时抛错，其文件头写着「谎报成功比失败更糟——用户以为凭据已删干净」），于是界面上表现为「什么都没发生」。三个写回调收敛到 `http.ts#writeFailure` 一份判据。钉子：`panel.test.mjs` §8/§8b（阴性对照：§8b 的 `match` 红）。
+
 **代码质量收敛**（内部重构 + 门禁强化，用户可见的只有 a11y 与两处防御性修正）
 
 - tab 键盘焦点不可见：`outline: "none"` 是内联样式，优先级高于外壳的焦点环，把键盘用户的焦点提示也一起压掉了。改为 `outlineOffset: -2`，保留可见性。

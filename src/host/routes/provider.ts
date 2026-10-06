@@ -14,6 +14,7 @@
  * @module dsh-connect-modelscope-token-plan/routes/provider
  */
 import { PROVIDER_PATH } from "./paths.ts";
+import { resolveEnabledIds } from "../provider-store.ts";
 import { rosterWithAvailability, resolveAllowedList } from "../llm-models.ts";
 import { resolveSwitchEnabled, switchSource } from "../switch-precedence.ts";
 import { optional } from "../util.ts";
@@ -64,11 +65,12 @@ async function readEntries(inference: ProviderRouteWiring["inference"]): Promise
 
 /**
  * 读「当前」允许清单：优先持久化的，否则 publisher 最近 publish 的那份。
+ *
+ * 判据是**共用**的 resolveEnabledIds（provider-store）——本文件与面板聚合、
+ * index.ts 的轮询必须对「空清单」给同一个答案，否则三个界面各说一套。
  */
 async function readEnabledIds(store: ProviderRouteWiring["providerStore"], published: string[]): Promise<string[]> {
-  const stored = await optional(store.enabledIds?.(), null);
-  if (Array.isArray(stored)) return stored;
-  return Array.isArray(published) ? published : [];
+  return resolveEnabledIds(await optional(store.enabledIds?.(), null), published);
 }
 
 /**

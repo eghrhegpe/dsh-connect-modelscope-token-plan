@@ -1352,6 +1352,24 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		if (!response.ok) return null;
 		return await response.json().catch(() => null);
 	}
+	/**
+	* 写路径的成败判定收口：失败返回 Error，成功返回 null。
+	*
+	* `postJson` 只把「HTTP/解析失败」折成 `null`，域失败是 `{ok:false, error}`（Host 对
+	* 写操作恒回 HTTP 200，成败看 body）。三个写回调曾各判一次，而**「忘掉令牌」漏判**——
+	* 它直接 `await postJson(...)` 就往下走，于是 Host 侧刻意传播的失败（凭据文件只读时
+	* `ms-auth.forget` 抛错，见其文件头「谎报成功比失败更糟」）在界面上表现为「什么都没
+	* 发生」：没有错误行、busy 清掉、刷新后的快照里令牌还在。判据收在这里一份，三个调用
+	* 方（开关/清单、保存令牌、忘掉令牌）不可能再各自漂移。
+	* @param {ApiBody|null} body - postJson 的返回值。
+	* @param {string} fallback - body 里没有可读原因时的一句话。
+	* @returns {Error|null} 失败原因；`null` = 成功。
+	*/
+	function writeFailure(body, fallback) {
+		if (body !== null && body.ok === true) return null;
+		const reason = typeof body?.error === "string" && body.error.trim() !== "" ? body.error : fallback;
+		return new Error(reason);
+	}
 	var FETCH_TIMEOUT_MS;
 	var init_http = __esmMin((() => {
 		FETCH_TIMEOUT_MS = 2e4;
@@ -1549,19 +1567,31 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const [providerBusy, setProviderBusy] = useState(false);
 		const [providerError, setProviderError] = useState(null);
 		const writeErrorText = (reason, t) => reason instanceof Error && reason.name === "AbortError" ? t("common.timeout") : errorText(reason);
+		/**
+		* POST 一个写路径，并把 body 里的域失败抛出去（Host 对写操作恒回 HTTP 200，成败
+		* 看 body）。判据只有 `http.ts#writeFailure` 一份——三个写回调曾各判一次，而
+		* 「忘掉令牌」那条漏了，于是凭据文件只读时界面表现为「什么都没发生」。
+		*/
+		const postWrite = useCallback(async (path, payload) => {
+			const failure = writeFailure(await postJson(path, payload), tt("common.httpError"));
+			if (failure !== null) throw failure;
+		}, [tt]);
 		const runProviderWrite = useCallback(async (path, payload) => {
 			setProviderBusy(true);
 			setProviderError(null);
 			try {
-				const body = await postJson(path, payload);
-				if (body === null || body.ok !== true) throw new Error(typeof body?.error === "string" ? body.error : tt("common.httpError"));
+				await postWrite(path, payload);
 				load();
 			} catch (reason) {
 				setProviderError(format(tt("provider.error"), { error: writeErrorText(reason, tt) }));
 			} finally {
 				setProviderBusy(false);
 			}
-		}, [load, tt]);
+		}, [
+			load,
+			postWrite,
+			tt
+		]);
 		const toggleProvider = useCallback((enabled) => void runProviderWrite(PROVIDER_PATH, { enabled }), [runProviderWrite]);
 		const saveRoster = useCallback((enabledIds) => {
 			const normalized = enabledIds.includes("__hide_all__") ? [HIDE_ALL_MODELS] : enabledIds.filter((id) => id !== HIDE_ALL_MODELS);
@@ -1574,27 +1604,34 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			setTokenBusy(true);
 			setTokenError(null);
 			try {
-				const body = await postJson(TOKEN_PATH, { token: value });
-				if (body === null || body.ok !== true) throw new Error(typeof body?.error === "string" ? body.error : tt("common.httpError"));
+				await postWrite(TOKEN_PATH, { token: value });
 				load();
 			} catch (reason) {
 				setTokenError(writeErrorText(reason, tt));
 			} finally {
 				setTokenBusy(false);
 			}
-		}, [load, tt]);
+		}, [
+			load,
+			postWrite,
+			tt
+		]);
 		const forgetToken = useCallback(async () => {
 			setTokenBusy(true);
 			setTokenError(null);
 			try {
-				await postJson(TOKEN_FORGET_PATH, {});
+				await postWrite(TOKEN_FORGET_PATH, {});
 				load();
 			} catch (reason) {
 				setTokenError(writeErrorText(reason, tt));
 			} finally {
 				setTokenBusy(false);
 			}
-		}, [load, tt]);
+		}, [
+			load,
+			postWrite,
+			tt
+		]);
 		const tokenState = data?.token ?? null;
 		const sampleModel = data?.models?.sample?.[0] ?? null;
 		const [verifyBusy, setVerifyBusy] = useState(false);
@@ -1845,7 +1882,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 					usePollingInterval,
 					useSnapshotPolling,
 					getJson,
-					postJson
+					postJson,
+					writeFailure
 				}),
 				components: Object.freeze({
 					BalanceCard,

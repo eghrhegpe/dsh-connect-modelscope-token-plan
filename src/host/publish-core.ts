@@ -367,7 +367,7 @@ export function swapRegistration({
     // failed re-registration restores the previous pair's identity too.
     onRollback?.();
     state.error = redactSecrets(errMsg(error));
-    restorePreviousPair({ llm, previousBuilt, state, registerPair });
+    restorePreviousPair({ llm, previousBuilt, state, registerPair, release });
     return { ok: false, error };
   }
   state.built = built;
@@ -386,11 +386,12 @@ export function swapRegistration({
  * 新对（`release()` 已在调用方做过），再尝试挂回旧对；旧对也注册不上就
  * 诚实地标 `registered: false`。
  */
-function restorePreviousPair({ llm, previousBuilt, state, registerPair }: {
+function restorePreviousPair({ llm, previousBuilt, state, registerPair, release }: {
   llm: any;
   previousBuilt: any;
   state: PublisherStateBase;
   registerPair: (llm: any, built: any, target: PublisherStateBase) => void;
+  release: () => void;
 }): void {
   if (previousBuilt === null) {
     state.registered = false;
@@ -401,6 +402,11 @@ function restorePreviousPair({ llm, previousBuilt, state, registerPair }: {
     state.built = previousBuilt;
     state.registered = true;
   } catch {
+    // 恢复也失败时必须 release：`registerPair`（见 `registerProviderPair`）是
+    // **先 registerAdapter 再挂目录行**，所以它抛错时 `state.releaseAdapter` 可能
+    // 已经握着一次**成功的**注册。不 release 就等于「面板说不注册、Host 里却还在
+    // 路由」——绕开的是 release 路径，不是注册本身。
+    release();
     state.built = null;
     state.registered = false;
   }

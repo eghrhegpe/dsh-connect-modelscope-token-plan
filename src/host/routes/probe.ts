@@ -48,7 +48,12 @@ export function registerProbeRoute(ctx: any, wiring: Pick<Wiring, "settings" | "
         // 成功（200/400 都算令牌好）不记调用也不记事件——它不是一次用量，
         // 2026-10-04 实测它返回的是零 token 空壳（SPIKE.md）；是否耗一次免费
         // 次数未证实，所以宁可不计。
-        writeJson(response, 200, { ...result, tokenState: await wiring.tokenStore.state() }, { "cache-control": "no-store" });
+        //
+        // `tokenState` 的读取必须自己兜住（与下面失败分支的 `.catch(() => null)`
+        // 同形）：它住在**成功分支的 try 里**，一旦凭据服务读状态时抛错，控制流会
+        // 落进 catch，于是一次**已经成功**的验令牌被回报成 ok:false，还在面板事件流
+        // 里写进一条假 error——事件流是该面板的独家数据源，污染它比少一个字段糟得多。
+        writeJson(response, 200, { ...result, tokenState: await wiring.tokenStore.state().catch(() => null) }, { "cache-control": "no-store" });
       } catch (error) {
         const code = (error as { code?: unknown }).code;
         const message = redactedError(error);

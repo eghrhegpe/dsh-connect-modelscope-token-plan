@@ -36,7 +36,7 @@ import {
   temporaryOf,
   writeStateFile
 } from "./state-store.ts";
-import { pluginError } from "./util.ts";
+import { pluginError, errMsg, redactSecrets } from "./util.ts";
 import { CODE } from "./codes.ts";
 import type { QuotaEvent } from "../shared/wire.ts";
 
@@ -175,7 +175,20 @@ export function createFileUsageStore({ name, profile = null, trendDays = 14, max
    * @returns `true` = 磁盘版本比本构建新（写必须拒绝）；`false` = 可以写。
    */
   const diskVersionBlocksWrites = async (): Promise<boolean> => {
-    const onDisk = await readStateVersion(file);
+    let onDisk: number | null;
+    try {
+      onDisk = await readStateVersion(file);
+    } catch (error) {
+      // 文件存在却读不出来（EACCES/EBUSY/EIO）：**不能**当成「没有文件」放行写入，
+      // 那正是这个闸要拦的降级覆盖。置只读闸并说明原因——它与版本闸共用同一个
+      // 闩锁，所以文件恢复可读（或操作者按 doctor 的建议删掉它）时，下面那段
+      // 「复位」逻辑会把记录恢复上来。
+      const note = `usage-state: usage.json exists but cannot be read (${redactSecrets(errMsg(error))})`;
+      if (!readOnly) logger?.warn?.(`${name}: ${note} — recording disabled to avoid clobbering`);
+      anomaly = note;
+      readOnly = true;
+      return true;
+    }
     if (onDisk !== null && !isKnownStateVersion(onDisk, KNOWN_VERSIONS)) {
       const note = `usage-state: on-disk version ${onDisk} is newer than this build knows`;
       if (!readOnly) logger?.warn?.(`${name}: ${note} — recording disabled to avoid clobbering`);

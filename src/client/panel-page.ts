@@ -6,7 +6,7 @@
 import { SectionCard, BalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm, ProviderCard } from "./cards.ts";
 import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, HIDE_ALL_MODELS } from "./const.ts";
 import { format, errorText, isoTime } from "./format.ts";
-import { getJson, postJson } from "./http.ts";
+import { getJson, postJson, writeFailure } from "./http.ts";
 import { viewOf, providerOf, DEGRADED_PROVIDER } from "./snapshot.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
 import { h, useCallback, useEffect, useState } from "./runtime.ts";
@@ -73,19 +73,28 @@ export function PanelPage({ tt, localeSubscribe }: {
   const writeErrorText = (reason: unknown, t: Tt) =>
     reason instanceof Error && reason.name === "AbortError" ? t("common.timeout") : errorText(reason);
 
+  /**
+   * POST 一个写路径，并把 body 里的域失败抛出去（Host 对写操作恒回 HTTP 200，成败
+   * 看 body）。判据只有 `http.ts#writeFailure` 一份——三个写回调曾各判一次，而
+   * 「忘掉令牌」那条漏了，于是凭据文件只读时界面表现为「什么都没发生」。
+   */
+  const postWrite = useCallback(async (path: string, payload: Record<string, unknown>) => {
+    const failure = writeFailure(await postJson(path, payload), tt("common.httpError"));
+    if (failure !== null) throw failure;
+  }, [tt]);
+
   const runProviderWrite = useCallback(async (path: string, payload: Record<string, unknown>) => {
     setProviderBusy(true);
     setProviderError(null);
     try {
-      const body = await postJson(path, payload);
-      if (body === null || body.ok !== true) throw new Error(typeof body?.error === "string" ? body.error : tt("common.httpError"));
+      await postWrite(path, payload);
       void load();
     } catch (reason) {
       setProviderError(format(tt("provider.error"), { error: writeErrorText(reason, tt) }));
     } finally {
       setProviderBusy(false);
     }
-  }, [load, tt]);
+  }, [load, postWrite, tt]);
   const toggleProvider = useCallback((enabled: boolean) => void runProviderWrite(PROVIDER_PATH, { enabled }), [runProviderWrite]);
   const saveRoster = useCallback((enabledIds: string[]) => {
     // 哨兵独占态归一（与 ProviderCard 同一口径，防御任何绕过它的调用方）：
@@ -104,27 +113,29 @@ export function PanelPage({ tt, localeSubscribe }: {
     setTokenBusy(true);
     setTokenError(null);
     try {
-      const body = await postJson(TOKEN_PATH, { token: value });
-      if (body === null || body.ok !== true) throw new Error(typeof body?.error === "string" ? body.error : tt("common.httpError"));
+      await postWrite(TOKEN_PATH, { token: value });
       void load();
     } catch (reason) {
       setTokenError(writeErrorText(reason, tt));
     } finally {
       setTokenBusy(false);
     }
-  }, [load, tt]);
+  }, [load, postWrite, tt]);
   const forgetToken = useCallback(async () => {
     setTokenBusy(true);
     setTokenError(null);
     try {
-      await postJson(TOKEN_FORGET_PATH, {});
+      // 与保存同一判据：Host 侧的 forget 失败是**刻意传播**的（凭据文件只读时
+      // ms-auth 会抛，见其文件头「谎报成功比失败更糟，用户以为凭据已删干净」），
+      // 这里丢掉 body 就等于把那条刻意的失败变成界面上的一句「什么都没发生」。
+      await postWrite(TOKEN_FORGET_PATH, {});
       void load();
     } catch (reason) {
       setTokenError(writeErrorText(reason, tt));
     } finally {
       setTokenBusy(false);
     }
-  }, [load, tt]);
+  }, [load, postWrite, tt]);
 
   const tokenState = data?.token ?? null;
   // 验令牌（validity probe）需要一个 model id——鉴权与模型无关，取目录样本的

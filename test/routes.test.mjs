@@ -6,7 +6,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply } from "../src/host/index.ts";
-import { name } from "../src/host/host-config.ts";
+import { name, resolveSettings } from "../src/host/host-config.ts";
+import { registerProbeRoute } from "../src/host/routes/probe.ts";
 import { SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH } from "../src/host/routes/paths.ts";
 
 process.env.DSH_HOME = mkdtempSync(join(tmpdir(), "ms-routes-"));
@@ -357,6 +358,42 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   assert.equal(typeof dispose, "function", "effect 的 setup 必须返回清理函数");
   dispose();
   assert.equal(local.size, 0, "teardown 摘掉全部路由");
+}
+
+// ── probe：探测成功而令牌状态读失败，不得被报成探测失败 ──
+//
+// `tokenState` 的读取住在**成功分支的 try 里**：它一抛错，控制流就落进 catch，于是
+// 一次已经成功的验令牌被回报成 ok:false，还在事件流里写进一条假 error——事件流是
+// 面板「额度」tab 的独家数据源，污染它比少一个字段糟得多。这里直接注册 probe 路由
+// 造出那次抛错（apply() 挂的是真实 tokenStore，造不出「读状态时抛」）。
+{
+  const run = async (tokenState) => {
+    const events = [];
+    let handler = null;
+    registerProbeRoute(
+      { webServer: { register: ({ path, handler: h }) => { if (path === PROBE_PATH) handler = h; return () => {}; } } },
+      {
+        settings: resolveSettings({}).settings,
+        tokenStore: { state: tokenState },
+        usageStore: { recordEvent: async (event) => { events.push(event); } },
+        inference: { probe: async () => ({ ok: true, validity: "token-ok" }) },
+        logger: { warn: () => {} }
+      }
+    );
+    assert.ok(handler, "probe handler 必须被注册");
+    const res = makeRes();
+    await handler(makeReq("POST", { body: { modelId: "ok/model" } }), res);
+    return { body: res.body, events };
+  };
+
+  const readable = await run(async () => ({ present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false }));
+  assert.equal(readable.body.ok, true, "令牌状态可读：成功的探测照实回报");
+  assert.equal(readable.events.length, 0, "成功不记事件");
+
+  const unreadable = await run(async () => { throw new Error("credentials service unavailable"); });
+  assert.equal(unreadable.body.ok, true, "令牌状态读失败不得把已成功的探测报成失败");
+  assert.equal(unreadable.body.tokenState, null, "读不到就回落 null（与失败分支的 .catch 同形）");
+  assert.equal(unreadable.events.length, 0, "更不得往事件流写一条假 error");
 }
 
 console.log("routes.test.mjs: all checks passed");

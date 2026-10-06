@@ -13,6 +13,7 @@
  */
 import { PLUGIN_VERSION, name } from "./host-config.ts";
 import { CODE } from "./codes.ts";
+import { resolveEnabledIds } from "./provider-store.ts";
 import { rosterWithAvailability, resolveAllowedList } from "./llm-models.ts";
 import { resolveSwitchEnabled, switchSource } from "./switch-precedence.ts";
 import { errMsg, redactSecrets } from "./util.ts";
@@ -122,12 +123,12 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     const enabled = resolveSwitchEnabled(panel, settings.registerProvider);
     const source = switchSource(panel);
     const roster = rosterWithAvailability(modelEntries, []);
-    // 允许清单是落盘的（provider-store，按 profile 分段）；优先从持久层读，否则回退到
-    // 内存里 publisher.state 最近一次 publish 用的那份（fix A/E）。重启后内存那份清空，
-    // 落盘读能保住用户的清单不丢。
+    // 允许清单是落盘的（provider-store，按 profile 分段）；判据走**共用**的
+    // resolveEnabledIds：可读的清单（含空清单 = 不过滤）优先，只有读抛错才回退到
+    // 内存里 publisher.state 最近一次 publish 的那份。三处消费者曾各写一套，其中
+    // 轮询侧那套把「空清单」读成「没有答案」，于是面板与 Host 会各说一套。
     const stored = await providerStore.enabledIds().catch(() => null);
-    const enabledIds = Array.isArray(stored) ? stored
-      : (Array.isArray(publisher.state.enabledIds) ? publisher.state.enabledIds : []);
+    const enabledIds = resolveEnabledIds(stored, publisher.state.enabledIds);
     const allowed = resolveAllowedList(enabledIds);
     const allowSet = new Set(enabledIds);
     const enabledCount = allowed === "all"

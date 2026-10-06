@@ -56,3 +56,22 @@ export async function getJson(path: string): Promise<ApiBody | null> {
   if (!response.ok) return null;
   return await response.json().catch(() => null) as ApiBody | null;
 }
+
+/**
+ * 写路径的成败判定收口：失败返回 Error，成功返回 null。
+ *
+ * `postJson` 只把「HTTP/解析失败」折成 `null`，域失败是 `{ok:false, error}`（Host 对
+ * 写操作恒回 HTTP 200，成败看 body）。三个写回调曾各判一次，而**「忘掉令牌」漏判**——
+ * 它直接 `await postJson(...)` 就往下走，于是 Host 侧刻意传播的失败（凭据文件只读时
+ * `ms-auth.forget` 抛错，见其文件头「谎报成功比失败更糟」）在界面上表现为「什么都没
+ * 发生」：没有错误行、busy 清掉、刷新后的快照里令牌还在。判据收在这里一份，三个调用
+ * 方（开关/清单、保存令牌、忘掉令牌）不可能再各自漂移。
+ * @param {ApiBody|null} body - postJson 的返回值。
+ * @param {string} fallback - body 里没有可读原因时的一句话。
+ * @returns {Error|null} 失败原因；`null` = 成功。
+ */
+export function writeFailure(body: ApiBody | null, fallback: string): Error | null {
+  if (body !== null && body.ok === true) return null;
+  const reason = typeof body?.error === "string" && body.error.trim() !== "" ? body.error : fallback;
+  return new Error(reason);
+}
