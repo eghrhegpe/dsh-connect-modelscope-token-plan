@@ -1,14 +1,12 @@
 /**
- * 状态文件公共原语 —— 把本插件的各 store（usage-store）从
- * 各自手写的同一段"版本载荷 + temp 文件 + rename 原子 + 0600 + 损坏即忽略"
- * 收敛到这里（家规：peer-free、离线可测）。。
+ * 状态文件公共原语。**TL;DR**：本文件只做三件事——`dshHome`/`stateDir`（定位
+ * 状态目录）、`profileSegment`（按 profile 分段路径）、以及 {@link createStateReadCache}
+ * （统一读缓存）。其余一切遵守下方「行为约定」。
  *
- * 第二步收敛的是**读缓存**：provider / draw 早有 1s TTL，而 catalog 完全没有
- * （进程内永不失效）——同一个「两个进程共享一个 state 目录」的问题修了两个、
- * 漏了第三个。现在统一走 {@link createStateReadCache}，一个 TTL 三个调用方。
- *
- * peer-free 与四个 store 同纪律：不 import 任何 Host peer，纯 `node:fs`，
- * 离线可测（store.test.mjs 直接注入 dir 构造即可）。
+ * 把本插件各 store（usage-store / provider / draw）各自手写的同一段
+ * "版本载荷 + temp 文件 + rename 原子 + 0600 + 损坏即忽略" 收敛到这里。
+ * 家规：peer-free（不 import 任何 Host peer，纯 `node:fs`）、离线可测
+ * （store.test.mjs 直接注入 dir 构造即可）。
  *
  * 行为约定（与本插件 store 的约定逐一对齐）：
  *   - 目录：`$DSH_HOME/state/<name>`——与 Host 自己的目录并列，而不是在
@@ -16,14 +14,18 @@
  *   - 写：临时文件（0600，owner-only）→ `rename` 原子落位。**失败抛错**，
  *     是否吞错是各 store 的语义（usage-store 面对只读 Home 选择吞、
  *     provider 面板开关交给调用方的错误路径），原语不做决定。
- *   - 临时名：进程 + 时间戳 + 随机 UUID 后缀。固定临时名会让两个 Host 进程的
- *     写落到同一路径、互相 `rename` 掉对方写了一半的文件；同一进程同一毫秒的
- *     两次异步写也会撞名（`writeFile` 截断覆盖后一次 `rename` 静默丢写），
- *     随机后缀让每个 temp 路径唯一，`rename` 原子性借此成立（见 `temporaryOf`）。
- *     此前的写法曾只有进程 + 时间戳，同毫秒并发写会静默丢一条。
+ *   - 临时名：进程 + 时间戳 + 随机 UUID 后缀。随机后缀让每个 temp 路径唯一，
+ *     `rename` 原子性借此成立（见 `temporaryOf`）。
  *   - 读：缺失、不可读、非 JSON 一律返回 `null`——"损坏即忽略"的方向。是否
  *     缓存、缓存多久由 {@link createStateReadCache} 决定，不是每个 store 各自的
  *     即兴实现。
+ *
+ * ## 演变记录（历史，非契约）
+ * 1. 第一步收敛的是上述「版本载荷 + 临时文件 + 原子落位」；临时名此前只有
+ *    进程 + 时间戳，同毫秒并发写会静默丢一条，故加随机后缀。
+ * 2. 第二步收敛的是**读缓存**：provider / draw 早有 1s TTL，而 catalog 完全
+ *    没有（进程内永不失效）——同一个「两个进程共享一个 state 目录」的问题修了
+ *    两个、漏了第三个。现在统一走 {@link createStateReadCache}，一个 TTL 三个调用方。
  *
  * @module dsh-connect-modelscope-token-plan/state-store
  */
@@ -34,18 +36,17 @@ import { join } from "node:path";
 import { str } from "./util.ts";
 
 /**
- * The DSH home: `$DSH_HOME` when the operator exported one, else `~/.dsh`.
- * @returns {string} the home directory.
+ * DSH 主目录：操作者导出了 `DSH_HOME` 就用它，否则回落到 `~/.dsh`。
+ * @returns {string} 主目录。
  */
 export function dshHome() {
   return str(process.env.DSH_HOME, join(homedir(), ".dsh"));
 }
 
 /**
- * Where this plugin keeps state: `$DSH_HOME/state/<name>`.
- * @param {string} name - the plugin's own state directory name
- *   (`host-config.ts`'s `name`).
- * @returns {string} the directory.
+ * 本插件存放状态的位置：`$DSH_HOME/state/<name>`。
+ * @param {string} name - 插件自己的状态目录名（即 `host-config.ts` 的 `name`）。
+ * @returns {string} 目录路径。
  */
 export function stateDir(name: string) {
   return join(dshHome(), "state", name);
@@ -67,9 +68,9 @@ const PROFILE_SEGMENT_MAX = 64;
 const PROFILE_SEGMENT_RE = /^(?!\.)[A-Za-z0-9._-]+$/;
 
 /**
- * Is this string safe to use as ONE path segment?
- * @param {unknown} value - candidate profile name.
- * @returns {boolean} true when it survives {@link PROFILE_SEGMENT_RE}.
+ * 该字符串能否安全地作为**一个**路径段使用？
+ * @param {unknown} value - 候选 profile 名。
+ * @returns {boolean} 通过 {@link PROFILE_SEGMENT_RE} 即为 true。
  */
 export function isProfileSegment(value: unknown) {
   if (typeof value !== "string") return false;
@@ -102,8 +103,8 @@ export function isProfileSegment(value: unknown) {
  *
  * 取到 = 调用方据此分段；取不到 = **退回当前的全局路径**，行为零漂移。
  *
- * @param {object} [ctx] - the Cordis context the Host handed `apply()`.
- * @returns {string|null} the profile name, or `null` when unavailable/unsafe.
+ * @param {object} [ctx] - Host 交给 `apply()` 的 Cordis context。
+ * @returns {string|null} profile 名，取不到或不安全时为 `null`。
  */
 export function profileSegment(ctx: { get?: (n: string) => unknown; reflect?: { get?: (n: string, strict?: boolean) => unknown }; [key: string]: unknown } | null | undefined) {
   if (ctx === null || typeof ctx !== "object") return null;

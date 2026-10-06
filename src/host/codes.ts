@@ -9,9 +9,12 @@
  * @module dsh-connect-modelscope-token-plan/codes
  */
 
-/** 面板按它分流的稳定码表。 */
 import { looksLikeRateLimit, hasHardQuotaWordingIn } from "./llm-error-fix.ts";
 
+/**
+ * 面板按它分流的稳定码表 —— Client 的 `GUIDANCE_BY_CODE` 以这份表的键为契约，
+ * 新增/改名必须同步 Client，否则内部错误没有引导文案（见下 `INTERNAL_ERROR`）。
+ */
 export const CODE = Object.freeze({
   CONFIG_ERROR: "config_error",
   NETWORK_ERROR: "network_error",
@@ -38,12 +41,13 @@ export type CodeValue = (typeof CODE)[keyof typeof CODE];
  *
  * 401/403 → AUTH_ERROR（换令牌能修，绝不自动重试——魔搭没有锁号问题，
  * 但重试一个坏令牌只会刷屏）；429 由调用方先走 {@link classifyRateLimit}
- * 分诊，这里只兜底；5xx → UPSTREAM_ERROR；其余 → NETWORK_ERROR。
+ * 分诊，这里只兜底；其余 4xx/5xx → UPSTREAM_ERROR；低于 400 → NETWORK_ERROR。
  */
 export function classifyStatus(status: number): CodeValue {
   if (status === 401 || status === 403) return CODE.AUTH_ERROR;
   if (status === 429) return CODE.RATE_LIMITED;
-  if (status >= 500) return CODE.UPSTREAM_ERROR;
+  // 4xx 与 5xx 在上游眼里都是「这次请求没法完成」，归到同一码；区分它俩
+  // 对调用方没有行动差异（都不可靠地重试），分得越细越难维护。
   if (status >= 400) return CODE.UPSTREAM_ERROR;
   return CODE.NETWORK_ERROR;
 }
