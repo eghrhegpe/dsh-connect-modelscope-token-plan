@@ -368,4 +368,30 @@ const FACTS = [
   }
 }
 
+// ── §12 语义状态词防御：文档地图说「尚未实现」时，对应实现必须真的不存在 ──────
+//
+// 事故（2026-10-15 修复）：README 文档地图把 SPIKE-image-gen.md 标成「尚未实现」，
+// 而 v0.2 起出图工具已落地（src/host/draw.ts 等，test/draw.test.mjs 39 组钉死）。
+// §8 只查「尚待真机验证 / 验证后落地 / 待真机回填」这几个预告词，「尚未实现」不在
+// 射程内——语义状态词是静态文本判据的盲区，这里按具体事实补一条机械规则。
+// 判据：任何非归档 .md / README 的行若同时含「尚未实现」与 SPIKE-image-gen.md，
+// 且 src/host/draw.ts 已存在，即报红。将来真有「实现了又回退」时，把实现文件
+// 删掉的同时必须同步更新这条判据（或让文案改为历史标注）。
+{
+  const DRAW_IMPLEMENTED = existsSync(join(root, "src", "host", "draw.ts"));
+  if (DRAW_IMPLEMENTED) {
+    const files = ["README.md", ...docFiles()]; // archive 已由 docFiles() 内部豁免
+    for (const file of files) {
+      const lines = read(file).split(/\r?\n/);
+      lines.forEach((line, i) => {
+        if (!line.includes("尚未实现") || !line.includes("SPIKE-image-gen.md")) return;
+        assert.fail(
+          `${file}:${i + 1} 把 SPIKE-image-gen.md 标成「尚未实现」，但 src/host/draw.ts 已在——` +
+            `v0.2 起出图工具已实现：\n    ${line.trim()}\n（改成「已实现 / v0.2 起」，或删掉实现文件并同步更新本条判据。）`
+        );
+      });
+    }
+  }
+}
+
 console.log("docs.test.mjs: all checks passed");

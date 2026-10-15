@@ -94,6 +94,24 @@ git commit -m "chore: 版本升级至 X.Y.Z"
 - 提交后 `git status --short` 复核：没带走别人的东西。
 - **发布必须从「完全提交」的状态切出版本**，否则 tag 指向的提交里会缺文件。
 
+### 1.6 peer 依赖升级的验证（升级 peer 与发版分开做）
+
+本仓库**没有 lockfile**（`.gitignore` 明确排除），`npm install` 每次解析最新版本；
+`peerDependencies` 又是宽范围（`@deepseek-ai/*` / `@earendil-works/pi-ai` 等
+`>=0.1.5 <0.3`）。因此**升级 peer 时离线测试全绿不能作为放行依据**——
+`test/llm-adapter.test.mjs` 用记录式假 peer（`test/helpers/peer-stub-loader.mjs`）钉住
+的是**我们自己**对 peer 的调用形状；假 peer 是我们写的，不会跟着 peer 真身漂移。
+`resolveRetryPolicy` 的形状、`classifyPiAiError` 的判定顺序这些**真身行为**若被 peer
+改掉，唯一防线是真机冒烟。
+
+升级 `@deepseek-ai/dsh-llm*` / `@earendil-works/pi-ai` 后必做：
+
+1. `npm test` + `npm run typecheck`（离线侧至少不能更坏）；
+2. 在 CI 上用 `workflow_dispatch` 手动触发一次 gate（换大版本时尤其）；
+3. **真机冒烟**：真 Host + 魔搭 API（或假魔搭平台），各跑一次「额度耗尽 429 快失败
+   不重试」与「rpm 限频 429 退避重试」——确认 peer 的新分类顺序没把两类 429 颠倒；
+4. 把「升级 peer」单独提交（不要混进发版提交），peer 漂移导致回退时可单点 revert。
+
 ### 2. 更新版本号
 
 手动改 `package.json` 的 `version`（语义化版本 `X.Y.Z`）。

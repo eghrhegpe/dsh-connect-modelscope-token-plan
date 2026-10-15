@@ -229,7 +229,9 @@ function tasksOf(source: Record<string, unknown>): string[] | undefined {
  * `/v1/images/generations` 出图成功（含带 `image_url` 的图生图），**候选列表因此
  * 非空**。此前「候选列表今天仍为空」是把「没有文生图」错当成「不能出图」。
  * 出图接入的完整实测（异步两段式、必需头、提交态不可信）见 docs/SPIKE-image-gen.md；
- * **出图功能尚未实现**，本模块仍只做能力标注。
+ * **出图功能 v0.2 起已实现**（`src/host/draw.ts` 的纯逻辑半边 +
+ * `draw-register.ts` 的工具注册），本模块的 {@link isImageGenModel} /
+ * {@link imageGenModelIds} 就是候选列表的判定半边——能力标注是它的消费者。
  * @typedef {"unknown"|"text"|"vision-input"|"image-to-text"|"image-to-image"|"text-to-image"|"text-to-video"} ModelCapability
  */
 export type ModelCapability =

@@ -47,7 +47,7 @@ tools registry 没有 unregister）。实测协议（异步两段式、必需头
 | 何时 | 查 |
 |---|---|
 | 「上游到底有没有额度信号」 | [docs/SPIKE.md](docs/SPIKE.md)（实测记录 + 结论） |
-| 「能不能接生图、协议是什么」 | [docs/SPIKE-image-gen.md](docs/SPIKE-image-gen.md)（2026-10-10 实测；**尚未实现**，承上表体例） |
+| 「能不能接生图、协议是什么」 | [docs/SPIKE-image-gen.md](docs/SPIKE-image-gen.md)（2026-10-10 实测；**v0.2 起已实现**，承上表体例） |
 | provider 怎么接入（写代码前） | [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md)（实现契约） |
 | **这版是怎么做出来的、踩过什么坑** | [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)（0.1.0 / M4 实施过程档案） |
 | v0.2.0 的十二轮修复细节（已冻结，非入门路径） | [docs/archive/2026-10-05-closeout.md](docs/archive/2026-10-05-closeout.md) |

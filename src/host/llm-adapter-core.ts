@@ -12,8 +12,9 @@
  * 读取的凭据解析器——那是真正的领域差异。
  *
  * peer-dependent：import `pi-ai` / `dsh-llm` / `dsh-llm-pi-ai`，它们随 Host
- * 发行。与适配器本身一样，不能由离线单测套件导入，**目前也没有测试覆盖**
- * （e2e 仍在 docs/ROADMAP.md 的 Backlog 里）。
+ * 发行。装配链由 `test/llm-adapter.test.mjs` 用记录式假 peer 钉住调用形状
+ * （见 `llm-adapter.ts` 文件头的诚实边界：peer 真身漂移仍需 ROADMAP Backlog
+ * 的 e2e / 真机冒烟去抓，本套件只钉我们自己这一侧）。
  *
  * @module dsh-connect-modelscope-token-plan/llm-adapter-core
  */

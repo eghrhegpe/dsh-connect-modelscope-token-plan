@@ -2,9 +2,13 @@
  * 魔搭 provider 注册的 peer-dependent 半边。
  *
  * 这里的一切都跑在 Host 发行的 peer 上（`pi-ai`、`dsh-llm`、`dsh-llm-pi-ai`）——这
- * 正是 descriptor 映射要住在 peer-free 的 `llm-models.ts` 的原因：本模块不能被离线
- * 单测套件导入，**目前也没有测试覆盖**——原注释说「由 wiring/e2e 检查来测」，而那个
- * e2e 还在 docs/ROADMAP.md 的 Backlog 里。改错本文件不会让任何门禁变红。
+ * 正是 descriptor 映射要住在 peer-free 的 `llm-models.ts` 的原因。本模块的装配链
+ * 由 `test/llm-adapter.test.mjs` 用**记录式假 peer**（`test/helpers/peer-stub-loader.mjs`，
+ * Node module customization hooks 拦截四个 peer 入口）钉住——断言的是「我们对 peer
+ * 的调用形状」：descriptor 契约、retryPolicy 传参、PiAiAdapter 构造、usage 观察层
+ * 包装与重分类顺序。**诚实边界**：假 peer 是我们写的，钉不住 peer 真身的漂移——peer
+ * 升级改形状仍由 docs/ROADMAP.md Backlog 的 e2e / 真机冒烟去抓，本套件只保证
+ * 这一侧不再静默改坏。
  *
  * 形状对齐已知可用的 qoder 适配器：
  *
