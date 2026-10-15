@@ -9,6 +9,13 @@
  * 卡片直接失效（理由见 .gitignore 与 sensenova 仓库 ADR-005）。新鲜度由
  * build-gate 把关——产物必须与源码同一个提交。
  *
+ * **工具链必须精确钉住**（见 package.json 的 devDependencies + overrides）：build-gate 是
+ * 逐字节比对，而 tsdown / rolldown 出一个补丁号就会改产物字节。2026-10-15 实测：CI 全新安装
+ * （lockfile 不入库，见 gate.yml）拿到 tsdown 0.23.1 + rolldown 1.2.14，打出的 `client.js`
+ * 与入库产物不同，门禁红在一个**看着像「改了 src 忘 build」**的地方——真因是工具链漂了，
+ * 与源码无关。所以 tsdown / rolldown / rolldown-plugin-dts 都钉在「产出当前入库产物」的那
+ * 一组版本上。升级流程：改 pin → `npm run build` → **把新产物与 pin 放进同一个提交**。
+ *
  * `chunkFileNames: "[name].js"`（不含内容哈希）：改 src 时产物**原地修改**而非删旧
  * 加新，diff 不产生 `D` + `??` 噪音。build-gate 用正则从本文件提取这个命名方案作
  * 判定基准，不手抄第二份——手抄会在配置漂移时让门禁报「入库有/新构建无」，而真因

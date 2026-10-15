@@ -2,6 +2,11 @@
 
 ## [未发布]
 
+**CI 门禁修好两处「上游数据引发的红」**（都与功能改动无关：同一个提交在 10-06 是绿的，10-15 重跑同一提交也红）
+
+- **npm 10（Node 22 自带）装不上依赖**：`npm error Cannot read properties of null (reading 'edgesOut')`，十几秒就死在 `npm install`。根因链条实测为：tsdown 声明可选 peer `@vitejs/devtools: "*"` → 该包 `0.8.0`（2026-10-14 发布）的 peer 里新增 `@vitejs/devtools-vitest` → vitest 的可选 peer 是 jsdom / happy-dom / canvas，**npm 10 的 peer 解析在那里崩**，npm 11 正常。`overrides` 回退 rolldown / cac / rolldown-plugin-dts 都无效、`--omit=optional` 无效，而 `--legacy-peer-deps` 立即成功——所以崩点在 peer 解析而非某个包。修法：项目根加 `.npmrc`（`legacy-peer-deps=true`），CI 与本地开发者（npm 10）一起修好，不必改 workflow。本仓库的 peerDependencies **全部**标了 optional，peer 校验本就没有可执行对象，关掉自动 peer 解析无实际损失。
+- **build-gate 报「client.js 与当前 src 不同源」**：lockfile 有意不入库，于是 CI 全新安装解析到 **tsdown 0.23.1 + rolldown 1.2.14**，打出的字节与入库产物不同——门禁红在一个「看着像改了 src 忘 build」的地方，真因是工具链漂了。修法：把工具链精确钉在**产出当前入库产物**的那一组（`tsdown: 0.23.0` + `overrides: rolldown 1.2.12 / rolldown-plugin-dts 0.28.6`），并在 `tsdown.config.mjs` 头部写下升级流程（改 pin 必须把新产物与 pin 放进同一个提交）。验证方式：在没有 lockfile 的干净 worktree 上全新安装，钉住后 build-gate 逐字节绿、不钉则与 CI 同样红。
+
 **门禁：新增真 DOM 渲染/交互套件 `test/dom-render.test.mjs`**（devDependencies 加 `jsdom`，是本仓库第一个测试用第三方包；仍然离线，不联网）
 
 - 补的缺口：client 半边此前只由 `test/panel.test.mjs` 的**替身 React**钉着——`createElement` 返回一个普通对象，`onClick` 只是对象上一个属性值，于是事件绑定、受控输入、busy 期间该不该 `disabled`、effect 与卸载的时序全都不可观察；更糟的是替身把 children 放在 `props` **旁边**，而 `SectionCard` 从 `props` 里解构 `children`——折叠体里的卡片在那个套件里**从来没被渲染过**。新套件把**构建产物 `client.js`** 挂进 jsdom 的真 document，配一套最小替身 React（hook 槽位按「路径 + 组件名」、setState 触发真重渲染、effect 在 commit 之后跑、卸载跑 cleanup），钉住：九条面板路由各自被真实点击驱动过且 payload 正确（打字经 state 回流进 `/token` 的 body、哨兵独占态、`已启用 N / M` 与勾选态一致）、`disabled` 的控件点不动、挂载即首轮轮询与 locale 订阅、切后台 `clearInterval` / 回前台补一发 / 失败退避不低于 60s、顶替与卸载真的 abort 在途请求、慢响应不覆盖快响应、写失败与契约漂移那两句话真的上屏。
