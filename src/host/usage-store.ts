@@ -25,6 +25,7 @@
  * @module dsh-connect-modelscope-token-plan/usage-store
  */
 import { join } from "node:path";
+import { stat } from "node:fs/promises";
 import {
   ensureStateDir,
   isKnownStateVersion,
@@ -46,6 +47,20 @@ export function localDateKey(now: Date): string {
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+/**
+ * 路径在不在（任何 fs 错误都读作「不在」——存在性问的是能不能 `ls` 到它。
+ * EACCES 让 `stat` 失败时，真相其实是「在，只是看不见」，而对下面的判据来说
+ * 那同样不能被当成「没有记录」）。
+ */
+async function pathExists(file: string): Promise<boolean> {
+  try {
+    await stat(file);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** 单日桶。 */
@@ -306,11 +321,39 @@ export function createFileUsageStore({ name, profile = null, trendDays = 14, max
       });
     },
 
-    /** 今天（本地时区）的账户级计数；没有任何记录时是 0，不是 null。 */
-    async daily() {
+    /**
+     * 今天（本地时区）的账户级计数。
+     *
+     * 三种答案，三种含义，**不可合并**（wire.ts DailyUsage 的语义基线）：
+     *   - `0` —— 确实一次都没有（没记录，或今天还没有桶）；这是可信的日常值；
+     *   - `null` —— **读不到**：文件在，但本构建看不懂它（损坏 / 形状不对 / 更新
+     *     构建写的版本 / 存在却不可读）。面板渲染「—」；
+     *   - 数字 —— 今日次数。
+     *
+     * 判据是「文件在不在」而不是「载荷读没读出来」：**文件不存在**才是真实的 0
+     * （这台 Host 从未经本插件调用过，不是数据丢失），而**文件在却读成空**代表
+     * 我们失去了那部分信息——把它报成 0 会让操作者以为今天没调用过，真相是他
+     * 不知道。
+     *
+     * 这是 2026-10-16 补上的一块拼图：`routes.test.mjs` 早有一条
+     * 「本地计数读不到 → null，绝不是 0」的断言，但它只能用一个**会抛错的桩**
+     * 造出那条路径（注释原话：「挂载的真实 store 造不出『读的时候抛』」）——
+     * 真实 store 把所有读失败都吞成了空载荷。于是 null 那份语义在 wire.ts、
+     * `cards.ts`、`snapshot-aggregate.ts` 里写了三遍，却从未在本机真的产出过。
+     *
+     * @returns {{dateKey: string, calls: number|null, tokens: number|null}}
+     */
+    async daily(): Promise<{ dateKey: string; calls: number | null; tokens: number | null }> {
       const payload = await cache.read();
-      const day = payload?.days[localDateKey(now())] ?? null;
-      return day === null ? { dateKey: localDateKey(now()), calls: 0, tokens: 0 } : { ...day, dateKey: localDateKey(now()) };
+      const dateKey = localDateKey(now());
+      if (payload === null) {
+        // 这发 stat 只发生在「载荷读不出来」的异常路径上——正常循环由读缓存命中
+        // 短路，零额外 IO。
+        const stored = await pathExists(file);
+        return { dateKey, calls: stored ? null : 0, tokens: stored ? null : 0 };
+      }
+      const day = payload.days[dateKey] ?? null;
+      return day === null ? { dateKey, calls: 0, tokens: 0 } : { ...day, dateKey };
     },
 
     /** 今天的单模型计数（只含有记录的模型，dayCalls/dayTokens 口径，均跨日清零）。 */

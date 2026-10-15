@@ -62,7 +62,7 @@ const call = async (handlers, path, req) => {
 
 // ── 挂载（无配置 = 全默认）──
 const handlers = new Map();
-apply(makeCtx(handlers), {});
+apply(makeCtx(handlers), {}, { env: {} });
 assert.ok([SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, PROBE_PATH].every((p) => handlers.has(p)), "四条路由全部注册");
 
 // ── provider.json 版本不符：读侧宽容，但必须说出来 ──
@@ -85,7 +85,7 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   writeFileSync(join(stateDirPath, "provider.json"), JSON.stringify({ version: 99, enabled: true, enabledIds: ["a/A"] }));
   try {
     const isolated = new Map();
-    apply(makeCtx(isolated), {});
+    apply(makeCtx(isolated), {}, { env: {} });
     const drifted = await call(isolated, SNAPSHOT_PATH, makeReq("GET"));
     assert.equal(drifted.ok, true, "形状漂移不该让整条快照失败");
     assert.ok(
@@ -114,7 +114,7 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   writeFileSync(join(stateDirPath, "provider.json"), "not json{{");
   try {
     const isolated = new Map();
-    apply(makeCtx(isolated), {});
+    apply(makeCtx(isolated), {}, { env: {} });
     const corrupted = await call(isolated, SNAPSHOT_PATH, makeReq("GET"));
     assert.equal(corrupted.ok, true, "损坏的状态文件不该让快照失败");
     assert.ok(
@@ -199,7 +199,7 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   // 缓存行为，漂移测试不能跟它共实例）。
   {
     const local = new Map();
-    apply(makeCtx(local), {});
+    apply(makeCtx(local), {}, { env: {} });
     await call(local, TOKEN_PATH, makeReq("POST", { body: { token: "ms-0123456789abcdef0123456789abcdef" } }));
     currentFetch = async () => new Response(JSON.stringify({ success: true, data: "nope" }), { status: 200 });
     try {
@@ -316,7 +316,7 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
 // ── 模型目录：独立实例（避开 60s 目录缓存）；先漂移后正常 ──
 {
   const local = new Map();
-  apply(makeCtx(local), {});
+  apply(makeCtx(local), {}, { env: {} });
   currentFetch = async () => new Response(JSON.stringify({ object: "weird", data: "nope" }), { status: 200 });
   const drifted = await call(local, MODELS_PATH, makeReq("GET"));
   assert.equal(drifted.ok, false, "目录形状漂移 → ok:false");
@@ -333,7 +333,7 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
 // ── configError 短路：非法端点 → ok:false + config_error ──
 {
   const broken = new Map();
-  apply(makeCtx(broken), { apiBase: "not a url" }, {});
+  apply(makeCtx(broken), { apiBase: "not a url" }, { env: {} });
   const res = makeRes();
   await broken.get(SNAPSHOT_PATH)(makeReq("GET"), res);
   assert.equal(res.body.ok, false);
@@ -352,7 +352,7 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
     logger: { warn: () => {} },
     effect: (fn) => { cleanup = fn; },
     webServer: { register: ({ path, handler }) => { local.set(path, handler); return () => local.delete(path); } }
-  }, {}, {});
+  }, {}, { env: {} });
   assert.ok(local.size > 0);
   // Cordis 语义：effect 的 fn 是 setup，其**返回值**才是 dispose。
   const dispose = cleanup();
@@ -430,6 +430,44 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   assert.notEqual(body.balance.error, null, "令牌状态读不到时不得把余额错误压成 null（我们并不知道有没有令牌）");
   assert.ok(body.shapeWarnings.some((w) => w.startsWith("token source failed")), "警告按来源标注（token 不是「用量源」）");
   assert.ok(body.shapeWarnings.some((w) => w.startsWith("daily source failed")), "警告按来源标注");
+}
+
+// ── 同一条语义，用**真实挂载的插件**再钉一次 ──
+//
+// 上面那节的注释原话是「挂载的真实 store 造不出『读的时候抛』」——它用一个会抛错
+// 的桩钉住了 null 语义，而真实 store 从不抛：它把一切读失败吞成空载荷，于是
+// `usedLocal` 恒为数字，`number | null` 里的 null 分支从未在本机真的产出过。
+// 结果是 wire.ts / cards.ts / snapshot-aggregate.ts 三处都写着「读不到渲成 0
+// 会让操作者以为今天没调用过」，实现却一次都没兑现。
+//
+// 这一节补的就是那块拼图：不靠桩，靠磁盘上一份**更新构建写的** usage.json。
+{
+  mkdirSync(stateDirPath, { recursive: true });
+  // 日期是什么无所谓——整份载荷本构建都不认识，重点是 daily() 不许把「读不到」
+  // 落成 0（下面那条 shapeWarnings 才是给用户看的原因）。
+  const usageFile = join(stateDirPath, "usage.json");
+  writeFileSync(usageFile, JSON.stringify({
+    version: 99,
+    days: { "2026-10-16": { calls: 7, tokens: 3 } },
+    models: {},
+    events: []
+  }), "utf8");
+  try {
+    const isolated = new Map();
+    apply(makeCtx(isolated), {}, { env: {} });
+    const body = await call(isolated, SNAPSHOT_PATH, makeReq("GET"));
+    assert.equal(
+      body.quota.daily.usedLocal,
+      null,
+      "磁盘上那 7 次本构建读不了 → 头条必须是「不知道」（null），不是伪造的 0"
+    );
+    assert.ok(
+      body.shapeWarnings.some((w) => w.startsWith("usage-state:")),
+      "读不到必须留下痕迹，否则面板上的「—」没有原因可查"
+    );
+  } finally {
+    rmSync(usageFile, { force: true });
+  }
 }
 
 // ── coalesced 缓存：clear() 之后的 pre-clear 答案不得复活 ──

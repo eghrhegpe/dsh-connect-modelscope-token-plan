@@ -44,6 +44,23 @@
 - 工厂加载的 rejection 被 memo 死：`createAdapterFactoryResolver` memo 的对象是 promise 本身，一次失败的 `import()`（典型 `ERR_MODULE_NOT_FOUND`）把错误钉在槽里直到进程结束——此后每次 publish 重抛同一个错，provider 再也注册不上。要命的是 `describeBuildFailure` 的补救提示恰好叫人修安装，照提示修好依然无效、必须重启 Host。现在只 memo 成功，失败清槽、下一次 publish 真重试（与 `dsh-connect-sensenova-token-plan` 对齐）。钉子：`provider-publish.test.mjs` §9（阴性对照实测：旧代码第二次 publish `ok:false`）。
 - `!llmAvailable` 分支漏清 `state.built`：残留 `built` 成为**下一次** publish 的回滚目标，注册失败时回滚会把一只 release 已调用过的适配器重新挂上 Host——回滚只在别处已出错时才跑，是最坏的发现时机。改为统一路由 `unregister`（与 `dsh-connect-agnes-token-plan` 对齐）。钉子：`provider-publish.test.mjs` §10（阴性对照实测：旧代码 `state.built` 仍是 `{adapter…}`）。
 
+**测试环境隔离：宿主令牌不得进测试判定**（2026-10-16 实测，这台开发机上 `npm test` 是红的）
+
+- **现场**：`test/routes.test.mjs:146` 断言「空状态快照的 `token.present === false`」，实测拿到 `true`——`createTokenStore` 的 env 默认 `process.env`，测试进程**继承了宿主的真实魔搭令牌**（本机 `MODELSCOPE_API_KEY` 在场，长 39）。清空该变量后全绿。**方向是最坏的**：CI（干净环境）永远绿，偏偏只有装了真令牌的机器红，也就是作者和每个真实用户。
+- **同类漂移的实证**：同一个坑在 `doctor.test.mjs` 里被手工 `delete` 处理过，`routes.test.mjs` 没有——「每个测试记得清环境」这条纪律在同一个仓库里已经出现了两种下场。修法因此不选"补一句 delete"，而是给 `HostDeps` 加 `env` **注入缝**（与既有 `fetchImpl` / `getLlm` / `emit` 同列的既有标准测试缝）：产品侧不传、落回 `process.env` 零漂移，测试侧传 `{}` 则宿主环境彻底进不了判定。
+- **门禁**：新增 `test/env-hermetic.test.mjs`（已进 `npm test`），两层：①运行时对照——断言「默认 env 源确实能读到宿主令牌」（把泄漏路径的存在钉成事实，删掉它就没人知道第二条在防什么）与「注入 env 后看不见宿主令牌」「注入的 env 仍可用」（缝不是恒空的桩）；②源码扫描——任何 import `apply()` 的测试必须隔离 env，忘了就在这里红并指明文件。**守纪律的是文件，不是记性。**
+- 阴性对照：①临时造一个忘了隔离的测试文件 → 门禁列出它（`zz-negative-probe.test.mjs`）；②删掉 `index.ts` 的 `env: deps.env` 转发 → §1 立刻红在「注入 env 缝后，宿主令牌不得可见」。两次都还原后全绿。
+
+**本地计数的 `null` 终于真的产出**（语义修复，**用户可见的行为变更**）
+
+- **病灶**：`wire.ts` 的 `DailyUsage.usedLocal: number | null` 里，null 那条分支（"没读到"）在 Host 侧**不可达**——`snapshot-aggregate` 只在 `usageStore.daily()` **抛异常**时才给 null，而真实的 `daily()` 把所有读失败都吞成空载荷再折成 0。`routes.test.mjs` 早有一条「读不到 → null，绝不是 0」的断言，但它只能用一个会抛错的**桩**造出那条路径，注释里写着「挂载的真实 store 造不出『读的时候抛』」。于是"读不到≠0"这件事在 `wire.ts` / `cards.ts` / `snapshot-aggregate.ts` 写了三遍，一次都没兑现。
+- **修法**：判据换成「**文件在不在**」。`usage.json` **不存在** = 真实的 0（这台 Host 从没调用过，那是已知答案）；**文件在却读不出来**（损坏 / 形状不对 / 更新构建写的版本 / 存在却不可读）= `null`；存在与否由 `stat` 判定，且这发 IO 只落在异常路径上（正常循环被读缓存短路，零额外开销）。
+- **用户可见**：`usage.json` 不可读时，面板「额度」头条从「今日 0 次」变成「—」，并在面板上方 `shapeWarnings` 里给出原因（此前至少还有一行警告，现在数字本身也不再伪造）。**把「读不到」画成 0 会让操作者以为今天没调用过——这正是那份注释说的错误判断。**
+- **既有的旧期望随之更正**：`usage-store.test.mjs` 曾把「损坏 → 0」「形状坏 → 0」「未知版本 → 0」当成"不炸"的证据——它们证明的是没崩，不是答案是 0。现在三处都断言 `null`，并新增反向对照（文件不存在仍是真实的 0，且不带任何痕迹）。
+- **端到端钉子**：`routes.test.mjs` 新增一节——用**真实挂载的插件** + 磁盘上一份 `version: 99` 的 `usage.json`（里面写着今日 7 次），断言快照头条是 `null` 而不是那 7 次、也不是 0，且 `usage-state:` 警告在场。
+- 阴性对照：把 `daily()` 退回恒 0 后，`usage-store.test.mjs` 与 `routes.test.mjs` 的新断言双双红（actual 0 / expected null），还原后全绿。
+- **留给 backlog**（本次有意不改，避免膨胀）：`perModelToday()` 与 `trend()` 还没跟上同一套语义——它们仍把读不到渲染成空数组 / 全零桶。补齐要动 `wire.ts` 的 `TrendBucket` 形状与 client 渲染，属于契约变更，另起一轮。
+
 ## [0.2.0] — 2026-10-05
 
 **凭据与红线**

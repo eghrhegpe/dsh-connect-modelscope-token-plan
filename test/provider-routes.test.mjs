@@ -62,7 +62,7 @@ currentFetch = async () => new Response(JSON.stringify({
 }), { status: 200, headers: { "content-type": "application/json" } });
 
 const handlers = new Map();
-apply(makeCtx(handlers), {});
+apply(makeCtx(handlers), {}, { env: {} });
 assert.ok(handlers.has(PROVIDER_PATH), "provider 路由已注册");
 
 // ── 信任围栏 ──

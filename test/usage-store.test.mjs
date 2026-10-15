@@ -76,21 +76,34 @@ const events = await store.events();
 assert.equal(events.length, 3);
 assert.equal(events[0].message, "hit 4", "最新在前");
 
-// §6 损坏即忽略：非 JSON → 读作空不炸；形状坏（days 非对象）→ anomaly 痕迹。
+// §6 读不到 ≠ 0：非 JSON / 形状坏 → daily 给 **null**（不可知），且留下痕迹。
+//
+// 判据是「文件在不在」：文件不存在才是真实的 0（这台 Host 从没调用过，那是
+// **已知答案**）；文件在却读成空是**信息丢失**，把它报成 0 会让操作者以为今天
+// 没调用过，而真相是他不知道（wire.ts DailyUsage 的 null≠0 基线）。
 writeFileSync(file, "{not json", "utf8");
 const corrupted = makeStore();
-assert.equal((await corrupted.daily()).calls, 0, "非 JSON 读作空，不炸");
+assert.equal((await corrupted.daily()).calls, null, "损坏：不炸，但也不谎报 0");
 writeFileSync(file, JSON.stringify({ version: 1, days: 42 }), "utf8");
 const shapeshift = makeStore();
-assert.equal((await shapeshift.daily()).calls, 0);
+assert.equal((await shapeshift.daily()).calls, null, "形状损坏 → null（不是 0）");
 assert.match(shapeshift.anomaly() ?? "", /days is not an object/, "形状损坏留下 shapeWarning 痕迹");
+
+// §6b 反向对照：文件压根不存在 → 真实的 0。
+rmSync(file, { force: true });
+const fresh = makeStore();
+assert.equal((await fresh.daily()).calls, 0, "文件不存在 = 真实的 0（没调用过是已知答案，不是数据丢失）");
+assert.equal((await fresh.daily()).tokens, 0);
+assert.equal(fresh.anomaly(), null, "真实零不该带任何痕迹");
 
 // §7 版本只读闸：磁盘 version 2 → 读作空且写入被拒绝（不 clobber）。
 mkdirSync(dir, { recursive: true });
 writeFileSync(file, JSON.stringify({ version: 2, days: { "2099-01-01": { calls: 9, tokens: 9 } } }), "utf8");
 warnings.length = 0;
 const future = makeStore();
-assert.equal((await future.daily()).calls, 0, "未知版本读作空");
+// 磁盘上明明白白写着 9 次调用，但那是更新构建的格式，本构建不该读它——于是答案
+// 既不是 9 也不是 0，而是「不知道」。报 0 是伪造（操作者会以为今天很闲）。
+assert.equal((await future.daily()).calls, null, "未知版本读作「读不到」，不是空");
 await future.recordCall({ modelId: "m/y", tokens: null, at: t0 });
 assert.equal(JSON.parse(readFileSync(file, "utf8")).version, 2, "只读闸：新版本文件未被覆写");
 assert.equal((await future.state()).readOnly, true);

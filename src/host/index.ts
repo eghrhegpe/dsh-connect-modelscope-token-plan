@@ -47,8 +47,14 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
 
   // 凭据服务是可选的：没有它的 Host 仍然有完整面板，令牌走 env / 内存
   // （重启即丢，快照的 token.ephemeral 会说明这一点）。
+  //
+  // `env` 走 deps 缝而不是让 tokenStore 直接摸 `process.env`：这条路径一旦连到
+  // 宿主环境，测试进程就会继承开发机上那把**真实令牌**，把「应当没有令牌」的
+  // 断言顶成绿不了的红（详见 types.ts 的 env 注释）。产品侧不传 deps.env，解构
+  // 默认值落回 `process.env`，行为零漂移。
   const tokenStore = createTokenStore({
-    credentials: () => ctx.get("credentials") ?? null
+    credentials: () => ctx.get("credentials") ?? null,
+    env: deps.env
   });
 
   // 本地计数按 profile 分段（usage-store 注释里的裁定）；profile 取不到时

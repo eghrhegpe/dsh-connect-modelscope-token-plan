@@ -88,7 +88,7 @@ currentFetch = async (url) => {
 };
 
 const handlers = new Map();
-apply(makeCtx(handlers), {});
+apply(makeCtx(handlers), {}, { env: {} });
 assert.ok(handlers.has(DRAW_PATH), "出图路由已注册");
 assert.ok(handlers.has(PROVIDER_PATH), "provider 路由仍注册（两条独立）");
 

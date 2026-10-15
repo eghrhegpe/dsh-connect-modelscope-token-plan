@@ -63,9 +63,15 @@ export function isPlausibleToken(value: string): boolean {
  * @param {object|Function|null} [options.credentials] - `ctx.credentials` 服务
  *   或其 resolver；**每次使用时解析**（服务可能在本插件挂载之后才注册，
  *   一次性查找会把错误的 "ephemeral" 断言冻进后续每个轮询）。
- * @param {object} [options.env] - 环境源；默认 `process.env`。
+ * @param {object} [options.env] - 环境源；**默认 `process.env`**。
+ *   测试经 `apply()` 的 `deps.env` 注入 `{}` 以隔离宿主环境——本文件时不能假设
+ *   「没有传就是要用真环境」以外的语义，但调用方可以（详见 types.ts 的 env 缝）。
+ *
+ *   `| undefined` 不是冗余：`tsconfig` 开了 `exactOptionalPropertyTypes`，
+ *   「可选」不允许被显式赋值为 `undefined`，而 `apply()` 是原样转发 `deps.env`
+ *   （产品侧不传时它就是 `undefined`）。不写这一半，转发点编译不过。
  */
-export function createTokenStore({ credentials = null, env = process.env }: { credentials?: unknown; env?: Record<string, string | undefined> } = {}) {
+export function createTokenStore({ credentials = null, env = process.env }: { credentials?: unknown; env?: Record<string, string | undefined> | undefined } = {}) {
   /** 无凭据服务的 Host 的内存兜底。 */
   const memory = new Map();
 

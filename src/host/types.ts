@@ -29,6 +29,21 @@ export interface HostDeps {
   emit?: (event: string) => void;
   /** 凭据服务的解析缝（缺省走 ctx.get("credentials")）。 */
   credentials?: unknown;
+  /**
+   * 令牌读取的**环境源**缝（缺省走 `process.env`）。
+   *
+   * 存在的理由是一只具体的鬼（2026-10-16 实测）：默认的 `process.env` 让测试
+   * 进程**继承宿主的真实令牌**——`test/routes.test.mjs` 断言「空状态快照的
+   * token.present === false」，而任何在开发机上配过 `MODELSCOPE_API_KEY` 的机器
+   * 都会让它读到真令牌从而断言失败。方向最坏：CI（干净环境）永远绿，只有装了
+   * 真令牌的机器红，也就是作者和真实用户。
+   *
+   * 所以这里要的不是「测试记得 delete 环境变量」（`doctor.test.mjs` 手工删过，
+   * `routes.test.mjs` 没删——同一条纪律两个下场），而是一个**必须被显式传**的缝：
+   * 测试传 `env: {}`，进程环境就进不了判定；产品不传，行为与今天完全一致。
+   * 「谁忘了传」由 `test/env-hermetic.test.mjs` 的源码级门禁抓，不靠自觉。
+   */
+  env?: Record<string, string | undefined>;
 }
 
 /** 路由族共享的 wiring 袋；每个路由用 `Pick<Wiring, …>` 声明自己摸的子集。 */
