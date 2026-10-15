@@ -17,7 +17,7 @@ export function registerRoutes(ctx: any, wiring: Wiring): Array<() => void> {
   return [
     registerSnapshotRoute(ctx, wiring),
     registerModelsRoute(ctx, wiring),
-    ...(registerTokenRoute(ctx, wiring) as Array<() => void>),
+    ...registerTokenRoute(ctx, wiring),
     registerProbeRoute(ctx, wiring),
     registerProviderRoute(ctx, wiring),
     registerDrawRoute(ctx, wiring)

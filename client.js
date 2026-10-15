@@ -159,7 +159,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"present.yes": "已配置",
 			"present.no": "未配置",
 			"validity.yes": "有效",
-			"validity.no": "未校验"
+			"validity.no": "未校验",
+			"validity.bad": "无效"
 		};
 		en = {
 			"panel.title": "ModelScope Access · Quota",
@@ -270,7 +271,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"present.yes": "configured",
 			"present.no": "not configured",
 			"validity.yes": "verified",
-			"validity.no": "unverified"
+			"validity.no": "unverified",
+			"validity.bad": "invalid"
 		};
 	}));
 
@@ -1168,7 +1170,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const [value, setValue] = useState("");
 		const source = token?.source ?? "none";
 		const sourceKey = source === "credentials" ? "source.credentials" : source === "env" ? "source.env" : source === "memory" ? "source.memory" : "source.none";
-		const validKey = token?.valid === true ? "validity.yes" : "validity.no";
+		const validKey = token?.valid === true ? "validity.yes" : token?.valid === false ? "validity.bad" : "validity.no";
 		return h("div", null, token?.readError ? h("div", { style: {
 			...S.formNote,
 			color: "var(--dsw-alias-state-warn-primary)"
@@ -1887,6 +1889,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			setVerifyError(null);
 			try {
 				const body = await postJson(PROBE_PATH, { modelId });
+				if (body !== null) load();
 				if (body !== null && body.ok === true) setVerifyNote(format(tt("probe.validOk"), { status: Number(body.status ?? 0) }));
 				else setVerifyError(typeof body?.error === "string" ? body.error : tt("common.httpError"));
 			} catch (reason) {
@@ -1894,7 +1897,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			} finally {
 				setVerifyBusy(false);
 			}
-		}, [tt]);
+		}, [load, tt]);
 		const quotaBody = () => {
 			if (data === null) return h("div", { style: S.empty }, failure === null ? tt("panel.loading") : h("div", { role: "alert" }, guidance ?? format(tt("panel.error"), { error: failure.message })));
 			const snap = data;

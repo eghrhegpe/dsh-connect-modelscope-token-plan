@@ -9,6 +9,7 @@ import { apply } from "../src/host/index.ts";
 import { buildSnapshotBody } from "../src/host/snapshot-aggregate.ts";
 import { name, resolveSettings } from "../src/host/host-config.ts";
 import { registerProbeRoute } from "../src/host/routes/probe.ts";
+import { CODE } from "../src/host/codes.ts";
 import { SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH } from "../src/host/routes/paths.ts";
 
 process.env.DSH_HOME = mkdtempSync(join(tmpdir(), "ms-routes-"));
@@ -368,33 +369,103 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
 // 面板「额度」tab 的独家数据源，污染它比少一个字段糟得多。这里直接注册 probe 路由
 // 造出那次抛错（apply() 挂的是真实 tokenStore，造不出「读状态时抛」）。
 {
-  const run = async (tokenState) => {
+  const run = async (tokenState, probe = async () => ({ ok: true, validity: "token-ok" })) => {
     const events = [];
+    const validityNotes = [];
     let handler = null;
     registerProbeRoute(
       { webServer: { register: ({ path, handler: h }) => { if (path === PROBE_PATH) handler = h; return () => {}; } } },
       {
         settings: resolveSettings({}).settings,
-        tokenStore: { state: tokenState },
+        tokenStore: { state: tokenState, noteValidity: (valid) => { validityNotes.push(valid); } },
         usageStore: { recordEvent: async (event) => { events.push(event); } },
-        inference: { probe: async () => ({ ok: true, validity: "token-ok" }) },
+        inference: { probe },
         logger: { warn: () => {} }
       }
     );
     assert.ok(handler, "probe handler 必须被注册");
     const res = makeRes();
     await handler(makeReq("POST", { body: { modelId: "ok/model" } }), res);
-    return { body: res.body, events };
+    return { body: res.body, events, validityNotes };
   };
 
   const readable = await run(async () => ({ present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false }));
   assert.equal(readable.body.ok, true, "令牌状态可读：成功的探测照实回报");
   assert.equal(readable.events.length, 0, "成功不记事件");
+  assert.deepEqual(readable.validityNotes, [true], "成功 → 记「令牌好」（200/400 都算鉴权过了）");
 
   const unreadable = await run(async () => { throw new Error("credentials service unavailable"); });
   assert.equal(unreadable.body.ok, true, "令牌状态读失败不得把已成功的探测报成失败");
   assert.equal(unreadable.body.tokenState, null, "读不到就回落 null（与失败分支的 .catch 同形）");
   assert.equal(unreadable.events.length, 0, "更不得往事件流写一条假 error");
+}
+
+// ── probe 的失败**不等于**令牌坏：只有 401/403 才写 valid:false ──
+//
+// `token.valid` 的三态里，false 是「探过且令牌坏」的**证据**，不是「这次请求没成」。
+// 429 / 额度耗尽 / 上游错误回答的是「上游现在忙不忙」——把它们记成 false，就是把限频
+// 说成令牌坏，正是 429 分诊那条修正（把 rpm 误判成额度耗尽）的同一个误判换了个地方。
+// 这三种不动结论：上一次的结果仍然是已知的最好答案。
+{
+  const tokenState = async () => ({ present: true, source: "credentials", valid: true, checkedAt: "2026-10-16T00:00:00.000Z", ephemeral: false });
+  const failing = (code) => async () => {
+    const error = new Error("upstream said no");
+    error.code = code;
+    throw error;
+  };
+  const run = async (probe) => {
+    const validityNotes = [];
+    let handler = null;
+    registerProbeRoute(
+      { webServer: { register: ({ path, handler: h }) => { if (path === PROBE_PATH) handler = h; return () => {}; } } },
+      {
+        settings: resolveSettings({}).settings,
+        tokenStore: { state: tokenState, noteValidity: (valid) => { validityNotes.push(valid); } },
+        usageStore: { recordEvent: async () => {} },
+        inference: { probe },
+        logger: { warn: () => {} }
+      }
+    );
+    await handler(makeReq("POST", { body: { modelId: "ok/model" } }), makeRes());
+    return validityNotes;
+  };
+
+  assert.deepEqual(await run(failing(CODE.AUTH_ERROR)), [false], "401/403 → 记「令牌坏」");
+
+  for (const [code, label] of [[CODE.RATE_LIMITED, "429 限频"], [CODE.QUOTA_EXCEEDED, "429 额度耗尽"], [CODE.UPSTREAM_ERROR, "上游 5xx"]]) {
+    assert.deepEqual(await run(failing(code)), [], `${label} 不是令牌的证据 → 不动 valid（留着上一次的结论）`);
+  }
+}
+
+// ── 端到端：探针的结论必须一路到快照 ──
+//
+// 上面两节用的是**桩** tokenStore，证明路由写了什么；这一节用**真实挂载的插件**
+// 证明整条链是通的（noteValidity → state() → snapshot-aggregate 的 spread →
+// 快照响应），并且令牌换手后旧结论失效。此前 `valid` / `checkedAt` 在 Host 侧是
+// 硬编码 null，这条链的下游（client 的 validity.yes、i18n 键）早已建好却从未被喂过。
+{
+  await call(handlers, TOKEN_PATH, makeReq("POST", { body: { token: "ms-0123456789abcdef0123456789abcdef" } }));
+  const before = await call(handlers, SNAPSHOT_PATH, makeReq("GET"));
+  assert.equal(before.token.valid, null, "探之前：未校验（不是「无效」）");
+
+  currentFetch = async () => ({ status: 200, body: null, headers: new Map() });
+  const good = await call(handlers, PROBE_PATH, makeReq("POST", { body: { modelId: "ok/model" } }));
+  assert.equal(good.ok, true);
+  const afterGood = await call(handlers, SNAPSHOT_PATH, makeReq("GET"));
+  assert.equal(afterGood.token.valid, true, "HTTP 200 → 快照说令牌好");
+  assert.equal(typeof afterGood.token.checkedAt, "string", "并且带上了时间戳");
+
+  currentFetch = async () => ({ status: 401, body: null, json: async () => ({ error: { message: "token rejected" } }), headers: new Map() });
+  await call(handlers, PROBE_PATH, makeReq("POST", { body: { modelId: "ok/model" } }));
+  const afterBad = await call(handlers, SNAPSHOT_PATH, makeReq("GET"));
+  assert.equal(afterBad.token.valid, false, "HTTP 401 → 快照说令牌坏（不是回到「未校验」）");
+
+  // 换令牌：旧结论立刻失效，不许一个关于**别的值**的判断继续替新令牌说话。
+  await call(handlers, TOKEN_PATH, makeReq("POST", { body: { token: "ms-ffffffffffffffffffffffffffffffff" } }));
+  const afterSwap = await call(handlers, SNAPSHOT_PATH, makeReq("GET"));
+  assert.equal(afterSwap.token.valid, null, "换令牌 → 回到「未校验」");
+  await call(handlers, TOKEN_FORGET_PATH, makeReq("POST", { body: {} }));
+  currentFetch = NO_NETWORK;
 }
 
 // ── 聚合层不得伪造值：读不到就说读不到 ──

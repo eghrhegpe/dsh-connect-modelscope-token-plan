@@ -131,7 +131,8 @@ export const zh = {
   "present.yes": "已配置",
   "present.no": "未配置",
   "validity.yes": "有效",
-  "validity.no": "未校验"
+  "validity.no": "未校验",
+  "validity.bad": "无效"
 };
 
 /** English dictionary, key-parity pinned by the type. */
@@ -262,7 +263,8 @@ export const en: typeof zh = {
   "present.yes": "configured",
   "present.no": "not configured",
   "validity.yes": "verified",
-  "validity.no": "unverified"
+  "validity.no": "unverified",
+  "validity.bad": "invalid"
 };
 
 export type DictionaryKey = keyof typeof zh;

@@ -157,7 +157,39 @@ for (let hexLen = 12; hexLen <= 80; hexLen += 4) {
   assert.equal((await persisted.state()).ephemeral, false, "落在凭据文件里的值不是 ephemeral");
 }
 
-// ── §6 收口不变量：任何进入 wire / 日志的错误文本都过了脱敏闸 ──
+// ── §6 valid / checkedAt 的三态生命周期 ──
+//
+// 这两个字段此前在 Host 侧**硬编码为 null**：`state()` 直接写死，而 wire 声明的是
+// `valid: boolean | null`、client 也早已渲染好 `validity.yes` / `no`，i18n 键齐备——
+// 下游全建好，上游从不产，`valid === true` 与 `checkedAt !== null` 是死分支。
+// 现在唯一的生产者是零额度探针（`noteValidity`），这里钉住它的三态与失效时机。
+{
+  const store = createTokenStore({ credentials: null, env: {} });
+  const initial = await store.state();
+  assert.equal(initial.valid, null, "没探过 = null（不是「无效」）");
+  assert.equal(initial.checkedAt, null);
+
+  store.noteValidity(true);
+  const ok = await store.state();
+  assert.equal(ok.valid, true, "探过且令牌好 → true");
+  assert.equal(typeof ok.checkedAt, "string", "结论带时间戳");
+  assert.ok(!Number.isNaN(Date.parse(ok.checkedAt)), "checkedAt 是可解析的 ISO 串");
+
+  store.noteValidity(false);
+  assert.equal((await store.state()).valid, false, "401/403 → false（判坏，不是「没探过」）");
+
+  // 令牌换手：旧结论必须失效，否则一个关于**别的值**的判断会替新令牌说话。
+  await store.save("ms-3f2a1b8c1111222233334444555566");
+  const afterSave = await store.state();
+  assert.equal(afterSave.valid, null, "save 换手后回到「没探过」");
+  assert.equal(afterSave.checkedAt, null);
+
+  store.noteValidity(true);
+  await store.forget();
+  assert.equal((await store.state()).valid, null, "forget 换手后同样清掉旧结论");
+}
+
+// ── §7 收口不变量：任何进入 wire / 日志的错误文本都过了脱敏闸 ──
 //
 // 回归用例：聚合层（`snapshot-aggregate` 的 `soft()`）用裸 `errMsg(error)`，
 // 而那个字符串会一路流进 `shapeWarnings` / `balance.error` / `models.error`

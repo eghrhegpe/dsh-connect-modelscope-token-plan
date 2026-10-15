@@ -201,9 +201,13 @@ export function TokenForm({ token, busy, error, onSave, onForget, onVerify, veri
   // `data?.token` 是 undefined，喂进来就把这里带进崩路径（读 undefined.source）。
   const source = token?.source ?? "none";
   const sourceKey = (source === "credentials" ? "source.credentials" : source === "env" ? "source.env" : source === "memory" ? "source.memory" : "source.none") as Parameters<Tt>[0];
-  // TokenStatus.valid 恒 null（v0.1 不在快照里断言有效性）→ 显示「未校验」；
-  // 验令牌按钮的即时结果由调用方渲染在表单下方，不进这条状态行。
-  const validKey = (token?.valid === true ? "validity.yes" : "validity.no") as Parameters<Tt>[0];
+  // `valid` 的三个态各自有一句话，不能合并：`true` = 探过且令牌好、`false` = 探过
+  // 且令牌坏（401/403）、`null` = **没探过**。把 false 并进「未校验」等于把已知的
+  // 坏说成不知道——与「读不到画成 0」同一类谎。`validity.no` 的措辞本就是「未校验」
+  // 而非「无效」，它只服务 null。
+  const validKey = (
+    token?.valid === true ? "validity.yes" : token?.valid === false ? "validity.bad" : "validity.no"
+  ) as Parameters<Tt>[0];
   return h(
     "div",
     null,

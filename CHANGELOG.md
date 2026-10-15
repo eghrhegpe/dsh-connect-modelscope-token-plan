@@ -68,6 +68,21 @@
 - **门禁**：新增 `test/deps-wiring.test.mjs`（已进 `npm test`）——①双向扫描：`HostDeps` 每个字段都必须在 `src/` 里被 `deps.<name>` 读到，反向（读了却没声明）同样红；②运行时：注入的 `getLlm` / `credentials` 必须真的生效。**两层各有各的阴性对照**：拆掉接线 → §1 红在「声明了没人读」；读到却不用（只当布尔判断）→ §2 红在「注入的 getLlm 必须真的被调用」——只有两层都在，才同时堵住「没接线」与「接了没用」。
 - **顺带修掉 `docs.test.mjs` §10 的一处误报**：反重复规则的 needle 是通用词「静默忽略」，任何注释一用这四个字就被判成在重述 `reasoning_effort` 那条事实（实测误伤 `index.ts` 里一句关于 deps 缝的注释）。收窄为归属文件原文的指纹「无法区分『参数生效』与『参数被静默忽略』」——中途试过「无法区分」，它同样是通用词（误伤 `docs/SPIKE-image-gen.md`）。阴性对照：插入一句真重述，门禁仍能抓住。
 
+**令牌状态的两个字段终于真的产出**（`valid` / `checkedAt`，同类漂移的第四例，**用户可见**）
+
+- **病灶**：`TokenStatus.valid: boolean | null` 与 `checkedAt: string | null` 在 Host 侧**硬编码为 null**——`ms-auth.state()` 直接写死，注释还写着"`valid` 恒为 null：本模块不做有效性断言"。于是 `valid === true` 与 `checkedAt !== null` 是**死分支**：wire 声明了三态、client 早已渲染 `validity.yes`、i18n 键齐备，唯独上游从不喂它。和 `usedLocal` 那条同形——下游全建好，中间一段没接。
+- **修法**：唯一的生产者是零额度探针（`noteValidity`）。判据按证据分，不按成败分：200/400 → `true`（鉴权过了）；401/403 → `false`（令牌坏的证据）；**429 / 额度耗尽 / 上游 5xx 一律不写**——它们回答的是"上游现在忙不忙"，不是"这把令牌好不好"，记成 false 就是把限频说成令牌坏（429 分诊那条修正的同一个误判换个地方）。这几种留着上一次的结论，那是已知的最好答案。
+- **失效时机**：`save` / `forget` 换令牌时清掉旧结论——一个关于**别的值**的判断不许继续替新令牌说话（与 `ephemeral` 那条修正同一条纪律）。只活在本进程：重启即回到"未校验"，那正是 `null` 的语义。
+- **三态补齐**：`valid: false` 此前会渲染成「未校验」——把已知的坏说成不知道，与"读不到画成 0"同一类谎。新增 `validity.bad`（zh「无效」/ en "invalid"），`validity.no`（「未校验」）从此只服务 `null`。
+- **面板**：探针结论写进快照后立刻 `load()` 一次，否则那行「状态：…（校验 …）」要等下一个 30s 轮询才从"未校验"变成答案，而按钮下方明明已经写着结论了。
+- **钉子**：`credentials.test.mjs` §6（三态与换手失效）、`routes.test.mjs` 新增两节——①错误码映射（401 写 false；429/额度/5xx **一个都不写**，阴性对照：去掉错误码判断后 `actual [false] / expected []`）；②**端到端**：真实挂载的插件，存令牌 → 桩 200 探针 → 快照 `token.valid === true`，桩 401 → `false`，再存一次别的令牌 → 回到 `null`。
+- 阴性对照：把 `state()` 退回硬编码 null → 两处新断言双双红（actual null / expected true）；还原后全绿。
+
+**两处 P3 收敛**（无行为变更）
+
+- `routes.ts` 对 `registerTokenRoute` 的调用结果做 `as Array<() => void>` 断言：token 是本族唯一注册两条路由（save + forget）的模块，返回类型标注在**产地**（函数签名）而不是在消费端断言——断言放在消费端等于把「这两条返回的是注销回调而不是 handler」的约定藏起来。去掉断言后 typecheck 仍绿，证明它是纯噪音。
+- `shared/wire.ts` 的 `TokenStatus` 文档注释与 `export` 挤在同一行。
+
 ## [0.2.0] — 2026-10-05
 
 **凭据与红线**

@@ -194,6 +194,10 @@ export function PanelPage({ tt, localeSubscribe }: {
     setVerifyError(null);
     try {
       const body = await postJson(PROBE_PATH, { modelId });
+      // 探针的结论写进了快照的 `token.valid`（401/403 也算——它是「令牌坏」的证据，
+      // 不是「请求失败」）。刷一次，否则那行「状态：…（校验 …）」要等下一个 30s
+      // 轮询才会从「未校验」变成答案，而按钮下方明明已经写着结论了。
+      if (body !== null) void load();
       if (body !== null && body.ok === true) {
         setVerifyNote(format(tt("probe.validOk"), { status: Number(body.status ?? 0) }));
       } else {
@@ -204,7 +208,7 @@ export function PanelPage({ tt, localeSubscribe }: {
     } finally {
       setVerifyBusy(false);
     }
-  }, [tt]);
+  }, [load, tt]);
 
   // 额度 tab：官方魔粒余额（头条）→ 本地计数 → 单模型 → 趋势 → 事件。
   const quotaBody = () => {

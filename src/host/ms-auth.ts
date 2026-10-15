@@ -75,6 +75,19 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
   /** 无凭据服务的 Host 的内存兜底。 */
   const memory = new Map();
 
+  /**
+   * 最后一次零额度探针的结论（`TokenStatus.valid` / `checkedAt` 的唯一生产者）。
+   *
+   * 只活在本进程：重启即回到「未检查过」，那是诚实答案——`valid: null` 的语义本来
+   * 就是「没检查过」，不是「检查过但没结论」。
+   *
+   * **只在令牌换手时清**（`save` / `forget`）：上一次的结论只对**那一把**令牌成立。
+   * 换令牌后留着旧结论，等于让一个关于别的值的判断继续替新令牌说话——正是
+   * `ephemeral` 那条修正反对的「不是判出来的、是碰巧对的」。env 在 DSH 启动时读
+   * 一次，进程内不会换手，所以这两个入口是全部。
+   */
+  let lastCheck: { valid: boolean; checkedAt: string } | null = null;
+
   const resolveService = () => {
     const value = typeof credentials === "function" ? credentials() : credentials;
     return value ?? null;
@@ -113,6 +126,8 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
       } else {
         memory.set(TOKEN_REF, value);
       }
+      // 令牌换手：上一次探针的结论不再对这把令牌成立（见 lastCheck 注释）。
+      lastCheck = null;
     },
 
     /**
@@ -126,10 +141,25 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
      */
     async forget() {
       memory.delete(TOKEN_REF);
+      // 同上：令牌换手，清掉旧结论。
+      lastCheck = null;
       const service = resolveService();
       if (service !== null && typeof service.unset === "function") {
         await service.unset(TOKEN_REF);
       }
+    },
+
+    /**
+     * 记录一次**零额度探针**的结论（probe 路由是唯一调用方）。
+     *
+     * 只接已经判出来的结论：`true`（200/400，令牌好）或 `false`（401/403，令牌坏）。
+     * 429 / 上游错误 / 配置错误**不调用**——那些回答的是「上游现在忙不忙」或
+     * 「这次请求成没成」，不是「这把令牌好不好」，把它们记进 `valid` 就是把限频
+     * 说成令牌坏（正是 429 分诊那条修正反对的误判）。不调用即留着上一次的结论，
+     * 那是已知的最好答案。
+     */
+    noteValidity(valid: boolean) {
+      lastCheck = { valid, checkedAt: new Date().toISOString() };
     },
 
     /**
@@ -157,9 +187,11 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
 
     /**
      * 无秘密的状态描述（快照与面板消费）。
-     * `valid` 恒为 null：本模块不做有效性断言（零额度探针在 probe 路由，
-     * 语义已于 2026-10-04 真机回填——判定 401/403 = 令牌坏、200/400 = 令牌好；
-     * SPIKE.md §结论 5）。
+     *
+     * `valid` / `checkedAt` 来自 `noteValidity`（零额度探针的结论），**本模块自己
+     * 不做有效性断言**——判定规则在 probe 路由（401/403 = 令牌坏、200/400 = 令牌好，
+     * 2026-10-04 真机回填；SPIKE.md §结论 5）。没探过就是 `null`，那不是「无效」，
+     * 是「没检查过」。
      *
      * `ephemeral` 答的是「**手里这个值**重启会不会丢」，不是「有没有凭据服务」
      * ——wire 的定义是前者。曾经只按「服务缺席」置位，于是两种都说谎：没有服务
@@ -172,8 +204,8 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
       return {
         present: source !== null,
         source: source === null ? "none" : source,
-        valid: null,
-        checkedAt: null,
+        valid: lastCheck === null ? null : lastCheck.valid,
+        checkedAt: lastCheck === null ? null : lastCheck.checkedAt,
         ephemeral: source === "memory"
       };
     }

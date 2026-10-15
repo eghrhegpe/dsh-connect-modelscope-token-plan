@@ -45,6 +45,10 @@ export function registerProbeRoute(ctx: any, wiring: Pick<Wiring, "settings" | "
       }
       try {
         const result = await inference.probe({ modelId });
+        // 令牌好：200 空壳与 400（校验层拒绝）都说明鉴权过了。这条结论进快照的
+        // `token.valid`，面板那行「状态：…（校验 …）」从此有答案——下游（client 的
+        // validity.yes / wire 的 boolean|null）早就建好，此前只是没人填它。
+        wiring.tokenStore.noteValidity(true);
         // 成功（200/400 都算令牌好）不记调用也不记事件——它不是一次用量，
         // 2026-10-04 实测它返回的是零 token 空壳（SPIKE.md）；是否耗一次免费
         // 次数未证实，所以宁可不计。
@@ -58,6 +62,11 @@ export function registerProbeRoute(ctx: any, wiring: Pick<Wiring, "settings" | "
         const code = (error as { code?: unknown }).code;
         const message = redactedError(error);
         // 失败也记账：429 按分诊入事件流，其余按 error。
+        // 只有 AUTH_ERROR 才是「令牌坏」的证据。429 / 额度耗尽 / 上游错误回答的是
+        // 「这次请求成没成」，不是「这把令牌好不好」——记成 valid:false 就是把限频
+        // 说成令牌坏（与 429 分诊那条同一个误判）。它们不动 lastCheck，上一次的
+        // 结论仍然是已知的最好答案。
+        if (code === CODE.AUTH_ERROR) wiring.tokenStore.noteValidity(false);
         const eventKind: QuotaEvent["kind"] =
           code === CODE.QUOTA_EXCEEDED ? "quota" :
           code === CODE.RATE_LIMITED ? "rate_limit" : "error";

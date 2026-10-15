@@ -151,7 +151,8 @@ export interface DrawStatus {
   toolName: string;
 }
 
-/** 令牌状态。valid: null = 未检查过（不是「有效」也不是「无效」）。 */export interface TokenStatus {
+/** 令牌状态。valid: null = 未检查过（不是「有效」也不是「无效」）。 */
+export interface TokenStatus {
   present: boolean;
   source: "credentials" | "env" | "none" | "memory";
   valid: boolean | null;
