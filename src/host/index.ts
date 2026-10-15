@@ -40,7 +40,9 @@ import type { HostDeps } from "./types.ts";
  * @param ctx - Host 根上下文。
  * @param config - 行的原始 patch 配置（无 schema，未校验；坏配置以
  *   configError 经快照呈现，而不是在挂载时炸掉整台插件）。
- * @param deps - 测试缝（fetchImpl）。真实 Loader 不传。
+ * @param deps - 测试缝（`HostDeps`：fetchImpl / getLlm / emit / credentials / env
+ *   与出图那两条）。真实 Loader 不传；**每个缝不传时都必须落回 ctx 或全局默认**，
+ *   产品行为零漂移。声明与接线由 `test/deps-wiring.test.mjs` 双向扫描守着。
  */
 function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   const { settings, configError } = resolveSettings(config);
@@ -48,12 +50,14 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   // 凭据服务是可选的：没有它的 Host 仍然有完整面板，令牌走 env / 内存
   // （重启即丢，快照的 token.ephemeral 会说明这一点）。
   //
-  // `env` 走 deps 缝而不是让 tokenStore 直接摸 `process.env`：这条路径一旦连到
-  // 宿主环境，测试进程就会继承开发机上那把**真实令牌**，把「应当没有令牌」的
-  // 断言顶成绿不了的红（详见 types.ts 的 env 注释）。产品侧不传 deps.env，解构
-  // 默认值落回 `process.env`，行为零漂移。
+  // `credentials` / `env` 都走 deps 缝，而不是硬连 ctx / process.env：
+  //   - `env` 那条路一旦连到宿主环境，测试进程就会继承开发机上那把**真实令牌**，
+  //     把「应当没有令牌」的断言顶成绿不了的红（详见 types.ts 的 env 注释）；
+  //   - `credentials` 同理：不接线的话，测试注入的假凭据服务会被静默忽略，测的
+  //     还是 ctx 里那份——比没有这个缝更糟，因为它让人以为自己覆盖了。
+  // 不传 deps 时两者都落回 ctx / process.env，产品行为零漂移。
   const tokenStore = createTokenStore({
-    credentials: () => ctx.get("credentials") ?? null,
+    credentials: deps.credentials !== undefined ? deps.credentials : () => ctx.get("credentials") ?? null,
     env: deps.env
   });
 
@@ -90,7 +94,8 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   const publisher = createProviderPublisher({
     settings,
     panelSwitch: () => providerStore.enabled(),
-    getLlm: (service: string) => ctx.get?.(service) ?? null,
+    // 同上：缝不接线就是纸面的。测试注入的 getLlm / emit 必须真的被用上。
+    getLlm: deps.getLlm ?? ((service: string) => ctx.get?.(service) ?? null),
     resolveApiKey: async () => (await tokenStore.resolve()).value,
     // 本地计数的唯一生产者：DSH 真实对话经适配器出去时，每一次调用与每一条
     // 429/错误事件都写进上面那个 usage-store（面板四块计数面板的**唯一**数据
@@ -102,7 +107,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
       recordCall: (input) => usageStore.recordCall({ modelId: input.modelId, tokens: input.tokens }).catch(() => {}),
       recordEvent: (input) => usageStore.recordEvent(input).catch(() => {})
     },
-    emit: (event: string) => ctx.emit?.(event),
+    emit: deps.emit ?? ((event: string) => ctx.emit?.(event)),
     logger: ctx.logger
   });
 

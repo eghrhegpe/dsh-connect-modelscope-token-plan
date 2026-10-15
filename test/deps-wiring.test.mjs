@@ -1,0 +1,158 @@
+/**
+ * `HostDeps` 接线门禁（declared ⇒ wired）。
+ *
+ * 守的是一条已经在本仓重复出现三次的漂移：**契约声明了，代码没接线**。
+ *   - `HostDeps` 曾声明 `credentials` / `getLlm` / `emit` / `pollMs`，而 `index.ts`
+ *     硬编码走 `ctx`，注入被静默忽略（2026-10-16 实测）；
+ *   - `pollMs` 描述的机制根本不存在（它自己的注释就写着"轮询实际取
+ *     settings.pollSeconds"）；
+ *   - 反向也漂：`loadToolsModule` / `drawFetch` 实际在用，却从没写进接口——靠
+ *     `deps: any` 绕过类型。
+ *
+ * 这类缝的害处不是"功能缺失"，是**骗人**：一个以为自己覆盖了假 llm 服务的测试，
+ * 实际走的是 ctx，绿得毫无意义。所以它要有门禁，而不是靠 review 记住。
+ *
+ * 两层：
+ *   §1 源码扫描：`HostDeps` 的每个字段都必须在 `src/host/index.ts`（或它转发给的
+ *      模块）里以 `deps.<field>` 形式被读到；反向：源码里读的每个 `deps.X` 都必须
+ *      在接口里声明。
+ *   §2 运行时：注入的 `getLlm` / `emit` / `credentials` 必须**真的生效**（阴性对照
+ *      是修复前的代码——注入被忽略，§2 全红）。
+ *
+ * @module test/deps-wiring
+ */
+import { strict as assert } from "node:assert";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { readdirSync } from "node:fs";
+import { apply } from "../src/host/index.ts";
+import { SNAPSHOT_PATH } from "../src/host/routes/paths.ts";
+
+process.env.DSH_HOME = mkdtempSync(join(tmpdir(), "ms-deps-wiring-"));
+
+const srcDir = new URL("../src/", import.meta.url);
+const readSrc = (relative) => readFileSync(new URL(relative, srcDir), "utf8");
+
+/** 收集 src/ 下所有 .ts 的源码（扫描面覆盖转发链，不只是 index.ts）。 */
+function allSources() {
+  const out = [];
+  const walk = (dirUrl) => {
+    for (const entry of readdirSync(dirUrl, { withFileTypes: true })) {
+      const url = new URL(`${entry.name}${entry.isDirectory() ? "/" : ""}`, dirUrl);
+      if (entry.isDirectory()) walk(url);
+      else if (entry.name.endsWith(".ts")) out.push({ name: String(url).split("/src/")[1], text: readFileSync(url, "utf8") });
+    }
+  };
+  walk(new URL("../src/", import.meta.url));
+  return out;
+}
+
+// ── §1 双向扫描：声明 ⇄ 接线 ──
+{
+  const typesText = readSrc("host/types.ts");
+  const block = typesText.slice(typesText.indexOf("export interface HostDeps"), typesText.indexOf("/** 路由族共享的 wiring 袋"));
+  assert.ok(block.includes("HostDeps"), "接口块必须能被定位（正则改坏了就红在这里）");
+
+  /** 接口里声明的字段名（`?` 之前那个标识符，跳过注释行）。 */
+  const declared = [...block.matchAll(/^\s{2}([A-Za-z_][A-Za-z0-9_]*)\??:/gm)]
+    .map((m) => m[1])
+    .filter((name) => name !== undefined);
+  assert.ok(declared.length >= 5, `声明的缝不该这么少：${declared.join(", ")}`);
+
+  const sources = allSources();
+  /** 源码里真正被读到的 `deps.<field>`。 */
+  const wired = new Set();
+  for (const { text } of sources) {
+    for (const m of text.matchAll(/\bdeps\.([A-Za-z_][A-Za-z0-9_]*)/g)) wired.add(m[1]);
+  }
+
+  // (a) 声明了却没接线 —— 注入被静默忽略，比没有这个缝更坏。
+  const unwired = declared.filter((name) => !wired.has(name));
+  assert.deepEqual(
+    unwired,
+    [],
+    `HostDeps 声明了这些缝但 src/ 里没人读 deps.<name>——注入会被静默忽略。要么在 index.ts 接上，要么删掉这个字段\n  - ${unwired.join("\n  - ")}`
+  );
+
+  // (b) 接线了却没声明 —— 说明有人靠 any 绕过了类型。
+  const undeclared = [...wired].filter((name) => !declared.includes(name));
+  assert.deepEqual(
+    undeclared,
+    [],
+    `src/ 读了这些 deps.<name> 但 HostDeps 没声明（多半是 any 绕过）——补进接口\n  - ${undeclared.join("\n  - ")}`
+  );
+
+  // 反向自证：扫描器自己别瞎了（把接口块抽错的典型症状是 declared 为空，上面已断言）。
+  assert.ok(declared.includes("env") && declared.includes("getLlm"), "扫描器必须认得这两个已知字段");
+}
+
+// ── §2 运行时：注入必须真的生效（而不只是被声明）──
+//
+// `emit` 不在这里：它只在 publish **成功**时发出，而离线进程里适配器 peer 加载
+// 注定失败，硬造一条成功路径的成本远高于收益——它由 §1 的双向扫描守着（改回硬
+// 编码 `ctx.emit` 的那个瞬间，`declared` 里就有字段不再被 `deps.<name>` 读到）。
+{
+  const cleanups = [];
+  /** ctx 里**什么服务都没有**：任何没接线的缝都会退回这里，从而被测出来。 */
+  const makeCtx = (extra = {}) => ({
+    get: () => undefined,
+    emit: () => { throw new Error("ctx.emit 是哨兵：只有 emit 缝没接线才会碰到它"); },
+    logger: { warn: () => {} },
+    // 真跑 effect（轮询在这里起飞），并收下 cleanup——否则定时器会把进程吊住。
+    effect: (fn) => { const off = fn(); if (typeof off === "function") cleanups.push(off); },
+    webServer: { register: () => () => {} },
+    ...extra
+  });
+
+  const MODEL_LIST = JSON.stringify({ object: "list", data: [{ id: "Qwen/Qwen3-Coder" }] });
+  const fetchImpl = async (url) =>
+    String(url).includes("/models")
+      ? new Response(MODEL_LIST, { status: 200, headers: { "content-type": "application/json" } })
+      : new Response("{}", { status: 401 });
+
+  const handlers = new Map();
+  let asked = 0;
+  let resolved = 0;
+
+  apply(
+    makeCtx({
+      webServer: { register: ({ path, handler }) => { handlers.set(path, handler); return () => {}; } }
+    }),
+    // 开关默认关 → publish 不会起飞 → getLlm 永远不被问。要测缝必须先让它有活干。
+    { registerProvider: true },
+    {
+      getLlm: (service) => {
+        asked += 1;
+        return service === "llm" ? { registerAdapter: () => () => {} } : null;
+      },
+      credentials: {
+        async resolve() { resolved += 1; return { value: "ms-0123456789abcdef0123456789abcdef" }; },
+        async set() {},
+        async unset() {}
+      },
+      fetchImpl,
+      env: {}
+    }
+  );
+
+  // 给挂载轮询（拉目录 → publish）几拍时间跑完它的 await 链。
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  for (const off of cleanups.splice(0)) off();
+
+  assert.ok(asked > 0, "注入的 getLlm 必须真的被 publisher 调用（修复前它走 ctx.get，asked 恒为 0）");
+
+  // credentials：打一次快照即可确定 tokenStore 用的是注入的那份服务。
+  const handler = handlers.get(SNAPSHOT_PATH);
+  assert.ok(handler, "快照路由必须注册");
+  const res = {
+    status: null,
+    writeHead(status) { this.status = status; },
+    end(payload) { this.body = JSON.parse(payload); }
+  };
+  await handler({ method: "GET", headers: { host: "localhost:3080" } }, res);
+  assert.ok(resolved > 0, "注入的 credentials 必须真的被 resolve（修复前它走 ctx.get('credentials')）");
+  assert.equal(res.body.token.present, true, "注入的凭据服务给出的令牌应当被快照看见");
+}
+
+console.log("deps-wiring.test.mjs: all checks passed");

@@ -61,6 +61,13 @@
 - 阴性对照：把 `daily()` 退回恒 0 后，`usage-store.test.mjs` 与 `routes.test.mjs` 的新断言双双红（actual 0 / expected null），还原后全绿。
 - **留给 backlog**（本次有意不改，避免膨胀）：`perModelToday()` 与 `trend()` 还没跟上同一套语义——它们仍把读不到渲染成空数组 / 全零桶。补齐要动 `wire.ts` 的 `TrendBucket` 形状与 client 渲染，属于契约变更，另起一轮。
 
+**测试缝的接线审计：声明了 ≠ 接上了**（2026-10-16，同类漂移的第三例）
+
+- **现场**：`HostDeps` 声明 5 个缝，`src/host/index.ts` 却只读了 `fetchImpl`（转给 inference-client）：`credentials` / `getLlm` / `emit` 三个硬编码走 `ctx`，**注入被静默忽略**；`pollMs` 描述的机制根本不存在（它自己的注释就写着"轮询实际取 settings.pollSeconds"）。纸面缝比没有缝更坏——测试以为自己覆盖了假 llm 服务，实际走的是 ctx，绿得毫无意义。而 ROADMAP 的头条 backlog（peer 装配链零覆盖）恰恰得靠这些缝去补。
+- **修法**：三个接上（不传 = 落回 `ctx`，产品行为零漂移）；`pollMs` **删除**（留着只会让人以为它能用——与当年移除 `dailyQuotaTotal` 同一条纪律）。反向也补：`loadToolsModule` / `drawFetch` 实际在用却从未声明（靠 `deps: any` 绕过类型），现已写进接口。
+- **门禁**：新增 `test/deps-wiring.test.mjs`（已进 `npm test`）——①双向扫描：`HostDeps` 每个字段都必须在 `src/` 里被 `deps.<name>` 读到，反向（读了却没声明）同样红；②运行时：注入的 `getLlm` / `credentials` 必须真的生效。**两层各有各的阴性对照**：拆掉接线 → §1 红在「声明了没人读」；读到却不用（只当布尔判断）→ §2 红在「注入的 getLlm 必须真的被调用」——只有两层都在，才同时堵住「没接线」与「接了没用」。
+- **顺带修掉 `docs.test.mjs` §10 的一处误报**：反重复规则的 needle 是通用词「静默忽略」，任何注释一用这四个字就被判成在重述 `reasoning_effort` 那条事实（实测误伤 `index.ts` 里一句关于 deps 缝的注释）。收窄为归属文件原文的指纹「无法区分『参数生效』与『参数被静默忽略』」——中途试过「无法区分」，它同样是通用词（误伤 `docs/SPIKE-image-gen.md`）。阴性对照：插入一句真重述，门禁仍能抓住。
+
 ## [0.2.0] — 2026-10-05
 
 **凭据与红线**

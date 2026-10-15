@@ -15,20 +15,34 @@ export type PluginError = Error & {
 };
 
 /**
- * `apply()` 的测试缝：真实 Loader 不传任何东西，测试用它替换 peer 模块与
- * fetch。v0.1 只需要 fetch 缝（probe 路由与模型目录的 HTTP 出口）；M4 追加
- * 其余可选缝（pollMs / getLlm / emit / credentials），全部可选以保持向后兼容。
+ * `apply()` 的测试缝：真实 Loader 不传任何东西，测试用它替换 peer 模块、fetch
+ * 与可选服务。**每个字段都必须在 `index.ts` 里真的被读到**——声明了不接线的缝
+ * 比没有更坏：注入被静默忽略，测试以为自己覆盖了，其实测的还是 ctx 里那份。
+ *
+ * 2026-10-16 接线审计（同类漂移的第三例）：本接口曾声明 5 个缝，其中
+ * `credentials` / `getLlm` / `emit` 三个从未被读取（`index.ts` 硬编码走 ctx），
+ * `pollMs` 描述的是一个根本不存在的机制（注释自己写着"轮询实际取
+ * settings.pollSeconds"）。现在前三个接上、`pollMs` 删除（留着只会让人以为它
+ * 能用——与当年移除 `dailyQuotaTotal` 同一条纪律），并把**实际在用却从未声明**
+ * 的 `loadToolsModule` / `drawFetch` 补进来（此前靠 `deps: any` 绕过类型）。
+ *
+ * 「谁声明了没接线」由 `test/deps-wiring.test.mjs` 扫描，不靠记性。
  */
 export interface HostDeps {
   fetchImpl?: typeof fetch;
-  /** 轮询间隔（毫秒）测试缝；M4 轮询实际取 settings.pollSeconds。 */
-  pollMs?: number;
-  /** 可选服务的解析缝（缺省走 ctx.get）。 */
+  /** 可选服务的解析缝；**缺省走 `ctx.get`（已接线）**。 */
   getLlm?: (service: string) => unknown;
-  /** 事件发射缝（缺省走 ctx.emit）。 */
+  /** 事件发射缝；**缺省走 `ctx.emit`（已接线）**。 */
   emit?: (event: string) => void;
-  /** 凭据服务的解析缝（缺省走 ctx.get("credentials")）。 */
+  /** 凭据服务本身或其 resolver 函数；**缺省走 `ctx.get("credentials")`（已接线）**。 */
   credentials?: unknown;
+  /**
+   * 出图 peer 模块（`@deepseek-ai/dsh-tools`）的惰性加载缝；缺省真 `import()`。
+   * **实际在用**（`draw-register.ts`），此前只是没写进本接口。
+   */
+  loadToolsModule?: () => Promise<unknown>;
+  /** 出图的 fetch 缝；缺省全局 `fetch`。同样**实际在用**。 */
+  drawFetch?: (url: string, options: object) => Promise<unknown>;
   /**
    * 令牌读取的**环境源**缝（缺省走 `process.env`）。
    *

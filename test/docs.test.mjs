@@ -289,7 +289,13 @@ const isVendoredSpec = (rel) => rel.startsWith("docs/modelscope.cn-openapi/");
 const FACTS = [
   {
     id: "reasoning_effort 档位表不可行（既不校验值也不保证生效）",
-    needles: [/静默忽略/],
+    // needle 必须是**这段论述特有的措辞**，不能是通用词。两次实测的误伤：
+    //   ①「静默忽略」是通用词——`src/host/index.ts` 一句「注入被静默忽略」的注释
+    //     被判成重述这条事实；
+    //   ②「无法区分」同样通用——`docs/SPIKE-image-gen.md` 里讲别的事也用了它。
+    // 归属文件的原文是「无法区分『参数生效』与『参数被静默忽略』」，只有这整串
+    // 才是这条论述独有的指纹。
+    needles: [/「参数生效」与「参数被静默忽略」/],
     canonical: "docs/PROVIDER-M4.md",
     pointer: "PROVIDER-M4.md"
   },
