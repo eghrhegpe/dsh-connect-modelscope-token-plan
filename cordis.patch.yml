@@ -54,5 +54,32 @@
         # 次数计费」的口径这反而是对的）。详见 src/host/usage-observer.ts 文件头
         # 与 README「诚实声明」。
         registerProvider: false
+        # ------------------------------------------------------------------
+        # 给 agent 注册出图工具（`modelscope_draw_image`）。**与上面的
+        # registerProvider 是两条独立开关**：那个管「魔搭作为 chat provider」，
+        # 这个管「agent 能不能出图」。默认同样关（opt-in）。
+        #
+        # 实测要点（docs/SPIKE-image-gen.md）：
+        #   · 上游是**异步两段式**：提交拿 task_id，再带
+        #     `X-ModelScope-Task-Type: image_generation` 轮询到终态；
+        #   · 提交响应里的 task_status 恒为 SUCCEED 且**不可信**，成功只看轮询终态；
+        #   · 耗时不稳（实测 61s–537s，免费池排队），故超时取 15 分钟；
+        #   · 出图**不扣**魔粒（chat 才扣，1 次 = 1 魔粒），所以面板刻意**不显示**
+        #     出图计数——那会变成拿 chat 的口径给生图记账。
+        #
+        # 生效时机：开关值立即保存，但**工具的挂载发生在下次 Host 启动**——
+        # peer 的 tools registry 没有 unregister，工具一旦注册就摘不下来。
+        # 面板会就这一点给出提示（draw.restartHint）。
+        drawEnabled: false
+        # 出图默认模型（空 = 自动取目录里第一个出图模型）。
+        # 注意只有目录内**平台声明**出图能力的模型才进候选：实测目录 35 条里
+        # 只有 2 条 image-to-image（Qwen/Qwen-Image-Edit、MusePublic/…），
+        # 没有任何 text-to-image。官方示例里的 Qwen/Qwen-Image-2.1-Turbo 与
+        # black-forest-labs/FLUX.1-Kontext-dev **都不在目录内**，后者实测 FAILED。
+        drawModelId: ""
+        # 单次出图总预算（毫秒），含提交与全部轮询。上界 900000（15 分钟）。
+        # 别调小：实测最慢一次 859s 才成功，而超时放弃**不等于**任务死亡
+        # （上游会继续跑），把预算压到 5 分钟曾实测击穿。
+        drawTimeoutMs: 900000
         # 追加可信 Host 名（默认 localhost / 127.0.0.1 / ::1，只增不替）。
         # allowedHosts: []

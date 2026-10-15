@@ -222,9 +222,14 @@ function tasksOf(source: Record<string, unknown>): string[] | undefined {
  *   `black-forest-labs/FLUX.1-schnell`、`Tongyi-MAI/Z-Image-Turbo` 实测），
  *   文生视频返回 `text-to-video-synthesis`。
  *
- * ⚠️ 能力标签 ≠ 可用端点：`text-to-image-synthesis` 只说明 hub 上有这么个模型，
- * api-inference 的 35 条目录里**目前没有任何**文生图模型，所以出图工具的候选列表
- * 今天仍为空。本模块只做能力标注，不假装可寻址。
+ * ⚠️ 能力标签 ≠ 可用端点：`text-to-image-synthesis` 只说明 hub 上有这么个模型。
+ * api-inference 的 35 条目录里**至今没有任何 `text-to-image` 模型**（2026-10-10
+ * 复核，结论未变），但**有 2 条 `image-to-image`**（`Qwen/Qwen-Image-Edit`、
+ * `MusePublic/Qwen-Image-Edit`）——2026-10-10 实测它们经
+ * `/v1/images/generations` 出图成功（含带 `image_url` 的图生图），**候选列表因此
+ * 非空**。此前「候选列表今天仍为空」是把「没有文生图」错当成「不能出图」。
+ * 出图接入的完整实测（异步两段式、必需头、提交态不可信）见 docs/SPIKE-image-gen.md；
+ * **出图功能尚未实现**，本模块仍只做能力标注。
  * @typedef {"unknown"|"text"|"vision-input"|"image-to-text"|"image-to-image"|"text-to-image"|"text-to-video"} ModelCapability
  */
 export type ModelCapability =
@@ -581,6 +586,56 @@ export function buildDescriptors(entries: unknown, options: { providerId?: strin
     out[seen.get(id)!] = toPiDescriptor({ ...catalogEntry, id }, { providerId, ...(baseUrl !== undefined ? { baseUrl } : {}) });
   }
   return out as object[];
+}
+
+/**
+ * 一条目录条目能不能**出图**。
+ *
+ * 判据是能力枚举里的两个出图档：`text-to-image`（文生图）与 `image-to-image`
+ * （图生图/改图）。**只认平台声明的能力**（详情端点 `Tasks[].Name` 或结构化模态
+ * 字段），不额外加名字正则——名字启发是 `resolveModelCapability` 里最后才用的兜底，
+ * 它把「说不清」的条目标成 `unknown`，那种条目**不**进候选。
+ *
+ * 与 `isVisionModel` 的严格方向同源：吃图判定宁可漏（漏了报 UNSUPPORTED_CONTENT，
+ * 面板看得见），出图判定同理宁可漏（漏了报「目录里没有出图模型」，可诊断）；反过来
+ * 猜错会把 agent 的请求发给一个出不了图的模型，换回一个原因不可知的 FAILED。
+ *
+ * 实测（2026-10-10）：api-inference 的 35 条目录里**没有 `text-to-image`**，只有 2 条
+ * `image-to-image`（`Qwen/Qwen-Image-Edit`、`MusePublic/Qwen-Image-Edit`），两者均
+ * 经 `/v1/images/generations` 出图成功。详见 docs/SPIKE-image-gen.md。
+ * @param {object} entry - 一条归一目录条目。
+ * @returns {boolean} 是否可用于出图。
+ */
+export function isImageGenModel(entry: CatalogEntry): boolean {
+  const capability = resolveModelCapability(entry);
+  return capability === "text-to-image" || capability === "image-to-image";
+}
+
+/**
+ * 一份目录里可用于出图的模型 id，按首见顺序去重。
+ *
+ * 去重口径与 `buildDescriptors` / `rosterOf` 一致（保留末次出现的值、占首见位置），
+ * 这样出图候选列表与 chat roster 不会对「有哪些 id」各说一套。
+ * @param {unknown} entries - 归一目录条目。
+ * @returns {string[]} 出图模型 id。
+ */
+export function imageGenModelIds(entries: unknown): string[] {
+  const position = new Map<string, number>();
+  const out: string[] = [];
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+    if (!isImageGenModel(entry as CatalogEntry)) continue;
+    const id = str((entry as CatalogEntry).id, "");
+    if (id === "") continue;
+    const seen = position.get(id);
+    if (seen === undefined) {
+      position.set(id, out.length);
+      out.push(id);
+    } else {
+      out[seen] = id;
+    }
+  }
+  return out;
 }
 
 /**

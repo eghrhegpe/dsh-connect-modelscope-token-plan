@@ -32,6 +32,15 @@ export const PROVIDER_ROSTER_PATH = `/api/${NS}/provider/roster`;
 /** provider 开关 + 清单回到 patch 默认的路由。 */
 export const PROVIDER_RESET_PATH = `/api/${NS}/provider/reset`;
 /**
+ * 出图工具的开关/状态路由。
+ *
+ * **与 PROVIDER_PATH 是两条独立路由**：那个管「魔搭作为 chat provider」，这个管
+ * 「给 agent 一个出图工具」。实测依据见 docs/SPIKE-image-gen.md。
+ */
+export const DRAW_PATH = `/api/${NS}/draw`;
+/** 出图开关与模型偏好回到 patch 默认的路由。 */
+export const DRAW_RESET_PATH = `/api/${NS}/draw/reset`;
+/**
  * 「什么都不提供」的哨兵 id：与 host/llm-models.ts 的 `HIDE_ALL_MODELS`
  * 同一个字面量。空清单的语义是「不过滤（全部提供）」，所以「全部隐藏」
  * 只能走这个哨兵——两端拼错一处就是「点隐藏反而全放出来」。

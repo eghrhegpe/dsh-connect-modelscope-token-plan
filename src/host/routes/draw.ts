@@ -1,0 +1,200 @@
+/**
+ * 出图工具路由：开关读/写、模型偏好保存、回到默认。
+ *
+ * 三条路径：
+ *   - GET  `DRAW_PATH`        读开关 + 出图候选模型 + 工具挂载状态（无副作用）；
+ *   - POST `DRAW_PATH`        body `{enabled?: boolean, modelId?: string|null}` → 保存；
+ *   - POST `DRAW_PATH/reset`  忘掉面板值，回到 patch 默认。
+ *
+ * **与 provider 路由刻意分开**：provider 管「魔搭作为 chat provider」，本路由管
+ * 「给 agent 一个出图工具」。两者的开关、状态文件、候选集合都不同，合并会让
+ * 「关掉出图」波及 provider 的注册时序（详见 draw-store.ts 的头注）。
+ *
+ * 一处**与 provider 路由不同**的地方必须说清：provider 开关翻转会**立即**重注册
+ * （publish 是活的重建），而出图工具的开关翻转**要等下次 Host 启动**——peer 的
+ * tools registry 没有 unregister，工具一旦注册就摘不下来。所以本路由保存成功后
+ * 不改挂载状态，只在响应里给出 `mountPending`，让面板能说清这件事，而不是让用户
+ * 以为开关坏了。
+ *
+ * peer-free：不 import 任何 Host peer。
+ * @module dsh-connect-modelscope-token-plan/routes/draw
+ */
+import { DRAW_PATH } from "./paths.ts";
+import { imageGenModelIds } from "../llm-models.ts";
+import { drawToolNote } from "../draw-tool-state.ts";
+import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "../switch-precedence.ts";
+import { optional } from "../util.ts";
+import { writeJson, refuseMethod, withOrigin, readJsonBodyOr400, readJsonBody, respondError, redactedError, MAX_JSON_BODY_BYTES } from "./http.ts";
+
+/**
+ * 本路由读到的 wiring 子集（`index.ts` 装配时传的真实对象只会比这个宽）。
+ */
+interface DrawRouteWiring {
+  settings: import("../host-config.ts").ResolvedSettings;
+  drawStore: {
+    enabled: () => Promise<boolean | null>;
+    modelId: () => Promise<string | null>;
+    saveEnabled: (value: boolean) => Promise<string | null>;
+    saveModelId: (modelId: string | null) => Promise<string | null>;
+    reset: () => Promise<string | null>;
+  };
+  inference: {
+    fetchModels: () => Promise<{ entries?: unknown[]; [k: string]: unknown }>;
+  };
+  logger?: { warn?: (message: string) => void };
+}
+
+/**
+ * 读目录条目，读不到按空目录降级。
+ *
+ * 与 provider 路由同一条纪律：GET 不能因为一次目录失败就把整个面板状态打掉——
+ * 出图候选为空只影响「能不能挑模型」，不影响开关的显示。
+ * @param {object} inference - inference client。
+ * @returns {Promise<unknown[]>} 归一目录条目。
+ */
+async function readEntries(inference: DrawRouteWiring["inference"]): Promise<unknown[]> {
+  const catalog = await inference.fetchModels().catch(() => ({ entries: [] }));
+  return Array.isArray(catalog?.entries) ? catalog.entries : [];
+}
+
+/**
+ * 注册出图路由（两条路径）。
+ * @param ctx - host 根上下文（只用 `ctx.webServer`）。
+ * @param {DrawRouteWiring} wiring - 本路由读到的子集。
+ * @returns {Function} 注销回调。
+ */
+export function registerDrawRoute(ctx: any, wiring: DrawRouteWiring) {
+  const { settings, drawStore, inference, logger } = wiring;
+
+  /**
+   * 组装响应。GET 与写成功后的响应共用，两个方向不可能对「当前状态」说两套话。
+   * @param {object} [extra] - 追加/覆盖字段。
+   * @returns {Promise<object>} 响应体。
+   */
+  const snapshot = async (extra: Record<string, unknown> = {}) => {
+    const panelSwitch = await optional(drawStore.enabled());
+    const panelModelId = await optional(drawStore.modelId());
+    const entries = await readEntries(inference);
+    const candidateIds = imageGenModelIds(entries);
+    const effectiveModelId = resolveSwitchValue(panelModelId, settings.drawModelId === "" ? undefined : settings.drawModelId) ?? null;
+    return {
+      ok: true,
+      enabled: resolveSwitchEnabled(panelSwitch, settings.drawEnabled),
+      source: switchSource(panelSwitch),
+      // 候选来自**目录**（平台声明的出图能力），不是 provider 的允许清单——用户
+      // 裁剪 chat picker 不该波及出图工具的候选。
+      candidateIds,
+      candidateCount: candidateIds.length,
+      preferredModel: effectiveModelId,
+      preferredSource: switchSource(panelModelId),
+      // 工具的实际挂载结果。`null` = 开关没开或已成功挂载；非 null = 缺席原因码
+      // （措辞在客户端 i18n 里，与 sensenova 的 DRAW_ABSENT_KEY 同一套分工）。
+      absentReason: drawToolNote(),
+      /**
+       * 开关的保存**不会**改变本次挂载的工具。
+       *
+       * 工具无法注销（peer 的 tools registry 没有 unregister），所以开关翻转只在
+       * 下次 Host 启动时生效。面板据此显示一句说明——否则用户会以为开关坏了。
+       * 判据：开关为开且本次挂载尚未注册成功（或缺席原因未知）。
+       */
+      mountPending: resolveSwitchEnabled(panelSwitch, settings.drawEnabled) === true && drawToolNote() !== null,
+      toolName: "modelscope_draw_image",
+      ...extra
+    };
+  };
+
+  const offs: (() => void)[] = [];
+
+  // 开关 + 模型偏好路由（GET 读 / POST 写）。
+  offs.push(ctx.webServer.register({
+    kind: "exact",
+    path: DRAW_PATH,
+    handler: withOrigin(async (request: any, response: any) => {
+      const method = request.method === undefined ? "GET" : request.method;
+      if (method === "GET") {
+        writeJson(response, 200, await snapshot(), { "cache-control": "no-store" });
+        return;
+      }
+      if (method !== "POST") {
+        refuseMethod(response);
+        return;
+      }
+      const body = await readJsonBodyOr400(request, response);
+      if (body === null) return;
+      // 两个字段都可选，但**至少要有一个**：空 body 应当被拒，否则一次误发的空
+      // POST 会静默成功，界面看起来「保存了」而什么都没变。
+      const hasEnabled = typeof body.enabled === "boolean";
+      const hasModel = body.modelId === null || typeof body.modelId === "string";
+      if (!hasEnabled && !hasModel) {
+        writeJson(response, 400, { ok: false, error: "expected { enabled?: boolean, modelId?: string|null }" }, { "cache-control": "no-store" });
+        return;
+      }
+      // 类型给错要拒，不能当「没给」处理：`enabled: "yes"` 静默变成不改动，比报错更坏。
+      if (body.enabled !== undefined && !hasEnabled) {
+        writeJson(response, 400, { ok: false, error: "enabled must be a boolean" }, { "cache-control": "no-store" });
+        return;
+      }
+      if (body.modelId !== undefined && !hasModel) {
+        writeJson(response, 400, { ok: false, error: "modelId must be a string or null" }, { "cache-control": "no-store" });
+        return;
+      }
+      try {
+        if (hasEnabled) {
+          const refusal = await drawStore.saveEnabled(body.enabled as boolean);
+          if (refusal !== null) {
+            respondError(response, new Error(refusal));
+            return;
+          }
+        }
+        if (body.modelId !== undefined) {
+          const refusal = await drawStore.saveModelId(body.modelId as string | null);
+          if (refusal !== null) {
+            respondError(response, new Error(refusal));
+            return;
+          }
+        }
+      } catch (error) {
+        respondError(response, error);
+        return;
+      }
+      writeJson(response, 200, await snapshot(), { "cache-control": "no-store" });
+    }, settings.allowedHosts)
+  }));
+
+  // 回退默认路由（POST，空 body 合法）。
+  offs.push(ctx.webServer.register({
+    kind: "exact",
+    path: `${DRAW_PATH}/reset`,
+    handler: withOrigin(async (request: any, response: any) => {
+      const method = request.method === undefined ? "POST" : request.method;
+      if (method !== "POST") {
+        refuseMethod(response);
+        return;
+      }
+      // reset 不接受参数：空 body 也合法，所以不能用 readJsonBodyOr400（那会先写
+      // 一个 400 再继续，没有意义）。与 provider 的 reset 同一条处理。
+      await readJsonBody(request, MAX_JSON_BODY_BYTES).catch(() => ({ ok: false, error: "ignored" }));
+      try {
+        const refusal = await drawStore.reset();
+        if (refusal !== null) {
+          respondError(response, new Error(refusal));
+          return;
+        }
+      } catch (error) {
+        respondError(response, error);
+        return;
+      }
+      writeJson(response, 200, await snapshot(), { "cache-control": "no-store" });
+    }, settings.allowedHosts)
+  }));
+
+  return () => {
+    for (const off of offs) {
+      try {
+        off();
+      } catch (error) {
+        logger?.warn?.(`draw route unregister failed: ${redactedError(error)}`);
+      }
+    }
+  };
+}

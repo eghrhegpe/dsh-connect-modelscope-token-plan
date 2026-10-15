@@ -180,6 +180,7 @@ assert.ok(JSON.stringify(balanceErr).includes("boom"), "错误形状渲染错误
 const artifact = readFileSync(new URL("../client.js", import.meta.url), "utf8");
 const hostPaths = readFileSync(new URL("../src/host/routes/paths.ts", import.meta.url), "utf8");
 const hostProviderRoutes = readFileSync(new URL("../src/host/routes/provider.ts", import.meta.url), "utf8");
+const hostDrawRoutes = readFileSync(new URL("../src/host/routes/draw.ts", import.meta.url), "utf8");
 const slug = registration.id;
 
 // 两边**全部**路由后缀的并集。client 侧每条都是 `const.ts` 里的模板字面量；
@@ -195,9 +196,14 @@ const ALL_SUFFIXES = [
   "/probe",
   "/provider",
   "/provider/roster",
-  "/provider/reset"
+  "/provider/reset",
+  "/draw",
+  "/draw/reset"
 ];
-const LITERAL_SUFFIXES = ["/snapshot", "/models", "/token", "/token/forget", "/probe", "/provider"];
+// `/draw/reset` 是**字面量**（paths.ts 里显式导出），而 `/provider/reset` 是
+// provider.ts 里用 `${PROVIDER_PATH}/reset` 拼的派生路由——两个家族的写法不同，
+// 清单按各自实际形态归类，不要为了让分类整齐去改生产代码的形状。
+const LITERAL_SUFFIXES = ["/snapshot", "/models", "/token", "/token/forget", "/probe", "/provider", "/draw", "/draw/reset"];
 const DERIVED_SUFFIXES = ["/provider/roster", "/provider/reset"];
 
 for (const suffix of ALL_SUFFIXES) {
@@ -207,11 +213,17 @@ for (const suffix of ALL_SUFFIXES) {
   if (LITERAL_SUFFIXES.includes(suffix)) {
     assert.ok(hostPaths.includes(`/api/${slug}${suffix}`), `paths.ts 缺字面量 /api/${slug}${suffix}`);
   } else {
-    // 派生路由：`routes/provider.ts` 里 `${PROVIDER_PATH}` + 后缀。
-    const derived = suffix.slice("/provider".length); // "/roster" | "/reset"
+    // 派生路由：`routes/<family>.ts` 里 `<CONST>_PATH` + 后缀。两个家族各有自己的
+    // 基常量，所以先按家族挑源文件与常量名，再比对那一条派生路径。
+    //   provider 家族：routes/provider.ts 的 `${PROVIDER_PATH}` + "/roster" | "/reset"
+    //   draw 家族：    routes/draw.ts     的 `${DRAW_PATH}`     + "/reset"
+    const family = suffix.startsWith("/provider") ? "provider" : "draw";
+    const constName = family === "provider" ? "PROVIDER_PATH" : "DRAW_PATH";
+    const derived = suffix.slice(family.length + 1); // "/roster" | "/reset"
+    const source = family === "provider" ? hostProviderRoutes : hostDrawRoutes;
     assert.ok(
-      hostProviderRoutes.includes("${PROVIDER_PATH}" + derived + "`"),
-      `routes/provider.ts 缺派生路由 \${PROVIDER_PATH}${derived}`
+      source.includes("${" + constName + "}" + derived + "`"),
+      `routes/${family}.ts 缺派生路由 \${${constName}}${derived}`
     );
   }
 }
@@ -249,12 +261,15 @@ for (const suffix of new Set(clientSuffixes)) {
   const clientResolved = new Set(
     [...clientConst.matchAll(/`\/api\/\$\{NS\}(\/[a-z/]+)`/g)].map((m) => `/api/${slug}${m[1]}`)
   );
-  // Host 侧：paths.ts 的字面量 ∪ routes/provider.ts 的派生路由。
+  // Host 侧：paths.ts 的字面量 ∪ 各家族源文件里的派生路由。
   const hostResolved = new Set(
     [...hostPaths.matchAll(/["'](\/api\/[a-z0-9/_-]+)["']/g)].map((m) => m[1])
   );
   for (const m of hostProviderRoutes.matchAll(/`\$\{PROVIDER_PATH\}(\/[a-z/]+)`/g)) {
     hostResolved.add(`/api/${slug}/provider${m[1]}`);
+  }
+  for (const m of hostDrawRoutes.matchAll(/`\$\{DRAW_PATH\}(\/[a-z/]+)`/g)) {
+    hostResolved.add(`/api/${slug}/draw${m[1]}`);
   }
 
   assert.ok(clientResolved.size >= 5, `client 侧应解析出至少 5 条路由，实际 ${clientResolved.size}`);

@@ -12,6 +12,7 @@
 |---|---|---|
 | `mutate.mjs` | `node tools/dev/mutate.mjs <specFile.json>` | 对源码施加「真实回归」变异，跑指定测试，**报告哪些变异没被抓住**。spec 形如 `[{ target, test, mutants: [{name, from, to}] }]`；`from` 必须唯一命中，否则记 `NOT-APPLIED`（绝不猜）。源码在 `finally` 里恢复。 |
 | `find-fake-gates.mjs` | `node tools/dev/find-fake-gates.mjs` | 静态扫描 `test/*.mjs`，找**看起来在验证、实际验证不到**的断言：声明了没进断言的变量、断言与自己造的桩比较、恒真断言、循环里与循环变量无关的断言等。 |
+| `probe-host-react.mjs` | `node tools/dev/probe-host-react.mjs` | 从本机 DSH 安装目录的 `app.asar` 里读出**宿主浏览器实际注入的 React 版本**。`test/dom-render-react.test.mjs` 钉的是宿主那一份的 reconciler 语义，pin 漂了就等于测着旧版本——升级 DSH 后先跑它核对（2026-10-15 实测：18.3.1）。 |
 
 **为什么变异测试是必要的**：新写的断言第一次跑就绿，**什么都不能证明**——它可能
 恒真、可能断言了个永远相等的值、可能根本没被执行到。`mutate.mjs` 是唯一能区分
@@ -22,6 +23,48 @@
 
 `test` 是**仓库相对路径**：`"test/routes.test.mjs"`（多个可给数组）。裸文件名
 （`"routes.test.mjs"`）也会被补上 `test/` 前缀。
+
+### 跑 client 的 DOM 门禁：`mutate-dom-render.json` 必须带 `DSH_DOM_TARGET=src`
+
+```
+DSH_DOM_TARGET=src node tools/dev/mutate.mjs tools/dev/mutate-dom-render.json
+```
+
+`test/dom-render.test.mjs`（以及 `test/panel.test.mjs`）默认被测物是**构建产物**
+`client.js`，而变异改的是 `src/**`——不重新 build，产物里根本没有那个改动，于是
+**每一条变异都会报告「漏过」**，看起来像门禁全瞎，其实是变异没进到被测物。这个坑
+真实踩过一次（2026-10-15 首轮审计：24/24 全绿假象）。`dom-render.test.mjs` 因此带
+第二个入口：`DSH_DOM_TARGET=src` 让它直接挂载 `src/client/panel-page.ts`（同一批
+断言、同一个替身 React），变异审计要跑这一档。产物入口仍是 `npm test` 的默认，
+「改了 src 忘 build」由 `test/build-gate.mjs` 单独负责。
+
+同一轮审计的两条结论，记在这里免得被当成矛盾：
+- 16 条 client 事件/时序/载荷变异，`panel.test.mjs` 抓住 **0** 条，
+  `dom-render.test.mjs`（src 入口）抓住 **16** 条。这就是那条 ROADMAP 缺口的量度。
+- 「全部隐藏」发混排清单那条变异（卡里那条防线拆掉）**抓不到**，因为调用方
+  `saveRoster` 还有一道归一——它是**冗余防线**，不是门禁盲区；拆那道归一的变异
+  （S1）确实会红。哨兵独占态的两条防线各自都有对应的变异钉着。
+
+### 跑真 React 那一档：`mutate-dom-render-react.json`
+
+```
+DSH_DOM_TARGET=src node tools/dev/mutate.mjs tools/dev/mutate-dom-render-react.json
+```
+
+`test/dom-render-react.test.mjs` 用**真 React 18.3.1 + react-dom/client + jsdom**挂载
+同一块面板，只承载 mini 替身结构上无法表达的五类（真 CSSOM 的选中态、节点复用、
+焦点保持、列表换序的 id 身份、React 开发期告警为零）。实测结论，记在这里免得重测：
+
+- 同一批 3 条变异，真 React 档抓住 **3** 条，mini 档（`dom-render.test.mjs`）抓住
+  **0** 条——两档不是重复，是互补。
+- 「删掉 roster 行的 `key`」那条是被 **§5 的零告警**抓住的，不是被 §4 的顺序断言抓住
+  的：checkbox 全受控（`checked: draft.includes(id)`），删 key 不会串位。**凡是「React
+  自己的规矩」类缺陷，都归 §5**，别指望 §4。
+- 两个必踩的坑（都写进了套件的注释，改文件时别删）：`react-dom/client` 必须在
+  `window`/`document` 就位之后再 import（它在模块求值时算死 `canUseDOM`，否则 input
+  事件被整条吞掉，表现为「打字进不去、payload 是空串」，看着像被测代码坏了）；受控
+  input 必须用 `HTMLInputElement.prototype` 的原生 setter 改值，否则被值追踪器判成
+  「没有变化」。写第一版时当场踩了前者。
 
 ### 四个判定，看清它们的区别
 

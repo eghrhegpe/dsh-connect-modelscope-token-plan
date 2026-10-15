@@ -14,8 +14,9 @@
 import { PLUGIN_VERSION, name } from "./host-config.ts";
 import { CODE } from "./codes.ts";
 import { resolveEnabledIds } from "./provider-store.ts";
-import { rosterWithAvailability, resolveAllowedList } from "./llm-models.ts";
-import { resolveSwitchEnabled, switchSource } from "./switch-precedence.ts";
+import { rosterWithAvailability, resolveAllowedList, imageGenModelIds } from "./llm-models.ts";
+import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "./switch-precedence.ts";
+import { drawToolNote } from "./draw-tool-state.ts";
 import { errMsg, redactSecrets } from "./util.ts";
 import type { Snapshot } from "../shared/wire.ts";
 import type { Wiring } from "./types.ts";
@@ -65,8 +66,8 @@ function providerDegraded(error: string): Snapshot["provider"] {
 }
 
 /** 聚合快照 body。wiring 子集见 routes/snapshot.ts 的 Pick。 */
-export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "tokenStore" | "usageStore" | "inference" | "providerStore" | "publisher" | "logger">): Promise<Snapshot> {
-  const { settings, tokenStore, usageStore, inference, providerStore, publisher } = wiring;
+export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "tokenStore" | "usageStore" | "inference" | "providerStore" | "drawStore" | "publisher" | "logger">): Promise<Snapshot> {
+  const { settings, tokenStore, usageStore, inference, providerStore, drawStore, publisher } = wiring;
 
   const [tokenState, daily, perModel, trend, events, providerNote] = await Promise.all([
     soft(tokenStore.state()),
@@ -161,6 +162,29 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     } satisfies Snapshot["provider"];
   })());
 
+  // ── 出图块 ──
+  // 与 provider 块同一套纪律：整块软失败，任何一路读不到都走降级形状，绝不 ok:false。
+  // 候选来自**目录**（平台声明的出图能力），不是 provider 的允许清单——用户裁剪
+  // chat picker 不该波及出图工具的候选。
+  const draw = await soft((async () => {
+    const panel = await drawStore.enabled().catch(() => null);
+    const panelModel = await drawStore.modelId().catch(() => null);
+    const candidateIds = imageGenModelIds(modelEntries);
+    return {
+      enabled: resolveSwitchEnabled(panel, settings.drawEnabled),
+      source: switchSource(panel),
+      candidateIds,
+      candidateCount: candidateIds.length,
+      preferredModel: resolveSwitchValue(panelModel, settings.drawModelId === "" ? undefined : settings.drawModelId) ?? null,
+      preferredSource: switchSource(panelModel),
+      // 缺席原因由 draw-register 在挂载时写入（仅内存）；开关未开时它也是 null，
+      // 面板据 enabled 区分「没开」与「开了但不在」。
+      absentReason: drawToolNote(),
+      mountPending: resolveSwitchEnabled(panel, settings.drawEnabled) === true && drawToolNote() !== null,
+      toolName: "modelscope_draw_image"
+    } satisfies Snapshot["draw"];
+  })());
+
   // 读不到就是 null（不是 0）：0 是可信的日常值，把「读不到」渲成 0 会让操作者以为
   // 今天没调用过，而真相是他不知道。面板对 null 渲染「—」（见 wire.ts DailyUsage）。
   const usedLocal = daily.ok ? daily.value.calls : null;
@@ -195,6 +219,9 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     },
     // provider 块（M4 §11）：软失败，失败给降级形状而非整条快照失败。
     provider: provider.ok ? provider.value : providerDegraded(provider.error),
+    // 出图块：同一条纪律。失败时**省略**整个块（wire 里 `draw?` 是可选），面板
+    // 走 drawOf 的降级形状——比硬塞一个可能误导的「未开启」更诚实。
+    ...(draw.ok ? { draw: draw.value } : {}),
     shapeWarnings,
     // quotaError 为 M4 预留（wire.ts 语义）；v0.1 的失败都走 shapeWarnings /
     // balance.error 呈现，此字段恒 null。

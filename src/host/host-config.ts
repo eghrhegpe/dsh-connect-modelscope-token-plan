@@ -49,6 +49,31 @@ export const CONFIG_DEFAULTS = Object.freeze({
   maxEvents: 50,
   /** provider 注册的 patch 默认值（面板保存值优先于它）。 */
   registerProvider: false,
+  /**
+   * 出图工具的 patch 默认值（面板保存值优先于它）。
+   *
+   * **与 `registerProvider` 是两个独立开关**：前者是「把魔搭当 chat provider」，
+   * 后者是「给 agent 一个出图工具」。默认同为 false（opt-in），但互不牵连。
+   * 实测依据见 docs/SPIKE-image-gen.md。
+   */
+  drawEnabled: false,
+  /** 出图默认模型（空 = 自动挑目录里第一个出图模型）。 */
+  drawModelId: "",
+  /**
+   * 单次出图的总预算（毫秒），含提交与全部轮询。
+   *
+   * 默认 **15 分钟**。这是本字段第三次调整，每次都有实测依据：
+   *  1. 最初据「任务慢」定 10 分钟，后归因为「轮询太密」，改为 5 分钟；
+   *  2. 该归因**已被推翻**——2026-10-10 同一模型、同样 15s 轮询连测三次，
+   *     耗时 61s → 261s → **537s**，单调恶化。是上游免费池的**排队时长在波动**，
+   *     与轮询间隔无关（那次 5s 轮询的 >185s 观测不能再当作证据）；
+   *  3. 5 分钟预算因此**实测被击穿**：一次真实 e2e 在 300s 处放弃，而任务仍活着。
+   *
+   * 取 15 分钟：覆盖已观测到的最慢一次（537s）并留一倍余量。**注意超时放弃不等于
+   * 任务死亡**——上游任务会继续跑（且记录最终会被回收，见 docs/SPIKE-image-gen.md
+   * §坑 5）。宁可多等，不要把一张已经在生成的图扔掉。
+   */
+  drawTimeoutMs: 900_000,
   /** Host 应答的默认主机名；操作者的列表是「只增不替」。 */
   admittedHosts: ["localhost", "127.0.0.1", "[::1]", "::1"]
 });
@@ -85,6 +110,12 @@ export interface ResolvedSettings {
   inferenceTimeoutMs: number;
   maxEvents: number;
   registerProvider: boolean;
+  /** 出图工具开关（面板保存值优先于它）。 */
+  drawEnabled: boolean;
+  /** 出图默认模型（空串 = 自动）。 */
+  drawModelId: string;
+  /** 单次出图总预算（毫秒），含提交与轮询。 */
+  drawTimeoutMs: number;
   allowedHosts: Set<string>;
 }
 
@@ -120,6 +151,12 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         inferenceTimeoutMs: clampInt(source.inferenceTimeoutMs, CONFIG_DEFAULTS.inferenceTimeoutMs, 1_000, 600_000),
         maxEvents: clampInt(source.maxEvents, CONFIG_DEFAULTS.maxEvents, 1, 1_000),
         registerProvider: source.registerProvider === true,
+        // 出图三件套。超时同样夹上界：它直接喂给轮询截止，3e9 会让每一次出图
+        // 立刻超时（与 pollSeconds / inferenceTimeoutMs 同一类坑）。下界 30s——
+        // 低于实测最快的一次出图（61s）没有意义。
+        drawEnabled: source.drawEnabled === true,
+        drawModelId: str(source.drawModelId, CONFIG_DEFAULTS.drawModelId),
+        drawTimeoutMs: clampInt(source.drawTimeoutMs, CONFIG_DEFAULTS.drawTimeoutMs, 30_000, 900_000),
         // 允许主机名：默认集只增不替（typo 不能把面板锁在外面）。
         allowedHosts: resolveAllowedHosts(source)
       },
@@ -137,6 +174,9 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         inferenceTimeoutMs: CONFIG_DEFAULTS.inferenceTimeoutMs,
         maxEvents: CONFIG_DEFAULTS.maxEvents,
         registerProvider: false,
+        drawEnabled: false,
+        drawModelId: CONFIG_DEFAULTS.drawModelId,
+        drawTimeoutMs: CONFIG_DEFAULTS.drawTimeoutMs,
         allowedHosts: new Set(CONFIG_DEFAULTS.admittedHosts)
       },
       configError: redactSecrets(errMsg(error))

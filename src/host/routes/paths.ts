@@ -11,3 +11,5 @@ export const TOKEN_PATH = "/api/dsh-connect-modelscope-token-plan/token";
 export const TOKEN_FORGET_PATH = "/api/dsh-connect-modelscope-token-plan/token/forget";
 export const PROBE_PATH = "/api/dsh-connect-modelscope-token-plan/probe";
 export const PROVIDER_PATH = "/api/dsh-connect-modelscope-token-plan/provider";
+export const DRAW_PATH = "/api/dsh-connect-modelscope-token-plan/draw";
+export const DRAW_RESET_PATH = "/api/dsh-connect-modelscope-token-plan/draw/reset";

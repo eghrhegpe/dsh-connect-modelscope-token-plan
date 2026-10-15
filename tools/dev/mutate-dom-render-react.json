@@ -1,0 +1,23 @@
+[
+  {
+    "target": "src/client/styles.ts",
+    "test": "test/dom-render-react.test.mjs",
+    "mutants": [
+      { "name": "R1 tabActive 被压平（选中 tab 与未选中在 CSSOM 里再无区别）", "from": "  tabActive: { color: \"var(--dsw-alias-label-primary)\", fontWeight: 600, borderBottom: `2px solid ${BRAND}` },", "to": "  tabActive: { color: \"var(--dsw-alias-label-secondary)\" }," }
+    ]
+  },
+  {
+    "target": "src/client/panel-page.ts",
+    "test": "test/dom-render-react.test.mjs",
+    "mutants": [
+      { "name": "R2 令牌区块拿到一个不稳定 key（每次重渲染整块重挂 → 正在输入的框被打断）", "from": "      { title: tt(\"section.token\"), open: openSections.token, onToggle: () => toggleSection(\"token\"), tt },", "to": "      { key: String(Math.random()), title: tt(\"section.token\"), open: openSections.token, onToggle: () => toggleSection(\"token\"), tt }," }
+    ]
+  },
+  {
+    "target": "src/client/cards.ts",
+    "test": "test/dom-render-react.test.mjs",
+    "mutants": [
+      { "name": "R3 删掉 roster 行的 key（由 §5 的「零 React 开发期告警」抓住，而不是 §4 的顺序断言——checkbox 全受控，删 key 不会串位，所以这条正说明 §5 才是它的门禁）", "from": "              { key: id, style: unusable ? { ...S.modelRow, ...S.modelRowOff } : S.modelRow },", "to": "              { style: unusable ? { ...S.modelRow, ...S.modelRowOff } : S.modelRow }," }
+    ]
+  }
+]

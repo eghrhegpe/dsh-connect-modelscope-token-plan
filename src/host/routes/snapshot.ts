@@ -19,7 +19,7 @@ import type { Wiring } from "../types.ts";
  * usageStore / inference / providerStore / publisher / logger。
  * @returns {Function} off() 注销回调。
  */
-export function registerSnapshotRoute(ctx: any, wiring: Pick<Wiring, "settings" | "configError" | "tokenStore" | "usageStore" | "inference" | "providerStore" | "publisher" | "logger">) {
+export function registerSnapshotRoute(ctx: any, wiring: Pick<Wiring, "settings" | "configError" | "tokenStore" | "usageStore" | "inference" | "providerStore" | "drawStore" | "publisher" | "logger">) {
   const { settings, configError } = wiring;
 
   return ctx.webServer.register({

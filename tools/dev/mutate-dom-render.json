@@ -1,0 +1,60 @@
+[
+  {
+    "target": "src/client/panel-page.ts",
+    "test": "test/dom-render.test.mjs",
+    "mutants": [
+      { "name": "P1 provider 开关永远发 enabled:false", "from": "runProviderWrite(PROVIDER_PATH, { enabled })", "to": "runProviderWrite(PROVIDER_PATH, { enabled: false })" },
+      { "name": "P2 出图开关把翻转后的值再翻一次", "from": "runDrawWrite(DRAW_PATH, { enabled })", "to": "runDrawWrite(DRAW_PATH, { enabled: !enabled })" },
+      { "name": "P3 刷新按钮不再绑 onClick", "from": "onClick: () => void load() }, tt(\"panel.refresh\"))", "to": "onClick: undefined }, tt(\"panel.refresh\"))" },
+      { "name": "S1 拆掉调用方的哨兵归一（「全部隐藏」被稀释成「全部提供」）", "from": "const normalized = enabledIds.includes(HIDE_ALL_MODELS)", "to": "const normalized = false && enabledIds.includes(HIDE_ALL_MODELS)" }
+    ]
+  },
+  {
+    "target": "src/client/cards.ts",
+    "test": "test/dom-render.test.mjs",
+    "mutants": [
+      { "name": "C1 保存令牌发的是空串（打字没回流到 payload）", "from": "onClick: () => { onSave(value); setValue(\"\"); }", "to": "onClick: () => { onSave(\"\"); setValue(\"\"); }" },
+      { "name": "C2 「忘掉已保存」不绑 handler", "from": "disabled: busy, onClick: onForget }", "to": "disabled: busy, onClick: undefined }" },
+      { "name": "C4 「保存清单」发 Host 值而不是勾选草稿", "from": "onClick: () => onSaveList(draft.slice())", "to": "onClick: () => onSaveList(hostIds.slice())" },
+      { "name": "C5 勾一个真实模型什么都不改（退出不了哨兵态）", "from": ": [...current.filter((x) => x !== HIDE_ALL_MODELS), id]", "to": ": current" },
+      { "name": "C6 「全部隐藏」之后复选框仍画成勾中（历史 bug 的可见症状）", "from": "type: \"checkbox\", checked: !hideAllMode && draft.includes(id), disabled: busy || unusable,", "to": "type: \"checkbox\", checked: true, disabled: busy || unusable," }
+    ]
+  },
+  {
+    "target": "src/client/toggle-switch.ts",
+    "test": "test/dom-render.test.mjs",
+    "mutants": [
+      { "name": "T1 开关内层控件不再是 checkbox（渲染套件区分开关与 roster 复选框的契约）", "from": "type: \"checkbox\",", "to": "type: \"radio\"," }
+    ]
+  },
+  {
+    "target": "src/client/use-polling-interval.ts",
+    "test": "test/dom-render.test.mjs",
+    "mutants": [
+      { "name": "U1 切到后台不再 clearInterval（后台窗口满速打 Host）", "from": "if (hidden()) stop();", "to": "if (hidden()) { /* 不暂停 */ }" },
+      { "name": "U2 失败退避的地板被拆（60s 退避变成 1ms 猛打）", "from": "const effective = failed ? Math.max(healthy, ERROR_BACKOFF_MS) : healthy;", "to": "const effective = failed ? 1 : healthy;" }
+    ]
+  },
+  {
+    "target": "src/client/use-snapshot-polling.ts",
+    "test": "test/dom-render.test.mjs",
+    "mutants": [
+      { "name": "G1 generation guard 的代号恒为 0（第一发就被判成过期）", "from": "const mine = generation.current;", "to": "const mine = 0;" },
+      { "name": "G2 不记录在途请求（顶替与卸载都作废不了它）", "from": "inFlight.current = controller;", "to": "inFlight.current = null;" }
+    ]
+  },
+  {
+    "target": "src/client/http.ts",
+    "test": "test/dom-render.test.mjs",
+    "mutants": [
+      { "name": "H1 写路径把 ok:false 也判成功（界面上「什么都没发生」）", "from": "if (body !== null && body.ok === true) return null;", "to": "if (body !== null) return null;" }
+    ]
+  },
+  {
+    "target": "src/client/snapshot.ts",
+    "test": "test/dom-render.test.mjs",
+    "mutants": [
+      { "name": "K1 缺键不进 shapeWarnings（结构漂移对用户不可见）", "from": "return { data: filled as unknown as Snapshot, error: null, missingKeys };", "to": "return { data: filled as unknown as Snapshot, error: null, missingKeys: [] };" }
+    ]
+  }
+]

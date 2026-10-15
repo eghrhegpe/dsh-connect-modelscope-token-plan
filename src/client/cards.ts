@@ -9,9 +9,9 @@ import { h, useEffect, useMemo, useState } from "./runtime.ts";
 import type { DictionaryKey, Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
 import { HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, modelscopeModelUrl, FEATURED_OWNERS, catalogOwner } from "./const.ts";
-import { providerOf } from "./snapshot.ts";
+import { providerOf, drawOf } from "./snapshot.ts";
 import { ToggleSwitch } from "./toggle-switch.ts";
-import type { BalanceData, ProviderStatus, QuotaEvent, Snapshot, TrendBucket, TokenStatus } from "../shared/wire.ts";
+import type { BalanceData, ProviderStatus, DrawStatus, QuotaEvent, Snapshot, TrendBucket, TokenStatus } from "../shared/wire.ts";
 
 /** 可折叠 section 卡：全宽头部按钮 + 旋转 chevron；open/onToggle 由 props 进。 */
 export function SectionCard({ title, open, onToggle, children, tt }: {
@@ -406,3 +406,115 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onRe
     error !== null ? h("div", { style: S.formError, role: "alert" }, error) : null
   );
 }
+
+/**
+ * 出图工具卡：开关、候选模型、挂载状态。
+ *
+ * **与 ProviderCard 的关键差异，也是这张卡存在的主要理由**：provider 开关翻转会
+ * 立即重注册，而出图工具的开关翻转**要等下次 Host 启动**——peer 的 tools registry
+ * 没有 unregister。所以这张卡必须把这件事说出来（`draw.restartHint`），否则用户
+ * 翻开关后看不到任何变化，会以为坏了。
+ *
+ * 缺席原因是**分开渲染**的：`no-tools-service` 是「这个 Host 没提供该服务」（正常），
+ * 另两种是 Host 缺陷。三种都给出各自的一句话，因为「开关开着但工具不在」如果没有
+ * 解释，用户没有任何办法自己诊断。
+ * @param {object} props - 渲染参数。
+ * @returns {unknown} 卡片节点。
+ */
+export function DrawCard({ draw, busy, error, onToggle, onReset, tokenPresent, tt }: {
+  draw: DrawStatus | null;
+  busy: boolean;
+  error: string | null;
+  onToggle: (enabled: boolean) => void;
+  onReset: () => void;
+  tokenPresent?: boolean | undefined;
+  tt: Tt;
+}): unknown {
+  const status = drawOf(draw);
+  const enabled = status.enabled === true;
+  const candidates = status.candidateIds;
+  const sourceKey = status.source === "panel" ? "draw.source.panel" : "draw.source.config";
+
+  const switchRow = h(
+    "div",
+    { style: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "0 0 8px" } },
+    h(ToggleSwitch, {
+      checked: enabled,
+      onChange: () => onToggle(!enabled),
+      busy,
+      label: tt(enabled ? "draw.on" : "draw.off"),
+      busyLabel: tt("draw.busy"),
+      title: tt("draw.enable")
+    }),
+    h("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary)" } }, tt(sourceKey))
+  );
+
+  // 挂载状态：缺席原因优先于「已挂载」——它是用户唯一能拿到的诊断线索。
+  let statusNode: unknown;
+  if (status.absentReason !== null) {
+    const key: DictionaryKey = DRAW_ABSENT_KEY[status.absentReason] ?? "draw.absent.unknown";
+    const severe = status.absentReason !== "no-tools-service";
+    statusNode = h(
+      "div",
+      {
+        style: severe
+          ? { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" }
+          : S.formNote,
+        role: "status"
+      },
+      tt(key)
+    );
+  } else if (enabled) {
+    statusNode = h("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" }, role: "status" }, format(tt("draw.mounted"), { tool: status.toolName }));
+  } else {
+    statusNode = h("div", { style: { ...S.muted, fontSize: 12 }, role: "status" }, tt("draw.notMounted"));
+  }
+
+  // 挂载发生在下次 Host 启动——开关翻转后本次不生效。只在开关为开时提示。
+  const restartHint = enabled
+    ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("draw.restartHint"))
+    : null;
+
+  const tokenHint = enabled && tokenPresent === false
+    ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("draw.needsKey"))
+    : null;
+
+  const candidateBlock = candidates.length === 0
+    ? h("div", { style: { ...S.muted, fontSize: 12, marginTop: 6 } }, tt("draw.noCandidates"))
+    : h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: 4 } },
+      candidates.map((id) =>
+        h(
+          "div",
+          { key: id, style: S.modelRowHead },
+          h("code", { style: S.modelName, title: id }, id),
+          h("span", { style: S.modelBadge }, tt("draw.badge")),
+          h("a", { style: { ...S.formNote, margin: 0, marginLeft: "auto" }, href: modelscopeModelUrl(id), target: "_blank", rel: "noreferrer", title: tt("models.viewOnSiteTitle") }, tt("models.viewOnSite"))
+        )
+      )
+    );
+
+  return h(
+    "div",
+    null,
+    switchRow,
+    statusNode,
+    restartHint,
+    tokenHint,
+    h("div", { style: { ...S.sectionTitle, margin: "18px 0 8px" } }, tt("draw.models")),
+    candidateBlock,
+    h("div", { style: S.rosterFoot }, h("button", { type: "button", style: S.button, disabled: busy, onClick: onReset }, tt("draw.reset"))),
+    error !== null ? h("div", { style: S.formError, role: "alert" }, error) : null
+  );
+}
+
+/**
+ * 缺席原因码 → 字典键。新增原因码而忘了配文案时，`DrawCard` 兜底到
+ * `draw.absent.unknown`，不会渲染出一个空白。
+ */
+const DRAW_ABSENT_KEY: Record<string, DictionaryKey> = {
+  "no-tools-service": "draw.absent.noTools",
+  "peer-load-failed": "draw.absent.peerLoad",
+  "registry-refused": "draw.absent.registry"
+};

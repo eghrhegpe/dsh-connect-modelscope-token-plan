@@ -110,8 +110,48 @@ export interface ProviderStatus {
   }[];
 }
 
-/** 令牌状态。valid: null = 未检查过（不是「有效」也不是「无效」）。 */
-export interface TokenStatus {
+/**
+ * 出图工具的状态（`DRAW_PATH` 的响应形状，也进快照）。
+ *
+ * **刻意与 `ProviderStatus` 分开**：那个说「魔搭作为 chat provider 提供什么模型」，
+ * 这个说「给 agent 一个出图工具」。两者的开关、候选集合、生效时机都不同——出图
+ * 开关翻转**不会**立刻改变挂载（工具无法注销），这正是 `mountPending` 要表达的。
+ *
+ * 实测依据见 docs/SPIKE-image-gen.md。
+ */
+export interface DrawStatus {
+  /** 生效的开关值（面板保存值优先于 patch 默认）。 */
+  enabled: boolean;
+  /** 谁说了算：面板保存的值，还是 patch 的默认。 */
+  source: "panel" | "config";
+  /**
+   * 出图候选模型 id。来自**目录**（平台声明的出图能力），不是 provider 的允许
+   * 清单——裁剪 chat picker 不该波及出图工具的候选。
+   */
+  candidateIds: string[];
+  candidateCount: number;
+  /** 生效的默认模型；`null` = 自动（取候选第一个）。 */
+  preferredModel: string | null;
+  preferredSource: "panel" | "config";
+  /**
+   * 工具缺席的原因；`null` = 开关没开，或已成功挂载。
+   *
+   * 三种原因里只有 `no-tools-service` 是「正常」（Host 没提供该服务），另两种是
+   * Host 缺陷。面板必须分开措辞，否则用户没法自己诊断「开关开着但工具不在」。
+   */
+  absentReason: "no-tools-service" | "peer-load-failed" | "registry-refused" | null;
+  /**
+   * 开关已开，但本次挂载**尚未**把工具注册上（或缺席）。
+   *
+   * 与 `absentReason` 的区别：这个说「本进程里还看不到工具」，是翻转开关后到下次
+   * Host 启动之间应有的状态——不是故障。面板据此显示「重启后生效」。
+   */
+  mountPending: boolean;
+  /** agent 侧的工具名（就是用户能在对话里看到的那个）。 */
+  toolName: string;
+}
+
+/** 令牌状态。valid: null = 未检查过（不是「有效」也不是「无效」）。 */export interface TokenStatus {
   present: boolean;
   source: "credentials" | "env" | "none" | "memory";
   valid: boolean | null;
@@ -163,6 +203,11 @@ export interface Snapshot {
   models: { available: boolean; count: number; sample: string[]; error: string | null };
   /** Provider 注册状态（M4）：开关 + 注册 + 允许清单 + 面板 roster。 */
   provider: ProviderStatus;
+  /**
+   * 出图工具状态。**可选**：旧 Host 或过渡期可能不给这个块，面板走
+   * `drawOf` 的降级形状（与 `provider` 同一套「resolver-not-snapshot」纪律）。
+   */
+  draw?: DrawStatus;
   shapeWarnings: string[];
   quotaError: { code: string } | null;
 }

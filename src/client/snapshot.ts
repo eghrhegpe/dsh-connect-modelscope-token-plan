@@ -8,7 +8,7 @@
 import { format } from "./format.ts";
 import type { zh } from "./i18n.ts";
 import type { Tt } from "./runtime.ts";
-import type { Snapshot, SnapshotResponse, ProviderStatus } from "../shared/wire.ts";
+import type { Snapshot, SnapshotResponse, ProviderStatus, DrawStatus } from "../shared/wire.ts";
 import { SNAPSHOT_REQUIRED_KEYS } from "../shared/wire.ts";
 
 /**
@@ -196,6 +196,58 @@ export function providerOf(raw: unknown): ProviderStatus {
 export function errorOfStatus(status: number): PanelFailure | string {
   if (status === 401 || status === 403) return { message: `HTTP ${status}`, code: "auth_error" };
   return `HTTP ${status}`;
+}
+
+/**
+ * 出图块的降级形状：旧 Host 不给 `draw` 时用它，面板不白屏。
+ *
+ * `absentReason: null` + `enabled: false` 表达的是「这个 Host 没告诉我出图状态」，
+ * 渲染成「未开启」——比把缺席原因猜成 `no-tools-service` 诚实：那会向用户宣称一个
+ * 我们并不知道的原因。
+ */
+export const DEGRADED_DRAW: DrawStatus = Object.freeze({
+  enabled: false,
+  source: "config",
+  candidateIds: [],
+  candidateCount: 0,
+  preferredModel: null,
+  preferredSource: "config",
+  absentReason: null,
+  mountPending: false,
+  toolName: "modelscope_draw_image"
+});
+
+/**
+ * 把 wire/路由返回的出图块归一成 `DrawStatus`；不合法一律降级。
+ *
+ * 与 `providerOf` 同一套防御性归一（旧 Host 可能缺字段）。`absentReason` 只认三个
+ * 已知码——上游若新增第四个，归一到 `null` 而不是把它透传成渲染不出的值；面板的
+ * 「缺席」措辞有兜底键，但**状态本身**宁可显示「未知」也不假装认识它。
+ * @param {unknown} raw - 原始块。
+ * @returns {DrawStatus} 归一后的状态。
+ */
+export function drawOf(raw: unknown): DrawStatus {
+  if (raw === null || typeof raw !== "object") return DEGRADED_DRAW;
+  const d = raw as Record<string, unknown>;
+  const candidates = Array.isArray(d.candidateIds)
+    ? (d.candidateIds as unknown[]).map((id) => String(id ?? "")).filter((id) => id !== "")
+    : [];
+  const reason = d.absentReason;
+  const absentReason = reason === "no-tools-service" || reason === "peer-load-failed" || reason === "registry-refused"
+    ? reason
+    : null;
+  return {
+    enabled: d.enabled === true,
+    source: d.source === "panel" ? "panel" : "config",
+    candidateIds: candidates,
+    // NaN 也是 "number"：与 providerOf 同一条理由，Number.isFinite 一并挡掉。
+    candidateCount: typeof d.candidateCount === "number" && Number.isFinite(d.candidateCount) ? d.candidateCount : candidates.length,
+    preferredModel: typeof d.preferredModel === "string" && d.preferredModel !== "" ? d.preferredModel : null,
+    preferredSource: d.preferredSource === "panel" ? "panel" : "config",
+    absentReason,
+    mountPending: d.mountPending === true,
+    toolName: typeof d.toolName === "string" && d.toolName !== "" ? d.toolName : "modelscope_draw_image"
+  };
 }
 
 /** wire 码 → 文案键。副本被 test/panel.test.mjs 钉住。 */

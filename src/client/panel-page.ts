@@ -3,16 +3,16 @@
  * 全部布局。渲染在 Plugins 页内、始终展开；轮询只在本卡挂载期间进行。
  * @module dsh-connect-modelscope-token-plan/client/panel-page
  */
-import { SectionCard, BalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm, ProviderCard } from "./cards.ts";
-import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, HIDE_ALL_MODELS } from "./const.ts";
+import { SectionCard, BalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm, ProviderCard, DrawCard } from "./cards.ts";
+import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, HIDE_ALL_MODELS } from "./const.ts";
 import { format, errorText, isoTime } from "./format.ts";
 import { getJson, postJson, writeFailure } from "./http.ts";
-import { viewOf, providerOf, DEGRADED_PROVIDER } from "./snapshot.ts";
+import { viewOf, providerOf, drawOf, DEGRADED_PROVIDER, DEGRADED_DRAW } from "./snapshot.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
 import { h, useCallback, useEffect, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
-import type { ProviderStatus, Snapshot } from "../shared/wire.ts";
+import type { ProviderStatus, DrawStatus, Snapshot } from "../shared/wire.ts";
 
 /** 三个固定视角。 */
 export type TabId = "quota" | "models" | "access";
@@ -23,7 +23,7 @@ export function PanelPage({ tt, localeSubscribe }: {
 }): unknown {
   const { data, error, updatedAt, load, missingKeys, pollRevision } = useSnapshotPolling();
   const [, setLocaleRevision] = useState(0);
-  const [openSections, setOpenSections] = useState({ balance: true, local: true, trend: true, events: false, provider: true, token: true });
+  const [openSections, setOpenSections] = useState({ balance: true, local: true, trend: true, events: false, provider: true, draw: true, token: true });
   const [activeTab, setActiveTab] = useState<TabId>("quota");
 
   useEffect(() => {
@@ -62,6 +62,25 @@ export function PanelPage({ tt, localeSubscribe }: {
     // 永远为 null，卡片会钉死在降级形状直到重挂——与 use-polling-interval 的
     // 「失败后退避重试」相反，是全客户端唯一一条永不重试的路径。
   }, [hasProviderBlock, pollRevision]);
+
+  // 出图工具：与 provider 同一套「快照优先 + 路由兜底」读法。
+  //
+  // 兜底那一发同样依赖 pollRevision——理由与 provider 那段完全相同（快照轮询从不
+  // 碰 DRAW_PATH，一次失败若不重试会让卡片钉死在降级形状直到重挂）。
+  const rawDraw: unknown = data?.draw;
+  const hasDrawBlock = rawDraw !== undefined && rawDraw !== null;
+  const [fetchedDraw, setFetchedDraw] = useState<DrawStatus | null>(null);
+  const draw: DrawStatus = hasDrawBlock ? drawOf(rawDraw) : (fetchedDraw ?? DEGRADED_DRAW);
+  useEffect(() => {
+    if (hasDrawBlock) return undefined;
+    let cancelled = false;
+    getJson(DRAW_PATH)
+      .then((body) => {
+        if (!cancelled && body !== null && body.ok === true) setFetchedDraw(drawOf(body));
+      })
+      .catch(() => { /* 保持降级形状；下一轮快照轮询会再试。 */ });
+    return () => { cancelled = true; };
+  }, [hasDrawBlock, pollRevision]);
 
   // 写盘统一入口：开关、允许清单、回到默认都 POST 到 provider 路由族。失败
   // 必须传播到面板（不静默吞）——这是用户的显式操作。成功即刷新快照，回显
@@ -105,6 +124,25 @@ export function PanelPage({ tt, localeSubscribe }: {
     void runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds: normalized });
   }, [runProviderWrite]);
   const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
+
+  // 出图工具的开关 / 模型偏好。**与 provider 走各自的一套 busy/error**：两张卡在
+  // 同一个 tab 里，共用一个 busy 会让「保存 provider 开关」把出图那张卡也置灰。
+  const [drawBusy, setDrawBusy] = useState(false);
+  const [drawError, setDrawError] = useState<string | null>(null);
+  const runDrawWrite = useCallback(async (path: string, payload: Record<string, unknown>) => {
+    setDrawBusy(true);
+    setDrawError(null);
+    try {
+      await postWrite(path, payload);
+      void load();
+    } catch (reason) {
+      setDrawError(format(tt("draw.error"), { error: writeErrorText(reason, tt) }));
+    } finally {
+      setDrawBusy(false);
+    }
+  }, [load, postWrite, tt]);
+  const toggleDraw = useCallback((enabled: boolean) => void runDrawWrite(DRAW_PATH, { enabled }), [runDrawWrite]);
+  const resetDraw = useCallback(() => void runDrawWrite(DRAW_RESET_PATH, {}), [runDrawWrite]);
 
   // 令牌保存 / 忘掉。
   const [tokenBusy, setTokenBusy] = useState(false);
@@ -202,7 +240,11 @@ export function PanelPage({ tt, localeSubscribe }: {
     );
   };
 
-  // 模型 tab：只有「接入为 DSH 模型」（开关 + 允许清单）。
+  // 模型 tab：provider 注册（开关 + 允许清单）+ 出图工具（开关 + 候选模型）。
+  //
+  // 两张卡并排是因为它们回答同一族问题（「魔搭能被 DSH 用成什么」），但**开关彼此
+  // 独立**：provider 管 chat 模型，出图管 agent 工具。放在同一个 tab 里，用户可以
+  // 一眼看到两者各自的状态与生效时机——出图那张卡还要额外说明「开关下次启动才生效」。
   //
   // 「模型目录（免认证，不耗额度）」那张表连同它的逐行试调按钮一起删掉了：
   // /models 是免认证的原始列表，而这一页由 Host 的 roster 承担——roster 是
@@ -223,6 +265,19 @@ export function PanelPage({ tt, localeSubscribe }: {
         onToggle: toggleProvider,
         onSaveList: saveRoster,
         onReset: resetProvider,
+        tokenPresent: data?.token?.present === true,
+        tt
+      })
+    ),
+    h(
+      SectionCard,
+      { title: tt("section.draw"), open: openSections.draw, onToggle: () => toggleSection("draw"), tt },
+      h(DrawCard, {
+        draw,
+        busy: drawBusy,
+        error: drawError,
+        onToggle: toggleDraw,
+        onReset: resetDraw,
         tokenPresent: data?.token?.present === true,
         tt
       })

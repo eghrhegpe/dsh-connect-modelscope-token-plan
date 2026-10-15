@@ -21,7 +21,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const slash = id.indexOf("/");
 		return slash >= 0 ? id.slice(0, slash) : id;
 	}
-	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
+	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
 	var init_const = __esmMin((() => {
 		NS = "dsh-connect-modelscope-token-plan";
 		PANEL_ID = NS;
@@ -33,6 +33,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		PROVIDER_PATH = `/api/${NS}/provider`;
 		PROVIDER_ROSTER_PATH = `/api/${NS}/provider/roster`;
 		PROVIDER_RESET_PATH = `/api/${NS}/provider/reset`;
+		DRAW_PATH = `/api/${NS}/draw`;
+		DRAW_RESET_PATH = `/api/${NS}/draw/reset`;
 		HIDE_ALL_MODELS = "__hide_all__";
 		MODELSCOPE_TOKEN_URL = "https://modelscope.cn/my/myaccesstoken";
 		MODELSCOPE_USAGE_URL = "https://modelscope.cn/magicube/usage?tab=consume";
@@ -114,6 +116,26 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.notConfigured": "还没有访问令牌，先到「接入」tab 配置",
 			"provider.source.panel": "面板",
 			"provider.source.config": "配置",
+			"section.draw": "出图工具",
+			"draw.enable": "给 agent 注册 modelscope_draw_image 工具",
+			"draw.on": "已开启",
+			"draw.off": "未开启",
+			"draw.busy": "切换中…",
+			"draw.mounted": "已注册：{tool}",
+			"draw.notMounted": "未注册——勾选上方开关即可开启。",
+			"draw.restartHint": "开关立即保存，但工具的挂载发生在**下次 Host 启动**（工具注册无法撤销）。",
+			"draw.models": "出图将使用以下模型",
+			"draw.badge": "出图",
+			"draw.noCandidates": "当前目录里没有出图模型（平台声明 image-to-image / text-to-image 的条目为空）；出图不可用。",
+			"draw.needsKey": "还没有访问令牌，先到「接入」tab 配置。",
+			"draw.reset": "回到默认",
+			"draw.error": "出图设置保存失败：{error}",
+			"draw.source.panel": "面板",
+			"draw.source.config": "配置",
+			"draw.absent.noTools": "开关已开，但本机 Host 未提供 agent tools 服务，出图工具缺席（Host 侧限制，非配置问题）。",
+			"draw.absent.peerLoad": "开关已开，但 tools 模块加载失败，出图工具缺席（Host 问题，非配置）。",
+			"draw.absent.registry": "开关已开，但工具注册被 Host 拒绝，出图工具缺席（Host 问题，非配置）。",
+			"draw.absent.unknown": "开关已开，但出图工具未挂载，原因未知。",
 			"trend.none": "还没有本地调用记录。",
 			"trend.legend": "柱长相对区间内最大值，仅本地口径。",
 			"events.none": "暂无事件。",
@@ -205,6 +227,26 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.notConfigured": "No token yet — configure it in the Access tab",
 			"provider.source.panel": "panel",
 			"provider.source.config": "config",
+			"section.draw": "Draw tool",
+			"draw.enable": "Register the modelscope_draw_image tool for the agent",
+			"draw.on": "On",
+			"draw.off": "Off",
+			"draw.busy": "Switching…",
+			"draw.mounted": "Registered: {tool}",
+			"draw.notMounted": "Not registered — tick the switch above.",
+			"draw.restartHint": "The switch saves at once, but the tool mounts at the NEXT Host start (a tool registration cannot be undone).",
+			"draw.models": "Draw calls will use the models below",
+			"draw.badge": "image",
+			"draw.noCandidates": "This catalogue declares no image model (no entry with image-to-image / text-to-image); drawing is unavailable.",
+			"draw.needsKey": "No token yet — configure it in the Access tab.",
+			"draw.reset": "Reset",
+			"draw.error": "Saving the draw settings failed: {error}",
+			"draw.source.panel": "panel",
+			"draw.source.config": "config",
+			"draw.absent.noTools": "The switch is on, but this Host exposes no agent tools service; the draw tool is absent (a Host limitation, not config).",
+			"draw.absent.peerLoad": "The switch is on, but the tools module failed to load; the draw tool is absent (a Host fault, not config).",
+			"draw.absent.registry": "The switch is on, but the Host refused the tool registration; the draw tool is absent (a Host fault, not config).",
+			"draw.absent.unknown": "The switch is on, but the draw tool is not mounted; the reason is unknown.",
 			"trend.none": "No local call records yet.",
 			"trend.legend": "Bar lengths are relative to the maximum in the range (local scope only).",
 			"events.none": "No events.",
@@ -810,6 +852,33 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		return `HTTP ${status}`;
 	}
 	/**
+	* 把 wire/路由返回的出图块归一成 `DrawStatus`；不合法一律降级。
+	*
+	* 与 `providerOf` 同一套防御性归一（旧 Host 可能缺字段）。`absentReason` 只认三个
+	* 已知码——上游若新增第四个，归一到 `null` 而不是把它透传成渲染不出的值；面板的
+	* 「缺席」措辞有兜底键，但**状态本身**宁可显示「未知」也不假装认识它。
+	* @param {unknown} raw - 原始块。
+	* @returns {DrawStatus} 归一后的状态。
+	*/
+	function drawOf(raw) {
+		if (raw === null || typeof raw !== "object") return DEGRADED_DRAW;
+		const d = raw;
+		const candidates = Array.isArray(d.candidateIds) ? d.candidateIds.map((id) => String(id ?? "")).filter((id) => id !== "") : [];
+		const reason = d.absentReason;
+		const absentReason = reason === "no-tools-service" || reason === "peer-load-failed" || reason === "registry-refused" ? reason : null;
+		return {
+			enabled: d.enabled === true,
+			source: d.source === "panel" ? "panel" : "config",
+			candidateIds: candidates,
+			candidateCount: typeof d.candidateCount === "number" && Number.isFinite(d.candidateCount) ? d.candidateCount : candidates.length,
+			preferredModel: typeof d.preferredModel === "string" && d.preferredModel !== "" ? d.preferredModel : null,
+			preferredSource: d.preferredSource === "panel" ? "panel" : "config",
+			absentReason,
+			mountPending: d.mountPending === true,
+			toolName: typeof d.toolName === "string" && d.toolName !== "" ? d.toolName : "modelscope_draw_image"
+		};
+	}
+	/**
 	* 面板决策：这张快照意味着什么。纯函数，Node 套件驱动同一个函数。
 	*
 	* `missingKeys` 是 `interpretSnapshot` 查出的缺失顶层键（非空 = 双端契约漂移）。
@@ -835,7 +904,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			shapeWarnings
 		};
 	}
-	var CLIENT_CODE, DEGRADED_PROVIDER, GUIDANCE_BY_CODE, FORM_EXCLUDED_CODES;
+	var CLIENT_CODE, DEGRADED_PROVIDER, DEGRADED_DRAW, GUIDANCE_BY_CODE, FORM_EXCLUDED_CODES;
 	var init_snapshot = __esmMin((() => {
 		init_format();
 		init_wire();
@@ -851,6 +920,17 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			allowed: "all",
 			enabledIds: [],
 			roster: []
+		});
+		DEGRADED_DRAW = Object.freeze({
+			enabled: false,
+			source: "config",
+			candidateIds: [],
+			candidateCount: 0,
+			preferredModel: null,
+			preferredSource: "config",
+			absentReason: null,
+			mountPending: false,
+			toolName: "modelscope_draw_image"
 		});
 		GUIDANCE_BY_CODE = Object.freeze({
 			auth_error: "panel.authError",
@@ -1311,7 +1391,114 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			role: "alert"
 		}, error) : null);
 	}
-	var EVENT_KIND_KEY;
+	/**
+	* 出图工具卡：开关、候选模型、挂载状态。
+	*
+	* **与 ProviderCard 的关键差异，也是这张卡存在的主要理由**：provider 开关翻转会
+	* 立即重注册，而出图工具的开关翻转**要等下次 Host 启动**——peer 的 tools registry
+	* 没有 unregister。所以这张卡必须把这件事说出来（`draw.restartHint`），否则用户
+	* 翻开关后看不到任何变化，会以为坏了。
+	*
+	* 缺席原因是**分开渲染**的：`no-tools-service` 是「这个 Host 没提供该服务」（正常），
+	* 另两种是 Host 缺陷。三种都给出各自的一句话，因为「开关开着但工具不在」如果没有
+	* 解释，用户没有任何办法自己诊断。
+	* @param {object} props - 渲染参数。
+	* @returns {unknown} 卡片节点。
+	*/
+	function DrawCard({ draw, busy, error, onToggle, onReset, tokenPresent, tt }) {
+		const status = drawOf(draw);
+		const enabled = status.enabled === true;
+		const candidates = status.candidateIds;
+		const sourceKey = status.source === "panel" ? "draw.source.panel" : "draw.source.config";
+		const switchRow = h("div", { style: {
+			display: "flex",
+			gap: 10,
+			alignItems: "center",
+			flexWrap: "wrap",
+			margin: "0 0 8px"
+		} }, h(ToggleSwitch, {
+			checked: enabled,
+			onChange: () => onToggle(!enabled),
+			busy,
+			label: tt(enabled ? "draw.on" : "draw.off"),
+			busyLabel: tt("draw.busy"),
+			title: tt("draw.enable")
+		}), h("span", { style: {
+			fontSize: 11,
+			color: "var(--dsw-alias-label-secondary)"
+		} }, tt(sourceKey)));
+		let statusNode;
+		if (status.absentReason !== null) {
+			const key = DRAW_ABSENT_KEY[status.absentReason] ?? "draw.absent.unknown";
+			const severe = status.absentReason !== "no-tools-service";
+			statusNode = h("div", {
+				style: severe ? {
+					...S.formNote,
+					color: "var(--dsw-alias-state-warn-primary)"
+				} : S.formNote,
+				role: "status"
+			}, tt(key));
+		} else if (enabled) statusNode = h("div", {
+			style: {
+				fontSize: 12,
+				color: "var(--dsw-alias-label-secondary)"
+			},
+			role: "status"
+		}, format(tt("draw.mounted"), { tool: status.toolName }));
+		else statusNode = h("div", {
+			style: {
+				...S.muted,
+				fontSize: 12
+			},
+			role: "status"
+		}, tt("draw.notMounted"));
+		const restartHint = enabled ? h("div", { style: {
+			...S.formNote,
+			color: "var(--dsw-alias-state-warn-primary)"
+		} }, tt("draw.restartHint")) : null;
+		const tokenHint = enabled && tokenPresent === false ? h("div", { style: {
+			...S.formNote,
+			color: "var(--dsw-alias-state-warn-primary)"
+		} }, tt("draw.needsKey")) : null;
+		const candidateBlock = candidates.length === 0 ? h("div", { style: {
+			...S.muted,
+			fontSize: 12,
+			marginTop: 6
+		} }, tt("draw.noCandidates")) : h("div", { style: {
+			display: "flex",
+			flexDirection: "column",
+			gap: 4
+		} }, candidates.map((id) => h("div", {
+			key: id,
+			style: S.modelRowHead
+		}, h("code", {
+			style: S.modelName,
+			title: id
+		}, id), h("span", { style: S.modelBadge }, tt("draw.badge")), h("a", {
+			style: {
+				...S.formNote,
+				margin: 0,
+				marginLeft: "auto"
+			},
+			href: modelscopeModelUrl(id),
+			target: "_blank",
+			rel: "noreferrer",
+			title: tt("models.viewOnSiteTitle")
+		}, tt("models.viewOnSite")))));
+		return h("div", null, switchRow, statusNode, restartHint, tokenHint, h("div", { style: {
+			...S.sectionTitle,
+			margin: "18px 0 8px"
+		} }, tt("draw.models")), candidateBlock, h("div", { style: S.rosterFoot }, h("button", {
+			type: "button",
+			style: S.button,
+			disabled: busy,
+			onClick: onReset
+		}, tt("draw.reset"))), error !== null ? h("div", {
+			style: S.formError,
+			role: "alert"
+		}, error) : null);
+	}
+	var EVENT_KIND_KEY, DRAW_ABSENT_KEY;
 	var init_cards = __esmMin((() => {
 		init_format();
 		init_runtime();
@@ -1323,6 +1510,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			quota: "events.quota",
 			rate_limit: "events.rate_limit",
 			error: "events.error"
+		};
+		DRAW_ABSENT_KEY = {
+			"no-tools-service": "draw.absent.noTools",
+			"peer-load-failed": "draw.absent.peerLoad",
+			"registry-refused": "draw.absent.registry"
 		};
 	}));
 
@@ -1553,6 +1745,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			trend: true,
 			events: false,
 			provider: true,
+			draw: true,
 			token: true
 		});
 		const [activeTab, setActiveTab] = useState("quota");
@@ -1581,6 +1774,20 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				cancelled = true;
 			};
 		}, [hasProviderBlock, pollRevision]);
+		const rawDraw = data?.draw;
+		const hasDrawBlock = rawDraw !== void 0 && rawDraw !== null;
+		const [fetchedDraw, setFetchedDraw] = useState(null);
+		const draw = hasDrawBlock ? drawOf(rawDraw) : fetchedDraw ?? DEGRADED_DRAW;
+		useEffect(() => {
+			if (hasDrawBlock) return void 0;
+			let cancelled = false;
+			getJson(DRAW_PATH).then((body) => {
+				if (!cancelled && body !== null && body.ok === true) setFetchedDraw(drawOf(body));
+			}).catch(() => {});
+			return () => {
+				cancelled = true;
+			};
+		}, [hasDrawBlock, pollRevision]);
 		const [providerBusy, setProviderBusy] = useState(false);
 		const [providerError, setProviderError] = useState(null);
 		const writeErrorText = (reason, t) => reason instanceof Error && reason.name === "AbortError" ? t("common.timeout") : errorText(reason);
@@ -1615,6 +1822,26 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds: normalized });
 		}, [runProviderWrite]);
 		const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
+		const [drawBusy, setDrawBusy] = useState(false);
+		const [drawError, setDrawError] = useState(null);
+		const runDrawWrite = useCallback(async (path, payload) => {
+			setDrawBusy(true);
+			setDrawError(null);
+			try {
+				await postWrite(path, payload);
+				load();
+			} catch (reason) {
+				setDrawError(format(tt("draw.error"), { error: writeErrorText(reason, tt) }));
+			} finally {
+				setDrawBusy(false);
+			}
+		}, [
+			load,
+			postWrite,
+			tt
+		]);
+		const toggleDraw = useCallback((enabled) => void runDrawWrite(DRAW_PATH, { enabled }), [runDrawWrite]);
+		const resetDraw = useCallback(() => void runDrawWrite(DRAW_RESET_PATH, {}), [runDrawWrite]);
 		const [tokenBusy, setTokenBusy] = useState(false);
 		const [tokenError, setTokenError] = useState(null);
 		const saveToken = useCallback(async (value) => {
@@ -1720,6 +1947,19 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			onToggle: toggleProvider,
 			onSaveList: saveRoster,
 			onReset: resetProvider,
+			tokenPresent: data?.token?.present === true,
+			tt
+		})), h(SectionCard, {
+			title: tt("section.draw"),
+			open: openSections.draw,
+			onToggle: () => toggleSection("draw"),
+			tt
+		}, h(DrawCard, {
+			draw,
+			busy: drawBusy,
+			error: drawError,
+			onToggle: toggleDraw,
+			onReset: resetDraw,
 			tokenPresent: data?.token?.present === true,
 			tt
 		})));

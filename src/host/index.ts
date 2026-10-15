@@ -1,8 +1,12 @@
 /**
  * dsh-connect-modelscope-token-plan — Host 半边（thin router）。
  *
- * 读魔搭 API-Inference 的**本地用量**（上游没有余额接口，见 docs/SPIKE.md）
- * 并经一条只读 /api 路由喂给 Client 面板。重活都在专注的兄弟模块里，本文件
+ * 读魔搭 API-Inference 的**本地用量**，并把它与官方魔粒余额一起经一条只读 /api
+ * 路由喂给 Client 面板。口径分工：推理响应**不携带**额度头（SPIKE.md §结论 1），但
+ * 官方另有魔粒余额端点（`GET {siteBase}/openapi/v1/magicubes/balance`，SPIKE.md
+ * 文首后记，2026-10-04 实测可用），面板头条读的是它；本文件下的兄弟模块只负责本地
+ * 计数那一半（按模型分布 / 本地趋势 / 429 事件流），回答官方余额答不了的问题。
+ * 重活都在专注的兄弟模块里，本文件
  * 只保留 Cordis 入口（name/inject/apply）、wiring 装配与卸载副作用：
  *
  *   - `host-config.ts`        配置契约 + isAdmitted 信任围栏
@@ -21,6 +25,9 @@ import { createTokenStore } from "./ms-auth.ts";
 import { createFileUsageStore } from "./usage-store.ts";
 import { createInferenceClient } from "./inference-client.ts";
 import { createFileProviderStore, resolveEnabledIds } from "./provider-store.ts";
+import { createFileDrawStore } from "./draw-store.ts";
+import { registerDrawTool } from "./draw-register.ts";
+import { resetDrawToolNote } from "./draw-tool-state.ts";
 import { createProviderPublisher } from "./provider-publish.ts";
 import { profileSegment } from "./state-store.ts";
 import { registerRoutes } from "./routes.ts";
@@ -71,6 +78,9 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   // `emit` 都传**函数**而非快照——llm 服务可能在本插件挂载之后才注册（与
   // credentials 同一个「resolver-not-snapshot」模式）。
   const providerStore = createFileProviderStore({ profile, logger: ctx.logger });
+
+  // 出图开关的持久层。（与 provider 开关同一个 profile 分段纪律；两个开关独立。）
+  const drawStore = createFileDrawStore({ profile, logger: ctx.logger });
   const publisher = createProviderPublisher({
     settings,
     panelSwitch: () => providerStore.enabled(),
@@ -148,17 +158,25 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     usageStore,
     inference,
     providerStore,
+    drawStore,
     publisher,
     logger: ctx.logger
   };
 
   const offs = registerRoutes(ctx, wiring);
-
   ctx.effect(() => {
     // M4 seed：挂载时立即跑一次轮询，让重启的 Host 在第一次目录拉到后就有模型，
     // 且**用落盘的允许清单**注册（而非空清单）——见 fix A/C。读不到目录就等下一轮
     // 轮询；开关/清单保存在 provider-store，provider 路由直接 publish。
     void runPoll();
+
+    // 出图工具（opt-in，默认关）：与 provider 注册是**两条独立的开关**——「把魔搭
+    // 当 chat provider」和「给 agent 一个出图工具」回答的是不同问题，合并没有好处。
+    //
+    // 注册时机承重：**工具注册不可撤销**（peer 的 tools registry 没有 unregister），
+    // 所以这里只在挂载时尝试一次，且 `isDisposed` 闸住已在途的调用。开关在挂载后
+    // 翻转要到下次 Host 启动才生效——这正是 sensenova 那份的面板文案也要说明的事。
+    void registerDrawTool(ctx, wiring, deps);
 
     // 目录轮询：每 `pollSeconds` 一次，拉目录、读落盘清单、`publish`。变化检测在
     // `publishProviderOnce` 内按 `catalogSignature` 比对——未变则空转不重建
@@ -171,6 +189,9 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     // 路由当场注销。
     return () => {
       clearInterval(timer);
+      // 出图工具的缺席原因只对**本次挂载**有意义：清掉，下一个生命周期从干净的
+      // 「未登记」开始（否则一次成功挂载后会残留上一轮的缺席原因）。
+      resetDrawToolNote();
       // 顺序承重：先 dispose（闸住后续 publish，不再注册进已撤下本插件的 Host），
       // 再 release（摘掉已注册的 provider 对）。
       publisher.dispose();

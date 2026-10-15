@@ -18,6 +18,12 @@
 
 ![「模型」tab：接入为DSH 模型与模型清单](assets/tab-model-list.png)
 
+同一 tab 下方另有**「出图工具」**卡（v0.2 起）：开启后 Host 给 agent 注册
+`modelscope_draw_image`，支持文生图、图生图与多图编辑。**它与「接入为 DSH 模型」
+是两条独立开关**，且开关值立即保存、而工具的**挂载发生在下次 Host 启动**（peer 的
+tools registry 没有 unregister）。实测协议（异步两段式、必需头、提交态不可信、
+计费与耗时口径）见 [docs/SPIKE-image-gen.md](docs/SPIKE-image-gen.md)。
+
 ## 三条事实（写代码前先认清）
 
 1. **官方有「魔粒」余额端点**：`GET {siteBase}/openapi/v1/magicubes/balance`（Bearer 访问令牌，匿名 401），返回 `{success, data:{total_balance, available_balance, frozen_amount}}`（2026-10-04 实测，见 [docs/SPIKE.md](docs/SPIKE.md)）。推理响应本身仍不带任何额度头。
@@ -41,6 +47,7 @@
 | 何时 | 查 |
 |---|---|
 | 「上游到底有没有额度信号」 | [docs/SPIKE.md](docs/SPIKE.md)（实测记录 + 结论） |
+| 「能不能接生图、协议是什么」 | [docs/SPIKE-image-gen.md](docs/SPIKE-image-gen.md)（2026-10-10 实测；**尚未实现**，承上表体例） |
 | provider 怎么接入（写代码前） | [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md)（实现契约） |
 | **这版是怎么做出来的、踩过什么坑** | [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)（0.1.0 / M4 实施过程档案） |
 | v0.2.0 的十二轮修复细节（已冻结，非入门路径） | [docs/archive/2026-10-05-closeout.md](docs/archive/2026-10-05-closeout.md) |

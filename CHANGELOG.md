@@ -2,6 +2,19 @@
 
 ## [未发布]
 
+**门禁：新增真 DOM 渲染/交互套件 `test/dom-render.test.mjs`**（devDependencies 加 `jsdom`，是本仓库第一个测试用第三方包；仍然离线，不联网）
+
+- 补的缺口：client 半边此前只由 `test/panel.test.mjs` 的**替身 React**钉着——`createElement` 返回一个普通对象，`onClick` 只是对象上一个属性值，于是事件绑定、受控输入、busy 期间该不该 `disabled`、effect 与卸载的时序全都不可观察；更糟的是替身把 children 放在 `props` **旁边**，而 `SectionCard` 从 `props` 里解构 `children`——折叠体里的卡片在那个套件里**从来没被渲染过**。新套件把**构建产物 `client.js`** 挂进 jsdom 的真 document，配一套最小替身 React（hook 槽位按「路径 + 组件名」、setState 触发真重渲染、effect 在 commit 之后跑、卸载跑 cleanup），钉住：九条面板路由各自被真实点击驱动过且 payload 正确（打字经 state 回流进 `/token` 的 body、哨兵独占态、`已启用 N / M` 与勾选态一致）、`disabled` 的控件点不动、挂载即首轮轮询与 locale 订阅、切后台 `clearInterval` / 回前台补一发 / 失败退避不低于 60s、顶替与卸载真的 abort 在途请求、慢响应不覆盖快响应、写失败与契约漂移那两句话真的上屏。
+- 阴性对照：同一批 16 条 src 变异（拆 handler、把开关值取反、混排哨兵、不 `clearInterval`、不记 `inFlight`、`ok:false` 判成功、缺键不报漂移……），`panel.test.mjs` 抓住 **0** 条，新套件抓住 **16** 条。跑法与「为什么必须带 `DSH_DOM_TARGET=src`」（产物入口看不见 src 变异，首轮曾得到 24/24 全绿的假象）见 `tools/dev/README.md`；spec 是 `tools/dev/mutate-dom-render.json`。
+- 这一档没覆盖的部分见下一条（真 React 那一档），以及 `docs/ROADMAP.md` 的 Backlog：并发与错误边界、fake timers 下跑满 cadence 的长周期行为。
+
+**再加一档：真 React 渲染门禁 `test/dom-render-react.test.mjs`**（devDependencies 精确钉 `react@18.3.1` + `react-dom@18.3.1`）
+
+- 上面那档 mini 替身每次 commit 整棵重建，所以「React 的 reconciler 说了算」的那一类它**结构上没法表达**。这一档用真 `react-dom/client` + jsdom 挂同一块面板（**不引** jest/vitest/@testing-library：React 18.3 自带 `act`，`HTMLInputElement` 的原生 setter 够用），只承载五类：真 CSSOM 里选中态与未选中态确有区别、重渲染复用**同一批 DOM 节点**（对象身份）、重渲染**不丢焦点**、roster 换序后勾选跟着模型 id 走、React 开发期告警必须为零。焦点那条不是学术问题：面板每 30s 一次 `setData` 就重渲染一次，正在输入令牌的框被打断是用户会遇到的事，而 mini 档实测那里 `activeElement = BODY`、节点复用三条全 false——它根本看不见。
+- 阴性对照：同一批 3 条变异（把 `tabActive` 压平、给令牌区块塞一个不稳定 key、删掉 roster 行的 `key`），真 React 档抓 **3** 条，mini 档抓 **0** 条；其中「删 key」是被**零告警**那条抓住的，不是被顺序断言抓住（checkbox 全受控，删 key 不串位）——凡「React 自己的规矩」类缺陷都归零告警那条。spec：`tools/dev/mutate-dom-render-react.json`。
+- **代价是版本耦合**：pin 的是宿主浏览器实际注入的那一份 React，用 `tools/dev/probe-host-react.mjs` 从 `app.asar` 读出来（2026-10-15 实测 18.3.1），套件启动时把 `React.version` 与期望值硬比，漂了就红并让人先去核对——不这么办的话，门禁会静默测着一个旧的 reconciler。产物里仍然永远没有 React（`tsdown` 的 `neverBundle` 不变），被钉的只是测试副本；这与 `types/dsh-peer-modules.d.ts`「不声明 React 形状」的立场不冲突。
+- 两个必踩的坑写进了套件文件头（别删注释）：`react-dom/client` 必须在 `window`/`document` 就位之后再 import，否则它按「没有 DOM」求值，input 事件被整条吞掉、payload 变空串，看着像被测代码坏了；受控 input 要用原型上的原生 setter 改值，否则被 React 的值追踪器判成「没有变化」。写第一版时当场踩了前者。
+
 **写守卫与注册状态机的六处修正**（每条都做了阴性对照：把修复前的源码放回去，新用例确实红）
 
 - **允许清单三处判据漂移**：`snapshot-aggregate.ts` 与 `routes/provider.ts` 把**可读的空清单**当「不过滤」（正确），而 `index.ts` 的轮询写成 `stored.length > 0` 才算数、否则回退内存——于是操作者按 `versionNote` 给的建议删掉 `provider.json`（或清单被保存为空）之后，面板说 `allowed:"all"` 且 `enabledCount` 数上全部模型，轮询却继续按内存里的旧清单注册：面板与 Host 对「正在提供什么」各说一套。判据收进 `provider-store.resolveEnabledIds` 一份，三处共用（只有读**抛错**才回退内存）。钉子：`provider.test.mjs` §9/§11（阴性对照：旧源码下 §11 的源码级断言直接红）。

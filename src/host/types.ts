@@ -40,6 +40,13 @@ export interface Wiring {
   inference: ReturnType<typeof import("./inference-client.ts").createInferenceClient>;
   /** 面板开关持久层（M4 §8）：读/写「这个 profile 要不要接入 provider」。 */
   providerStore: ReturnType<typeof import("./provider-store.ts").createFileProviderStore>;
+  /**
+   * 出图工具的开关 + 模型偏好持久层。
+   *
+   * **与本包的 providerStore 是两件事**：那个管「魔搭作为 chat provider」，这个管
+   * 「给 agent 一个出图工具」。分开是有意的（见 draw-store.ts 头注）。
+   */
+  drawStore: ReturnType<typeof import("./draw-store.ts").createFileDrawStore>;
   /** provider 注册状态机（M4 §7）：publish/dispose/release 与 state。 */
   publisher: ReturnType<typeof import("./provider-publish.ts").createProviderPublisher>;
   logger?: { warn?: (message: string, error?: unknown) => void };

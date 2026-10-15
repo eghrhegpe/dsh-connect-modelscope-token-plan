@@ -25,7 +25,22 @@ M0–M4+ 全部落地，当前版本 0.2.0：
   所以进不了 `npm test` 离线门禁。后果：peer 若改策略形状或分类顺序，本 provider 会在运行时静默失效，
   没有门禁会红。这是本仓库最大的覆盖缺口，与下面的 e2e 是同一条路径的两种解法（vendored 假 peer，或真 Host e2e）。
 - **e2e**（真 Host + 假魔搭平台）进 CI 门禁；
-- **client hooks 的行为测试**（`use-polling-interval` 的 visibility 暂停 / 失败退避 / 卸载停止，`use-snapshot-polling` 的 generation guard 防乱序覆盖）：需要 React 测试框架（fake timers + DOM mock + `renderHook`），而本仓库的测试全部是离线裸 node（不引 React 测试依赖，`package.json` 里没有 jest/vitest/@testing-library）。当前 `panel.test.mjs` 的替身 React 能钉住组件的输出结构（卡片渲染了什么），钉不住 hooks 的时序行为（什么时候调 `setInterval`、什么时候 `clearInterval`）。后果：轮询节奏漂移、generation guard 失效、或卸载后仍有在途请求，都不会被任何门禁抓住。解法要么引入 React 测试框架（打破离线裸 node 的约束），要么用替身 React 模拟时序（工作量大且脆弱）。
+- **client 的 DOM / 事件 / 时序层已补上门禁**（`test/dom-render.test.mjs`：真产物 + jsdom 真 DOM + 一套最小替身 React，2026-10-15）。现在钉得住的：`props.onClick` / `onChange` 真的绑成了真事件、打字经 state 回流进写盘 payload、busy 期间控件真的 `disabled`（真浏览器语义：点不动）、挂载即首轮轮询、切后台 `clearInterval` / 回前台补一发 / 失败退避不低于 60s、在途请求在顶替与卸载时真的 abort、慢响应不覆盖快响应、写失败以 `role=alert` 上屏、契约漂移那句话上屏。变异审计：同一批 16 条变异，旧的结构套件抓住 0 条，这套抓住 16 条（spec 见 [tools/dev/README.md](tools/dev/README.md)）。
+- **client hooks 剩下的覆盖缺口**（2026-10-15 补掉一半）：reconciler 那一侧已由
+  `test/dom-render-react.test.mjs` 钉住——真 React 18.3.1 + `react-dom/client` + jsdom，承载 mini 替身
+  结构上表达不了的其中五类：真 CSSOM 里的选中态、重渲染复用同一批 DOM 节点、**焦点不丢**（面板每
+  30s 一次 `setData` 就重渲染一次，正在输入的框被打断是真实缺陷形态）、列表换序的 id 身份、以及
+  React 开发期告警为零。同一批 3 条变异：真 React 档抓 3、mini 档抓 0，两档互补不重复。
+  **仍然缺**：并发与错误边界、fake timers 下的**长周期**行为（30s cadence 走满、连续多轮退避的指数
+  形状——两档都只能观察到「重建时用了哪个间隔」）。
+  没有为此引 jest/vitest/@testing-library：React 18.3 自带 `act`，jsdom + 原生 setter 够用了。
+  **代价是版本耦合**：`react` / `react-dom` 在 devDependencies 里被**精确钉住**，钉的是宿主浏览器
+  实际注入的那一份（`node tools/dev/probe-host-react.mjs` 从 app.asar 读，2026-10-15 实测 18.3.1）；
+  升级 DSH 后先重跑核对，再一起改 pin——门禁静默测着旧 reconciler 比不测更坏。这条与
+  [types/dsh-peer-modules.d.ts](../types/dsh-peer-modules.d.ts) 「不声明 React 形状」的立场不冲突：
+  产物里永远没有 React（`tsdown` 的 `neverBundle`），被钉的只是测试用的一份副本。
+  **另一条已经踩到的纪律**：两档渲染套件默认入口都是**产物** `client.js`，所以改 `src/**` 不重新
+  build 时它们（和 `panel.test.mjs` 一样）看不见改动——变异审计必须带 `DSH_DOM_TARGET=src`。
 - **余额差值趋势**：usage-store 记录每日首末两次官方余额观察，日消耗 = 首减末——OpenAPI 无记录端点，只能这样做（见 [REFERENCES.md](REFERENCES.md)）；
 - `GET /users/me` 展示账号名（官方 OpenAPI 端点，端点家族盘点见 [REFERENCES.md](REFERENCES.md)）；
 - 「每日签到领魔粒」提醒：签到是**网页行为**（登录态访问 magicube/usage 页触发，非 API），只能做面板外链 + 待办提醒（见 [REFERENCES.md](REFERENCES.md) 的 userscripts 上游）；

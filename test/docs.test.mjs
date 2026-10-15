@@ -27,10 +27,19 @@ const walk = (dir, ext) => {
   }
   return out;
 };
-const docFiles = () => walk("docs", ".md");
+// 断言用的文档集合：**默认**已排除机读规格目录（见 isVendoredSpec）。在这里
+// 统一过滤而不是逐条调用点过滤——新增一条文档断言时自动继承该豁免，漏一处就会
+// 在上游重新导出时误报。确需扫描 vendor 目录的规则请显式说明理由。
+const docFiles = () => walk("docs", ".md").filter((f) => !isVendoredSpec(f));
 const tsFiles = (dir) => walk(dir, ".ts");
 // 归档是冻结的历史记录，允许逐字保留当时的论述（含已被推翻的形状预期）。
 const inArchive = (rel) => rel.split("/")[1] === "archive";
+// 机读规格目录是**上游产物的原样快照**（本例：modelscope.cn 官方 OpenAPI 的
+// json + 从官网导出的 html 转 md），不是本仓库撰写的文档。它们跟着 spec 一起
+// 版本化，不进 README 文档地图——地图是给「谁写给谁看的文档」用的，把上游导出
+// 登记进去只会让地图被噪音撑大。同样从文档断言的射程内排除：它们随时会被上游
+// 重新导出覆盖，任何「必须与代码一致」的门禁都只会在重新导出时误报。
+const isVendoredSpec = (rel) => rel.startsWith("docs/modelscope.cn-openapi/");
 
 // ── §1 文档地图：README 里链到的每个仓库内文件都必须存在 ────────────────
 //
