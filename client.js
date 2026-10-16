@@ -897,14 +897,16 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const roster = Array.isArray(p.roster) ? p.roster.map((entry) => {
 			const row = entry ?? {};
 			const id = String(row.id ?? "");
+			const w = row.contextWindow;
+			const contextSource = row.contextSource === "override" || row.contextSource === "curated" ? row.contextSource : "catalog";
 			return {
 				id,
 				name: typeof row.name === "string" && row.name !== "" ? row.name : id,
 				vision: row.vision === true,
 				available: row.available !== false,
 				quotaExhausted: row.quotaExhausted === true,
-				contextWindow: typeof row.contextWindow === "number" && Number.isFinite(row.contextWindow) && row.contextWindow > 0 ? row.contextWindow : void 0,
-				contextSource: row.contextSource === "override" || row.contextSource === "curated" ? row.contextSource : "catalog"
+				contextSource,
+				...typeof w === "number" && Number.isFinite(w) && w > 0 ? { contextWindow: w } : {}
 			};
 		}).filter((entry) => entry.id !== "") : [];
 		return {

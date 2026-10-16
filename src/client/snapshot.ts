@@ -168,20 +168,22 @@ export function providerOf(raw: unknown): ProviderStatus {
     ? (p.roster as unknown[]).map((entry) => {
       const row = (entry ?? {}) as Record<string, unknown>;
       const id = String(row.id ?? "");
+      const w = row.contextWindow;
+      // 来源标记：只认已知三值，其余（旧 Host 缺字段 / 脏值）当 catalog——
+      // 缺席时徽章退化为普通窗口显示，不破坏旧行为。
+      const contextSource: "catalog" | "override" | "curated" =
+        row.contextSource === "override" || row.contextSource === "curated" ? row.contextSource : "catalog";
       return {
         id,
         name: typeof row.name === "string" && row.name !== "" ? row.name : id,
         vision: row.vision === true,
         available: row.available !== false,
         quotaExhausted: row.quotaExhausted === true,
-        // 旧 Host 的 roster 行没有窗口字段：undefined 透传为 undefined（badge
-        // 缺席），而不是伪装成某个默认值。
-        contextWindow: typeof row.contextWindow === "number" && Number.isFinite(row.contextWindow) && row.contextWindow > 0
-          ? row.contextWindow
-          : undefined,
-        // 来源标记：只认已知三值，其余（旧 Host 缺字段 / 脏值）当 catalog——
-        // 缺席时徽章退化为普通窗口显示，不破坏旧行为。
-        contextSource: row.contextSource === "override" || row.contextSource === "curated" ? row.contextSource : "catalog"
+        contextSource,
+        // 旧 Host 的 roster 行没有窗口字段：合法时才带键，整键缺席（
+        // exactOptionalPropertyTypes 下显式 undefined 不满足可选属性）——
+        // badge 缺席，而不是伪装成某个默认值。
+        ...(typeof w === "number" && Number.isFinite(w) && w > 0 ? { contextWindow: w } : {})
       };
     }).filter((entry) => entry.id !== "")
     : [];

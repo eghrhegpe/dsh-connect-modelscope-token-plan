@@ -52,7 +52,9 @@ interface ProviderRouteWiring {
     publish: (entries: unknown[], enabledIds: string[], unavailable?: string[]) => Promise<unknown>;
   };
   inference: {
-    fetchModels: () => Promise<{ entries?: unknown[]; [k: string]: unknown }>;
+    // 与 host-contextOptions 语义对齐：fetchModels 可携带全局窗口覆盖（null =
+    // 跟随目录）。readEntries 每次重注册都把 store 里的覆盖传下去。
+    fetchModels: (contextWindow?: number | null) => Promise<{ entries?: unknown[]; [k: string]: unknown }>;
   };
   logger?: { warn?: (message: string) => void };
 }

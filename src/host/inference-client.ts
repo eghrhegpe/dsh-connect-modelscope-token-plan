@@ -223,12 +223,14 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
           .map((raw) => {
             const id = str((raw as Record<string, unknown>).id, "");
             const tags = tagsById.get(id) ?? [];
-            const source = { ...(raw as Record<string, unknown>), tasks: tags.length > 0 ? tags : undefined };
+            // 显式注解 Record：字面量 spread 推断不带索引签名（strict 下
+            // delete source[key] / source.contextWindow= 都会红），声明上才有。
+            const source: Record<string, unknown> = { ...(raw as Record<string, unknown>), tasks: tags.length > 0 ? tags : undefined };
             // 窗口判定（与 contextWindowOf 同序）：目录四键有正数 → 平台真声明，
             // 三级链都不碰。没声明才看下层。
-            const CONTEXT_KEYS = ["context_length", "context_window", "contextWindow", "max_context_tokens"];
+            const CONTEXT_KEYS = ["context_length", "context_window", "contextWindow", "max_context_tokens"] as const;
             const declared = CONTEXT_KEYS.some((key) => {
-              const value = (source as Record<string, unknown>)[key];
+              const value = source[key];
               return typeof value === "number" && Number.isFinite(value) && value > 0;
             });
             if (!declared) {
