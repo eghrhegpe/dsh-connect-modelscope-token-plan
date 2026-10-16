@@ -178,7 +178,10 @@ export function providerOf(raw: unknown): ProviderStatus {
         // 缺席），而不是伪装成某个默认值。
         contextWindow: typeof row.contextWindow === "number" && Number.isFinite(row.contextWindow) && row.contextWindow > 0
           ? row.contextWindow
-          : undefined
+          : undefined,
+        // 来源标记：只认已知三值，其余（旧 Host 缺字段 / 脏值）当 catalog——
+        // 缺席时徽章退化为普通窗口显示，不破坏旧行为。
+        contextSource: row.contextSource === "override" || row.contextSource === "curated" ? row.contextSource : "catalog"
       };
     }).filter((entry) => entry.id !== "")
     : [];

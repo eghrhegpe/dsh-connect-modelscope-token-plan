@@ -36,11 +36,25 @@ import {
   readTaskId,
   readTaskStatus
 } from "./draw.ts";
-import { isImageGenModel, imageGenModelIds } from "./llm-models.ts";
+import { isImageGenModel, imageGenModelIds, textToImageModelIds } from "./llm-models.ts";
 import { str } from "./util.ts";
 
 /** agent 工具名。带插件前缀，避免与 `dsh-draw-router` 的 `draw_image` 撞名。 */
 export const DRAW_TOOL_NAME = "modelscope_draw_image";
+
+/**
+ * 已知能**纯文生图**的目录内模型 id（2026-10-16 真机复核）。
+ *
+ * 为什么需要手工策展：api-inference 目录里至今**没有**平台声明的 `text-to-image`
+ * 条目，只有 2 条 `image-to-image`——而两者行为**不同**：
+ * `Qwen/Qwen-Image-Edit` 不带 `image_url` 纯文生图可用（本轮实测：提交成功、两次
+ * 15min 排队超时后于 9.7min 出图）；`MusePublic/Qwen-Image-Edit` 纯文生图被上游
+ * 直接拒绝（提交阶段 HTTP 4xx：`image_url is required for model: …`）。
+ * 能力枚举把两者都归为 `image-to-image`，区分不了这个差异，所以这里用实测知识兜底：
+ * 目录里没有 `text-to-image` 可挑时，默认偏向这个已知能用的 id，而不是「目录第一个」
+ * （真实目录顺序 `MusePublic/…` 在前，照旧逻辑纯文生图必挂）。
+ */
+export const KNOWN_T2I_MODEL_ID = "Qwen/Qwen-Image-Edit";
 
 /** 一次失败的冷却窗：出图慢，失败后立刻重试既易撞限流又白等。 */
 const DRAW_FAILURE_COOLDOWN_MS = 60_000;
@@ -256,19 +270,38 @@ export async function runDrawOnce({
 /**
  * 从目录里挑一个出图模型。
  *
- * 显式请求优先（即使不在目录里——那是手工覆盖，上游会自己报错）；否则取目录里
- * **平台声明**为出图模型的第一个（`isImageGenModel` 的严格方向：只认明确声明，
- * 缺字段不算）。目录为空且没显式请求 → `null`，由调用方给出可操作的错误，
+ * 优先级（高 → 低）：
+ * 1. **工具显式请求**——即使不在目录里也放行（手工覆盖，上游会自己报错）；
+ * 2. **首选模型**（面板保存的模型偏好，或配置 `drawModelId`）——用户点了谁就是
+ *    谁，同样不校验在不在目录（用户可能先配好、等模型上线）。此前这个偏好只在
+ *    `pickDrawModel` 返回 null 时才生效，目录非空时等于死配置——面板显示的
+ *    preferredModel 与实际挑中的模型会说两套话；
+ * 3. 目录里**平台声明**为 `text-to-image` 的条目（`textToImageModelIds`，将来目录
+ *    补上真文生图模型时自动优先生效）；
+ * 4. **已知能纯文生图**的模型（`KNOWN_T2I_MODEL_ID`）——今天目录的坑位，见该
+ *    常量的注释：真实目录里它是第二个，照旧取「第一个」会挑中纯文生图必挂的
+ *    `MusePublic/…`；
+ * 5. 目录里第一个出图模型（`isImageGenModel` 的严格方向：只认明确声明，缺字段
+ *    不算）。
+ *
+ * 目录为空且既无显式请求也无首选模型 → `null`，由调用方给出可操作的错误，
  * 而不是发一个注定失败的请求。
  * @param {unknown} entries - 归一目录条目。
  * @param {string} [requested] - 工具调用里显式给的 model。
+ * @param {string} [preferred] - 首选模型 id（面板偏好或配置 `drawModelId`）。
  * @returns {string|null} 选中的 id。
  */
-export function pickDrawModel(entries: unknown, requested?: string): string | null {
+export function pickDrawModel(entries: unknown, requested?: string, preferred?: string): string | null {
   const want = str(requested, "");
   if (want !== "") return want;
+  const preferredId = str(preferred, "");
+  if (preferredId !== "") return preferredId;
   const ids = imageGenModelIds(entries);
-  return ids.length > 0 ? (ids[0] ?? null) : null;
+  if (ids.length === 0) return null;
+  const t2i = textToImageModelIds(entries);
+  if (t2i.length > 0) return t2i[0] ?? null;
+  if (ids.includes(KNOWN_T2I_MODEL_ID)) return KNOWN_T2I_MODEL_ID;
+  return ids[0] ?? null;
 }
 
 /**
@@ -303,6 +336,7 @@ export function defineDrawTool({
   resolveApiKey,
   getEntries,
   settings,
+  getPreferredModelId,
   cooldown = createDrawCooldown(DRAW_FAILURE_COOLDOWN_MS),
   isDisposed = () => false
 }: {
@@ -311,12 +345,13 @@ export function defineDrawTool({
   resolveApiKey: () => Promise<string>;
   getEntries?: () => unknown | Promise<unknown>;
   settings?: { apiBase?: unknown; drawModelId?: unknown; drawTimeoutMs?: unknown };
+  /** 首选模型读取器（面板保存的偏好）；每次调用现读，读不到回退 `settings.drawModelId`。 */
+  getPreferredModelId?: () => Promise<string | null>;
   cooldown?: ReturnType<typeof createDrawCooldown>;
   isDisposed?: () => boolean;
 }) {
   const timeoutMs = Math.max(30_000, Math.floor(Number(settings?.drawTimeoutMs) > 0 ? Number(settings?.drawTimeoutMs) : DRAW_TIMEOUT_MS));
   const apiBase = str(settings?.apiBase, "https://api-inference.modelscope.cn/v1");
-  const preferred = str(settings?.drawModelId, "");
 
   return defineTool({
     name: DRAW_TOOL_NAME,
@@ -324,7 +359,7 @@ export function defineDrawTool({
       "Generate or edit an image with the ModelScope (魔搭) API-Inference token. " +
       "Text-to-image by default; pass `imageUrl` to edit an existing image (image-to-image), or an array of URLs for multi-image editing. " +
       "Omit `model` to use the catalogue's image model. " +
-      "This call is ASYNCHRONOUS upstream and typically takes 1-3 minutes; it polls until the task reaches a terminal state. " +
+      "This call is ASYNCHRONOUS upstream: the model queues first, so latency varies from ~1 minute to 15+ minutes depending on the free pool; it polls until the task reaches a terminal state. " +
       "Available image model ids are reported in the result.",
     parameters: {
       prompt: { type: "string", required: true, description: "Image prompt; describe the target image (for edits, describe the intended change)" },
@@ -375,7 +410,14 @@ export function defineDrawTool({
         picked = [];
       }
       const entries = Array.isArray(picked) ? picked : [];
-      const model = pickDrawModel(entries, str(params?.model, "")) ?? (preferred !== "" ? preferred : null);
+      // 首选模型**每次调用现读**：面板里改过的偏好对下一次出图就生效（与
+      // getEntries 同一个「调用时读」的纪律）。读失败退回配置 drawModelId，
+      // 不因此打断出图。
+      const configuredPreferred = str(settings?.drawModelId, "");
+      const panelPreferred = typeof getPreferredModelId === "function" ? await getPreferredModelId().catch(() => null) : null;
+      const preferred =
+        typeof panelPreferred === "string" && panelPreferred.trim() !== "" ? panelPreferred : configuredPreferred;
+      const model = pickDrawModel(entries, str(params?.model, ""), preferred);
       if (model === null) {
         throw new Error(
           "目录里没有出图模型（image-to-image / text-to-image 条目为空）：确认令牌已配置、面板已至少轮询一次，且套餐含该模型"

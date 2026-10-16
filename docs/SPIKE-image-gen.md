@@ -330,9 +330,51 @@ server `https://modelscope.cn/openapi/v1`）**不含** `images/generations`、`t
   未钉死，两种解释分不开。
 - **预扣探针**：提交后立刻连查 `frozen`，确认过程中是否预扣过（见 §计费的边界）。
 - 计费细账：chat 的 1 魔粒是固定值还是按模型/长度浮动。
-- `MusePublic/Qwen-Image-Edit` 是否与 `Qwen/` 版行为一致。
+- ~~`MusePublic/Qwen-Image-Edit` 是否与 `Qwen/` 版行为一致。~~ **已实测（2026-10-16）：行为不同（前者不能纯文生图），并成了默认模型缺陷的根因，见文末补记。**
 - `image_url` 支持 data URL（`data:image/png;base64,…`）——第二份资料称支持，**未实测**。
 - **目录外模型**（`Qwen/Qwen-Image-2.1-Turbo`、`black-forest-labs/FLUX.1-Kontext-dev`）
   能否可靠调用：官方示例用的是前者，后者实测 `FAILED`，结论未定。
 - 多图编辑的**上限**（几张？）与 `loras` 的可用取值——官方给了规则（≤6、和 1.0），
   未逐项验证。
+
+## 补记 2026-10-16 — MusePublic 与 Qwen 行为不同；默认模型缺陷已修
+
+`2026-10-10` 的待办里那条「`MusePublic/Qwen-Image-Edit` 是否与 `Qwen/` 版行为一致」
+本轮给出答案：**两者不同**，且这个差异直接造成了「测试通过、插件用不了」的线上
+缺陷——连同默认模型选择一起修复。
+
+### 事实（全部真机，2026-10-16）
+
+1. **`MusePublic/Qwen-Image-Edit` 不能纯文生图**：`POST /v1/images/generations`、
+   带 Bearer、不带 `image_url` → 提交阶段即被拒：
+   `{"errors":{"message":"image_url is required for model: MusePublic/Qwen-Image-Edit"}}`。
+2. **`Qwen/Qwen-Image-Edit` 能纯文生图**：同一请求换模型 → 提交成功、拿到 task_id
+   （本轮排队序列：15min 超时 ×2 → 约 9.7min 出图，继续印证「排队不可预测」）。
+3. **真实目录顺序**（`/v1/models` 免认证实名拉取，36 条）：`MusePublic/…` 在第 11 位、
+   `Qwen/…` 在第 20 位——**MusePublic 在前**。而 `2026-10-10` 写下的
+   `test/draw-runtime.test.mjs` 夹具把 `Qwen` 放第一位。
+4. **根因**：旧 `pickDrawModel` 取「目录里第一个出图模型」→ 默认挑中 MusePublic →
+   纯文生图必挂；测试夹具顺序与真实目录相反 → 测试永远绿。**「测试通过、插件用不了」
+   的典型形态：夹具钉住的是「夹具里第一个能出图」，不是「线上目录默认挑中的能纯文生图」。**
+
+### 修复
+
+`pickDrawModel` 优先级改为（`src/host/draw-runtime.ts`）：
+
+1. 工具显式请求（目录外也放行）；
+2. 首选模型——面板保存值或配置 `drawModelId`，两者走 `resolveSwitchValue` 同一份
+   裁决（此前该配置只在目录为空时生效，等于死配置；修复后面板显示的
+   preferredModel 与工具实际挑中的一致）；
+3. 平台声明 `text-to-image` 的条目（新增 `textToImageModelIds`，将来目录补上真
+   文生图模型时自动优先生效）；
+4. `KNOWN_T2I_MODEL_ID = "Qwen/Qwen-Image-Edit"`——目录缺 `text-to-image` 时用
+   实测知识兜底（本轮新增常量）；
+5. 目录第一个出图模型。
+
+测试夹具已改为真实顺序（MusePublic 在前）并新增回归用例（`test/draw-runtime.test.mjs`）：
+默认挑中 `Qwen/Qwen-Image-Edit`、首选模型压过默认、目录外首选放行、`text-to-image`
+优先、已知 id 缺席时退回第一个。
+
+**排队现状如实记录**：工具描述已从「typically 1-3 minutes」改为「~1 分钟到 15+
+分钟不等（免费池排队）」。今天实测为两次 900s 超时 + 一次 ~9.7min 成功，处于档案
+记录的最劣区间。

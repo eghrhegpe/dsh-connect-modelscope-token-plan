@@ -130,15 +130,19 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由已注册");
 }
 
 // ── POST context：全局上下文窗口覆盖 ──
-// 打在两层：快照顶层字段（面板选择器回显）与 roster 行（每行 badge）——目录桩
-// 条目没声明窗口，未设覆盖时两处都是目录兜底 128000，写覆盖后必须一起变。
+// 打在两层：快照顶层字段（面板选择器回显）与 roster 行（每行 badge）。桩条目
+// 没声明窗口，真值链 = 目录声明 > 用户覆盖 > 策展表 > 兜底：Qwen3.5-35B-A3B
+// 在策展表（262144，curated），Qwen2.5-VL-32B 不在（128000 兜底，catalog）；
+// 写覆盖后两行都被覆盖值接管（override 压过策展）。
 {
   const before = await call(handlers, PROVIDER_PATH, makeReq("GET"));
   assert.equal(before.body.contextWindow, null, "未设置时快照读 null");
-  assert.ok(
-    before.body.roster.every((r) => r.contextWindow === 128000),
-    "未设置时 roster 行是目录兜底窗口"
-  );
+  const beforeCurated = before.body.roster.find((r) => r.id === "Qwen/Qwen3.5-35B-A3B");
+  const beforeFallback = before.body.roster.find((r) => r.id === "Qwen/Qwen2.5-VL-32B");
+  assert.equal(beforeCurated.contextWindow, 262144, "策展表命中的行=表值，不是 128000");
+  assert.equal(beforeCurated.contextSource, "curated", "来源标记 curated");
+  assert.equal(beforeFallback.contextWindow, 128000, "不在表 → 目录兜底 128000");
+  assert.equal(beforeFallback.contextSource, "catalog", "来源标记 catalog");
 
   const saved = await call(handlers, PROVIDER_PATH + "/context", makeReq("POST", { body: { contextWindow: 262144 } }));
   assert.equal(saved.status, 200);
@@ -147,6 +151,10 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由已注册");
   assert.ok(
     saved.body.roster.every((r) => r.contextWindow === 262144),
     "覆盖值打进每条 roster 行（descriptor 同源）"
+  );
+  assert.ok(
+    saved.body.roster.every((r) => r.contextSource === "override"),
+    "覆盖接管后来源标记 override（压过策展）"
   );
 
   // 目录声明窗口的条目不受覆盖影响：桩里换一条带 context_length 的模型再存
@@ -164,15 +172,15 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由已注册");
   assert.equal(mixed.body.roster.find((r) => r.id === "Declared/Big-Window").contextWindow, 1000000, "目录已声明的窗口不被覆盖");
   assert.equal(mixed.body.roster.find((r) => r.id === "Qwen/Qwen3.5-35B-A3B").contextWindow, 524288, "未声明的走覆盖");
 
-  // 清除：null 回跟随目录（顶层 null、行回兜底）。
-  currentFetch = NO_NETWORK;
+  // 清除：null 回跟随目录（顶层 null、行回真值链底：策展命中=表值，否则兜底）。
   currentFetch = async () => new Response(JSON.stringify({
     object: "list",
     data: [{ id: "Qwen/Qwen3.5-35B-A3B" }]
   }), { status: 200, headers: { "content-type": "application/json" } });
   const cleared = await call(handlers, PROVIDER_PATH + "/context", makeReq("POST", { body: { contextWindow: null } }));
   assert.equal(cleared.body.contextWindow, null, "null 清除覆盖");
-  assert.ok(cleared.body.roster.every((r) => r.contextWindow === 128000), "清除后 roster 行回目录兜底");
+  assert.equal(cleared.body.roster[0].contextWindow, 262144, "清除后策展命中的行回表值（不是 128000）");
+  assert.equal(cleared.body.roster[0].contextSource, "curated");
 
   // reset 连覆盖一起忘（forget 的三键语义）。
   await call(handlers, PROVIDER_PATH + "/context", makeReq("POST", { body: { contextWindow: 131072 } }));

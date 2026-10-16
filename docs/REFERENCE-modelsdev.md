@@ -120,7 +120,38 @@ providers/modelscope/models/
    （结构化 → 详情端点 `Tasks[].Name` → 策展 `KNOWN_VISION_IDS` → 名字启发）不变；
    models.dev 的存在只是再次证明「魔搭无单一权威模态字段」这一判断，并给出一种社区解法参照。
 
-## 6. 引用来源
+## 6. 2026-10-16 复查：策展表真值来源（上下文窗口）
+
+本文件 2026-10-04 的结论「魔搭 provider 覆盖极薄（7 个文本模型）」**仍然成立**，但
+`api.json` 的用途在插件里扩大了：魔搭目录不声明上下文窗口（`/v1/models` 只回
+id/object/owned_by/created + Tasks 标签），未声明条目原本一路落到 128k 兜底。现在
+`src/host/context-catalog.ts` 用 **同 id 模型在各厂自家 host 下的主流 `limit.context`**
+作为策展真值（目录声明 > 用户覆盖 > 策展表 > 兜底）。
+
+复查要点（`curl https://models.dev/api.json`，5.7MB 全量）：
+
+- 聚合 `api.json` 仍搜不到 `modelscope` 作为 provider 键下的当前目录模型；`modelscope`
+  provider 自身仍只有那 7 个旧模型（全不在当前目录）。
+- 但**同 id 模型在各厂 host 下普遍收录**（alibaba/deepseek/zhipuai/stepfun/novita/kilo
+  等），`limit.context` 可交叉比对。策展表每条取**多数 host 的值**，并注明离群：
+  - DeepSeek-V4 全系 1048576（nebius 979000~1048000 离群）；
+  - Qwen3.5 系 / Qwen3.8-27B / Step-3.5·3.7-Flash / Nex-N2.5 双子 262144
+    （openrouter/novita 把 Qwen3.8 抄成 1000000，ofox 256000、merge-gateway 131072）；
+  - MiniMax-M3 1048576（ambient 262144 离群）、MiniMax-M1-80k 全 host 一致 1000000；
+  - GLM-5.2 取智谱官方 host 1000000（第三方抄 205000）、GLM-4.7-Flash 官方 200000；
+  - LongCat-Flash-Lite 仅 qiniu-ai 收录（256000，单源）；
+  - Qwen3.8-Flash-Next 仅 tensorx 收录（262144，单源）。
+- **无任何数据源**（不进表，落 128k 兜底）：EA-29B-A4B、AntAngelMed、
+  Mistral-Large-Instruct-2407、CompassJudger-1-32B、InternVL3_5、ERNIE-4.5 全系、
+  Intern-S1/S1-mini/S2-Preview、XiYanSQL 两版本。
+- 生图/语音模型（Qwen-Image-Edit、MusePublic 变体、ACE-Step）无对话上下文，不收。
+- 取多数而非最大值的理由：个别网关把窗口抄大（openrouter 抄 1M）不代表魔搭侧真开
+  那么宽；跨 host 抄写的开量窗口是模型出厂规格，部署配额才是各网关自己的。
+
+维护纪律见 `context-catalog.ts` 模块头注：只收当前目录存在的 id、每条注明来源与
+核对日期、目录下架随手删、永不推翻目录声明。
+
+## 7. 引用来源
 
 - 仓库：`https://github.com/anomalyco/models.dev`
 - 魔搭 provider 数据：`providers/modelscope/`（provider.toml + models/{Qwen,ZhipuAI}/*.toml）

@@ -138,6 +138,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.contextWindow": "上下文窗口",
 			"provider.contextDefault": "默认（跟随目录）",
 			"provider.contextHint": "目录没声明窗口的模型按此值生效；保存后立即重新注册",
+			"provider.contextCuratedTitle": "窗口来自内置策展表（models.dev 交叉真值），平台未亲口声明；带 * 标记",
 			"section.draw": "出图工具",
 			"draw.enable": "给 agent 注册 modelscope_draw_image 工具",
 			"draw.on": "已开启",
@@ -258,6 +259,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.contextWindow": "Context window",
 			"provider.contextDefault": "Default (catalog)",
 			"provider.contextHint": "Applies to models whose catalog entry declares no window; re-registers immediately",
+			"provider.contextCuratedTitle": "Window from the built-in curated table (models.dev cross-check), not declared by the platform; marked with *",
 			"section.draw": "Draw tool",
 			"draw.enable": "Register the modelscope_draw_image tool for the agent",
 			"draw.on": "On",
@@ -901,7 +903,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				vision: row.vision === true,
 				available: row.available !== false,
 				quotaExhausted: row.quotaExhausted === true,
-				contextWindow: typeof row.contextWindow === "number" && Number.isFinite(row.contextWindow) && row.contextWindow > 0 ? row.contextWindow : void 0
+				contextWindow: typeof row.contextWindow === "number" && Number.isFinite(row.contextWindow) && row.contextWindow > 0 ? row.contextWindow : void 0,
+				contextSource: row.contextSource === "override" || row.contextSource === "curated" ? row.contextSource : "catalog"
 			};
 		}).filter((entry) => entry.id !== "") : [];
 		return {
@@ -1492,9 +1495,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				style: S.modelName,
 				title: id
 			}, row.name)), row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null, typeof row.contextWindow === "number" ? h("span", {
-				style: S.modelBadge,
-				title: tt("provider.contextWindow")
-			}, formatWindow(row.contextWindow)) : null, FEATURED_OWNERS.includes(catalogOwner(row.id)) ? h("span", {
+				style: row.contextSource === "curated" ? {
+					...S.modelBadge,
+					color: "var(--dsw-alias-label-secondary)"
+				} : S.modelBadge,
+				title: row.contextSource === "curated" ? tt("provider.contextCuratedTitle") : tt("provider.contextWindow")
+			}, row.contextSource === "curated" ? formatWindow(row.contextWindow) + " *" : formatWindow(row.contextWindow)) : null, FEATURED_OWNERS.includes(catalogOwner(row.id)) ? h("span", {
 				style: S.modelBadgeFeatured,
 				title: tt("models.featuredTitle")
 			}, tt("provider.featured")) : null, row.quotaExhausted === true ? h("span", { style: {

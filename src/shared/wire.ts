@@ -114,6 +114,11 @@ export interface ProviderStatus {
     quotaExhausted: boolean;
     /** 该行生效的窗口（覆盖或目录声明后的归一值；总是正数）。 */
     contextWindow?: number;
+    /**
+     * 窗口数字的来源：catalog = 目录声明或 pi-ai 兜底；override = 用户全局
+     * 覆盖；curated = 策展表。与 host 的 contextWindowSourceOf 同词汇。
+     */
+    contextSource?: "catalog" | "override" | "curated";
   }[];
 }
 

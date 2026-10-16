@@ -24,7 +24,7 @@
  */
 import { defineDrawTool } from "./draw-runtime.ts";
 import { setDrawToolNote } from "./draw-tool-state.ts";
-import { resolveSwitchEnabled } from "./switch-precedence.ts";
+import { resolveSwitchEnabled, resolveSwitchValue } from "./switch-precedence.ts";
 import { errMsg, redactSecrets } from "./util.ts";
 import { name } from "./host-config.ts";
 
@@ -126,6 +126,13 @@ export async function registerDrawTool(
         getEntries: async () => {
           const fetched = await inference.fetchModels().catch(() => null);
           return fetched?.entries ?? [];
+        },
+        // 首选模型：面板保存值赢、否则配置 drawModelId——与 routes/draw.ts 的
+        // effectiveModelId 同一份裁决（resolveSwitchValue），面板显示什么、工具
+        // 就挑什么，不会说两套话。每次调用现读，面板改完下次出图即生效。
+        getPreferredModelId: async () => {
+          const panelValue = drawStore ? await drawStore.modelId().catch(() => null) : null;
+          return resolveSwitchValue(panelValue, settings.drawModelId === "" ? undefined : settings.drawModelId) ?? null;
         },
         settings: {
           apiBase: settings.apiBase,

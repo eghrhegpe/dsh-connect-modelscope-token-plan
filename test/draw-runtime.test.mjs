@@ -83,14 +83,45 @@ section("pickDrawModel 显式请求优先，即使不在目录里", () => {
   assert.equal(pickDrawModel(entries, "custom/model"), "custom/model", "手工覆盖应放行，上游会自己报错");
 });
 
-section("pickDrawModel 无请求时取目录里第一个出图模型", () => {
+section("pickDrawModel 默认挑「已知能纯文生图」的模型，而不是目录第一个（回归）", () => {
+  // 真实目录顺序（2026-10-16 实名拉取 /v1/models，36 条）：MusePublic 在 Qwen 之前。
+  // 而 MusePublic/Qwen-Image-Edit 纯文生图被上游拒绝（image_url is required）——
+  // 照旧「取目录第一个」的逻辑，纯文生图必挂。回归钉住：默认偏向 KNOWN_T2I_MODEL_ID。
   const entries = [
     { id: "some/chat-model", tasks: ["text-generation"] },
-    { id: "Qwen/Qwen-Image-Edit", tasks: ["image-to-image"] },
-    { id: "MusePublic/Qwen-Image-Edit", tasks: ["image-to-image"] }
+    { id: "MusePublic/Qwen-Image-Edit", tasks: ["image-to-image"] },
+    { id: "Qwen/Qwen-Image-Edit", tasks: ["image-to-image"] }
   ];
   assert.equal(pickDrawModel(entries), "Qwen/Qwen-Image-Edit");
-  assert.deepEqual(drawModelIds(entries), ["Qwen/Qwen-Image-Edit", "MusePublic/Qwen-Image-Edit"]);
+  assert.deepEqual(drawModelIds(entries), ["MusePublic/Qwen-Image-Edit", "Qwen/Qwen-Image-Edit"]);
+});
+
+section("pickDrawModel 首选模型（面板/配置）压过默认，目录外 id 也放行", () => {
+  const entries = [
+    { id: "MusePublic/Qwen-Image-Edit", tasks: ["image-to-image"] },
+    { id: "Qwen/Qwen-Image-Edit", tasks: ["image-to-image"] }
+  ];
+  assert.equal(pickDrawModel(entries, undefined, "MusePublic/Qwen-Image-Edit"), "MusePublic/Qwen-Image-Edit", "用户点了谁就用谁，上游会自己报错");
+  assert.equal(pickDrawModel(entries, undefined, "off-catalog/m"), "off-catalog/m", "首选模型不在目录里也放行（用户可能先配好、等模型上线）");
+  assert.equal(pickDrawModel(entries, "requested/x", "preferred/y"), "requested/x", "工具显式请求压过首选配置");
+  assert.equal(pickDrawModel(entries, undefined, ""), "Qwen/Qwen-Image-Edit", "空白首选 = 没配，回到默认偏向");
+});
+
+section("pickDrawModel 平台声明 text-to-image 的条目优先于 image-to-image（向前兼容）", () => {
+  const entries = [
+    { id: "MusePublic/Qwen-Image-Edit", tasks: ["image-to-image"] },
+    { id: "q/real-t2i", tasks: ["text-to-image-synthesis"] },
+    { id: "Qwen/Qwen-Image-Edit", tasks: ["image-to-image"] }
+  ];
+  assert.equal(pickDrawModel(entries), "q/real-t2i", "将来目录补上真文生图模型时自动优先生效");
+});
+
+section("pickDrawModel 已知能纯文生图的模型不在目录时，退回目录第一个", () => {
+  const entries = [
+    { id: "MusePublic/Qwen-Image-Edit", tasks: ["image-to-image"] },
+    { id: "other/Edit", tasks: ["image-to-image"] }
+  ];
+  assert.equal(pickDrawModel(entries), "MusePublic/Qwen-Image-Edit", "没有更好的信息只能给第一个");
 });
 
 section("pickDrawModel 目录里没有出图模型时返回 null（不发注定失败的请求）", () => {

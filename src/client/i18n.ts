@@ -87,6 +87,7 @@ export const zh = {
   "provider.contextWindow": "上下文窗口",
   "provider.contextDefault": "默认（跟随目录）",
   "provider.contextHint": "目录没声明窗口的模型按此值生效；保存后立即重新注册",
+  "provider.contextCuratedTitle": "窗口来自内置策展表（models.dev 交叉真值），平台未亲口声明；带 * 标记",
 
   "section.draw": "出图工具",
   "draw.enable": "给 agent 注册 modelscope_draw_image 工具",
@@ -232,6 +233,7 @@ export const en: typeof zh = {
   "provider.contextWindow": "Context window",
   "provider.contextDefault": "Default (catalog)",
   "provider.contextHint": "Applies to models whose catalog entry declares no window; re-registers immediately",
+  "provider.contextCuratedTitle": "Window from the built-in curated table (models.dev cross-check), not declared by the platform; marked with *",
 
   "section.draw": "Draw tool",
   "draw.enable": "Register the modelscope_draw_image tool for the agent",

@@ -367,6 +367,26 @@ export function contextWindowOf(entry: CatalogEntry): number {
 }
 
 /**
+ * 这个条目的窗口数字从真值链哪一级来——与 contextWindowOf 配对的来源标记。
+ *
+ * catalog = 目录四键声明过（平台真值）；override = fetchModels 打标时写入的
+ * 用户覆盖；curated = 打标时写入的策展表值。后两者在归一条目上是不可区分的
+ * （都表现为 contextWindow 键有值），所以打标侧各自留指纹：覆盖命中时在
+ * source 上放 `__contextSource: "override"`，策展命中放 `"curated"`，本函数
+ * 只读指纹。都没有 → "catalog"（含义是「目录说了算」，包括目录没声明、值
+ * 就是 pi-ai 兜底 128k 的条目——面板把 128k 徽章留给这个状态，策展命中会
+ * 显示自己的数值）。
+ * @param {object} entry - 一条归一目录条目。
+ * @returns {"catalog"|"override"|"curated"} 来源标记。
+ */
+export function contextWindowSourceOf(entry: CatalogEntry): "catalog" | "override" | "curated" {
+  const source = entry?.raw as Record<string, unknown> | undefined;
+  const mark = source?.__contextSource;
+  if (mark === "override" || mark === "curated") return mark;
+  return "catalog";
+}
+
+/**
  * 读目录声明的单次输出上限，0 = 未声明。
  *
  * 这个数**只用于展示/投影**。descriptor 只在 >0 时声明 `maxTokens`（见模块头注
@@ -614,19 +634,21 @@ export function isImageGenModel(entry: CatalogEntry): boolean {
 }
 
 /**
- * 一份目录里可用于出图的模型 id，按首见顺序去重。
+ * 一份目录里匹配某判定的模型 id，按首见顺序去重。
  *
  * 去重口径与 `buildDescriptors` / `rosterOf` 一致（保留末次出现的值、占首见位置），
- * 这样出图候选列表与 chat roster 不会对「有哪些 id」各说一套。
+ * 这样出图候选列表与 chat roster 不会对「有哪些 id」各说一套。`imageGenModelIds`
+ * 与 `textToImageModelIds` 共用这一份骨架，避免两处各自写一份相同的循环。
  * @param {unknown} entries - 归一目录条目。
- * @returns {string[]} 出图模型 id。
+ * @param {(entry: CatalogEntry) => boolean} isMatch - 条目匹配判定。
+ * @returns {string[]} 匹配的模型 id。
  */
-export function imageGenModelIds(entries: unknown): string[] {
+function idsOf(entries: unknown, isMatch: (entry: CatalogEntry) => boolean): string[] {
   const position = new Map<string, number>();
   const out: string[] = [];
   for (const entry of Array.isArray(entries) ? entries : []) {
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
-    if (!isImageGenModel(entry as CatalogEntry)) continue;
+    if (!isMatch(entry as CatalogEntry)) continue;
     const id = str((entry as CatalogEntry).id, "");
     if (id === "") continue;
     const seen = position.get(id);
@@ -641,6 +663,35 @@ export function imageGenModelIds(entries: unknown): string[] {
 }
 
 /**
+ * 一份目录里可用于出图的模型 id，按首见顺序去重。
+ *
+ * 去重口径见 {@link idsOf}。**注意**：这里只保证「平台声明能出图」，不保证
+ * 「能纯文生图」——真实目录里唯一的出图条目是 `image-to-image`，其中
+ * `MusePublic/Qwen-Image-Edit` 纯文生图被上游拒绝（见 `draw-runtime.ts` 的
+ * `KNOWN_T2I_MODEL_ID`）。挑默认模型要走 `pickDrawModel` 的完整优先级，别直接
+ * 取这里的第一个。
+ * @param {unknown} entries - 归一目录条目。
+ * @returns {string[]} 出图模型 id。
+ */
+export function imageGenModelIds(entries: unknown): string[] {
+  return idsOf(entries, isImageGenModel);
+}
+
+/**
+ * 一份目录里**平台声明为文生图**（`text-to-image`）的模型 id，按首见顺序去重。
+ *
+ * 与 `imageGenModelIds` 同一份去重骨架，只筛能力为 `text-to-image` 的条目。
+ * 真实目录至今为空集（api-inference 的 36 条里没有 `text-to-image`），但将来
+ * 目录补上真文生图模型时，`pickDrawModel` 应当优先挑它们——这个函数就是那个
+ * 「平台说了算」的优先通道。
+ * @param {unknown} entries - 归一目录条目。
+ * @returns {string[]} 文生图模型 id。
+ */
+export function textToImageModelIds(entries: unknown): string[] {
+  return idsOf(entries, (entry) => resolveModelCapability(entry) === "text-to-image");
+}
+
+/**
  * 带额度可用性的面板 roster。
  *
  * 与 {@link rosterOf} 一样每 chat 模型 id 一行，但每行还带该模型额度池是否耗尽。
@@ -650,7 +701,7 @@ export function imageGenModelIds(entries: unknown): string[] {
  * @param {string[]} unavailableIds - 额度耗尽的模型 id；空数组 = 全部可用。
  * @returns {{id: string, name: string, vision: boolean, capability: ModelCapability, available: boolean, quotaExhausted: boolean, contextWindow: number, maxOutputLength: number}[]}
  */
-export function rosterWithAvailability(entries: unknown, unavailableIds: string[]): { id: string; name: string; vision: boolean; capability: ModelCapability; available: boolean; quotaExhausted: boolean; contextWindow: number; maxOutputLength: number }[] {
+export function rosterWithAvailability(entries: unknown, unavailableIds: string[]): { id: string; name: string; vision: boolean; capability: ModelCapability; available: boolean; quotaExhausted: boolean; contextWindow: number; contextSource: "catalog" | "override" | "curated"; maxOutputLength: number }[] {
   const blocked = new Set(Array.isArray(unavailableIds) ? unavailableIds : []);
   // 循环骨架与 rosterOf 共用 buildRosterRows——只多投 5 个字段。
   return buildRosterRows(entries, (entry, id) => ({
@@ -660,9 +711,13 @@ export function rosterWithAvailability(entries: unknown, unavailableIds: string[
     capability: resolveModelCapability(entry),
     available: !blocked.has(id),
     quotaExhausted: blocked.has(id),
-    // descriptor 自己会用的窗口：目录声明了就用，否则用 pi-ai 拿到的同一个
-    // 128k 兜底——徽章不会跟实际行为矛盾。
+    // descriptor 自己会用的窗口。contextSource 说清这个数从哪来：
+    // catalog = 目录声明；override = fetchModels 打的用户覆盖；curated =
+    // 策展表；其余 = pi-ai 兜底 128k（用 FALLBACK_CONTEXT_WINDOW，徽章不会
+    // 跟实际行为矛盾）。判定与 inference-client 的打标同一份真值链
+    // （目录声明 > 覆盖 > 策展表 > 兜底），两侧不会说两套话。
     contextWindow: contextWindowOf(entry),
+    contextSource: contextWindowSourceOf(entry),
     // 平台声明的输出上限（0 = 未知）。刻意把投影加宽：原始条目留在 Host 侧，
     // 面板只引这两个参数值与 vision 判定。
     maxOutputLength: maxOutputLengthOf(entry)

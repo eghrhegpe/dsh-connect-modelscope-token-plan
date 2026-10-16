@@ -148,7 +148,8 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     const enabledIds = resolveEnabledIds(stored, publisher.state.enabledIds);
     // 窗口覆盖同样落盘（同一份 provider.json）；读抛错按「未设置」降级，与开关
     // 同一纪律——读不到不能把整块 provider 状态打掉。roster 行的 contextWindow
-    // 已由 fetchModels 在归一前打上覆盖标记，这里不再二次加工。
+    // 已由 fetchModels 在归一前打上覆盖/策展标记（contextSource 随行透传），
+    // 这里不再二次加工。
     const contextWindow = await providerStore.contextWindow().catch(() => null);
     const allowed = resolveAllowedList(enabledIds);
     const allowSet = new Set(enabledIds);

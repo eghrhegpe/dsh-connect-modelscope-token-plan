@@ -64,7 +64,8 @@ function isKnownDrawVersion(version: number | null): boolean {
 }
 
 /**
- * 归一一个保存的模型偏好：非空字符串，或 `null`（= 自动挑目录里第一个出图模型）。
+ * 归一一个保存的模型偏好：非空字符串，或 `null`（= 自动挑——具体挑谁由
+ * `draw-runtime.ts` 的 `pickDrawModel` 优先级决定，不是简单取目录第一个）。
  *
  * 不校验「这个 id 是否真存在」——目录会变，存一个暂时不在目录里的 id 是合法的
  * （用户可能先配好、等模型上线）。调用侧解析不出来时退回自动。

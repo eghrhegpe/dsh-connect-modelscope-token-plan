@@ -18,6 +18,7 @@
  */
 import { createCoalescedFetch } from "./coalesced-fetch.ts";
 import { CODE, classifyRateLimit, classifyStatus, parseRetryAfterMs } from "./codes.ts";
+import { curatedWindowOf } from "./context-catalog.ts";
 import { normalizeEntry } from "./llm-models.ts";
 import { pluginError, errMsg, redactSecrets, str } from "./util.ts";
 import type { ResolvedSettings } from "./host-config.ts";
@@ -188,6 +189,11 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
      * 覆盖值**参与缓存键**：coalesced 缓存里存的条目已是打标后的形状，若仍用
      * 字面量 `"models"` 键，保存覆盖后的一个 TTL 内会读到未打标的旧条目（面板
      * 显示变了、注册却没变）。带指纹后不同覆盖值各自缓存，互不串味。
+      *
+      * 窗口三级真值链（fetchModels 内单点判定）：目录声明 > 用户覆盖 >
+      * **策展表**（context-catalog，models.dev 交叉真值，零网络依赖）> 兜底
+      * 128k。目录声明过的条目任何下层都不碰；策展表只在用户没设覆盖时兜在
+      * 兜底之前——它是「更聪明的 128k」，不是新权威。
      * @param {number|null} [contextOverride] - 全局窗口覆盖（tokens），null = 跟随目录。
      */
     async fetchModels(contextOverride?: number | null): Promise<{ entries: CatalogEntry[]; ids: string[]; fetchedAt: string }> {
@@ -218,21 +224,32 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
             const id = str((raw as Record<string, unknown>).id, "");
             const tags = tagsById.get(id) ?? [];
             const source = { ...(raw as Record<string, unknown>), tasks: tags.length > 0 ? tags : undefined };
-            if (contextOverride != null) {
-              // 宽形状覆盖，但**目录声明优先**：先按 contextWindowOf 同序找旧拼写
-              // 首个正数——目录声明过窗口的条目不动（覆盖只作用于「没声明」的
-              // 模型，这是面板文案的承诺）；没声明的删掉四个键（可能带 0/负数/
-              // 非数字的残值）再写唯一答案。normalizeEntry 的逐键顺序是
-              // context_length → context_window → contextWindow →
-              // max_context_tokens，保留任何一个旧键都会赢过覆盖值。
-              const CONTEXT_KEYS = ["context_length", "context_window", "contextWindow", "max_context_tokens"];
-              const declared = CONTEXT_KEYS.some((key) => {
-                const value = (source as Record<string, unknown>)[key];
-                return typeof value === "number" && Number.isFinite(value) && value > 0;
-              });
-              if (!declared) {
+            // 窗口判定（与 contextWindowOf 同序）：目录四键有正数 → 平台真声明，
+            // 三级链都不碰。没声明才看下层。
+            const CONTEXT_KEYS = ["context_length", "context_window", "contextWindow", "max_context_tokens"];
+            const declared = CONTEXT_KEYS.some((key) => {
+              const value = (source as Record<string, unknown>)[key];
+              return typeof value === "number" && Number.isFinite(value) && value > 0;
+            });
+            if (!declared) {
+              // 第二级：用户覆盖。没声明才删四个键（可能带 0/负数/非数字的残值）
+              // 再写唯一答案。normalizeEntry 的逐键顺序是 context_length →
+              // context_window → contextWindow → max_context_tokens，保留任何
+              // 一个旧键都会赢过覆盖值。__contextSource 指纹供
+              // contextWindowSourceOf 区分「覆盖」与「策展」——归一后两者都是
+              // contextWindow 键有值，本身不可分。
+              if (contextOverride != null) {
                 for (const key of CONTEXT_KEYS) delete source[key];
                 source.contextWindow = contextOverride;
+                source.__contextSource = "override";
+              } else {
+                // 第三级：策展表（仅用户未设覆盖时兜在 128k 兜底之前）。
+                const curated = curatedWindowOf(id);
+                if (curated !== null) {
+                  for (const key of CONTEXT_KEYS) delete source[key];
+                  source.contextWindow = curated;
+                  source.__contextSource = "curated";
+                }
               }
             }
             return normalizeEntry(source);

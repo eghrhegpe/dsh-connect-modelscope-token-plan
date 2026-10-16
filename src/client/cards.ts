@@ -429,7 +429,17 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
                 ),
                 row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null,
                 typeof row.contextWindow === "number"
-                  ? h("span", { style: S.modelBadge, title: tt("provider.contextWindow") }, formatWindow(row.contextWindow))
+                  ? h(
+                    "span",
+                    // 策展值带来源标记：同一窗口数字，「策展」与「覆盖/目录」的
+                    // 可信度不同——面板把它点出来，用户才知道 262144 是查表得
+                    // 来、平台没亲口说。title 说全文案，badge 文本走短词。
+                    {
+                      style: row.contextSource === "curated" ? { ...S.modelBadge, color: "var(--dsw-alias-label-secondary)" } : S.modelBadge,
+                      title: row.contextSource === "curated" ? tt("provider.contextCuratedTitle") : tt("provider.contextWindow")
+                    },
+                    row.contextSource === "curated" ? formatWindow(row.contextWindow) + " *" : formatWindow(row.contextWindow)
+                  )
                   : null,
                 (FEATURED_OWNERS as readonly string[]).includes(catalogOwner(row.id))
                   ? h("span", { style: S.modelBadgeFeatured, title: tt("models.featuredTitle") }, tt("provider.featured"))
