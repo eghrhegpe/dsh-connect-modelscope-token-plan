@@ -515,6 +515,47 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   );
 }
 
+// ── provider 块聚合失败：**省略**整个块，不塞填满默认值的「降级块」 ──
+//
+// 旧实现失败时塞 `{ enabled:false, allowed:"all", roster:[], … }`。那个形状**看起来
+// 就是一个答案**：客户端据此认为「块在」，于是不再走 `GET /provider` 的兜底，只能
+// 拿编出来的值渲染——而真相是「读不到」。省略让兜底真的跑起来（与 draw 块同一条
+// 纪律），降级形状因此只剩客户端那一份（`DEGRADED_PROVIDER`）。
+//
+// 省掉的块不能把原因一起带走：原因进 shapeWarnings，否则操作者只看到「未接入」，
+// 而真相是「Host 读不到自己的状态」。
+{
+  const body = await buildSnapshotBody({
+    settings: resolveSettings({}).settings,
+    tokenStore: { state: async () => ({ present: false, source: "none", valid: null, checkedAt: null, ephemeral: true }) },
+    usageStore: {
+      daily: async () => ({ calls: 0 }),
+      perModelToday: async () => [],
+      trend: async () => [],
+      events: async () => [],
+      anomaly: () => null
+    },
+    inference: {
+      fetchModels: async () => ({ ids: [], entries: [] }),
+      fetchBalance: async () => { throw new Error("balance endpoint refused"); }
+    },
+    providerStore: { enabled: async () => null, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
+    drawStore: { enabled: async () => null, modelId: async () => null, versionNote: async () => null },
+    // provider 块里唯一会真抛的一路：publisher 状态读不到。
+    publisher: { get state() { throw new Error("publisher state unavailable"); } },
+    logger: { warn: () => {} }
+  });
+  assert.equal(
+    "provider" in body,
+    false,
+    "provider 块读不到时必须省略——塞降级块会让客户端跳过 /provider 兜底，只能拿编出来的值渲染"
+  );
+  assert.ok(
+    body.shapeWarnings.some((w) => w.startsWith("provider source failed")),
+    "省略不等于把原因也带走：操作者要能区分「未接入」与「Host 读不到自己的状态」"
+  );
+}
+
 // ── 同一条语义，用**真实挂载的插件**再钉一次 ──
 //
 // 上面那节的注释原话是「挂载的真实 store 造不出『读的时候抛』」——它用一个会抛错

@@ -225,8 +225,16 @@ export interface Snapshot {
   events: QuotaEvent[];
   trend: { days: number; buckets: TrendBucket[] };
   models: { available: boolean; count: number; sample: string[]; error: string | null };
-  /** Provider 注册状态（M4）：开关 + 注册 + 允许清单 + 面板 roster。 */
-  provider: ProviderStatus;
+  /**
+   * Provider 注册状态（M4）：开关 + 注册 + 允许清单 + 面板 roster。
+   *
+   * **可选**，与 `draw` 同一条纪律：Host 侧这一块聚合失败时**省略它**，而不是塞
+   * 一个填了默认值的「降级块」。理由不是洁癖——填默认值的块**看起来**是一个
+   * 答案（`allowed:"all"`、`roster:[]`、`enabled:false`），面板因此会认为「块在」、
+   * 不再走 `GET /provider` 兜底，于是只能拿那份编出来的形状渲染；而真相是
+   * 「读不到」。省略则让兜底路径真的跑起来（兜底也失败才用 `DEGRADED_PROVIDER`）。
+   */
+  provider?: ProviderStatus;
   /**
    * 出图工具状态。**可选**：旧 Host 或过渡期可能不给这个块，面板走
    * `drawOf` 的降级形状（与 `provider` 同一套「resolver-not-snapshot」纪律）。

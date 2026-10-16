@@ -830,8 +830,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 //#endregion
 //#region src/client/snapshot.ts
 /**
-	* 缺失块的空形状，**逐字对齐 Host 的降级实现**（`snapshot-aggregate.ts` 的
-	* `providerDegraded` 与各 `soft()` 失败分支、TokenStatus 的失败分支）。
+	* 缺失块的空形状，**逐字对齐 Host 的降级实现**（`snapshot-aggregate.ts` 各
+	* `soft()` 失败分支、TokenStatus 的失败分支）。
+	*
+	* `provider` 块现在是**省略**而不是由 Host 塞一个降级块（2026-10-17）：Host 那份
+	* 降级形状「看起来就是一个答案」，面板据此认为块在、不再走 `GET /provider` 兜底，
+	* 于是只能拿编出来的值渲染。省略之后，兜底真的跑起来，降级形状只剩这里一份。
 	*
 	* 这里的每一条都是「Host 那一路失败时真的产出的形状」，不是随手捏的：面板渲染
 	* 的每一个字段都必须有一个与 Host 同构的空值，否则补出来的空块自己就会炸——

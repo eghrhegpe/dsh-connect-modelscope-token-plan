@@ -47,26 +47,6 @@ async function soft<T>(promise: Promise<T>): Promise<{ ok: true; value: T } | { 
   }
 }
 
-/**
- * Provider 状态块降级形状：读不到开关/注册状态/目录时，面板仍然得到一个完整
- * 可渲染的块（开关关、roster 空、error 说明原因），绝不让整条快照失败。
- */
-function providerDegraded(error: string): Snapshot["provider"] {
-  return {
-    enabled: false,
-    source: "config",
-    llmAvailable: false,
-    registered: false,
-    error,
-    modelCount: 0,
-    enabledCount: 0,
-    allowed: "all",
-    enabledIds: [],
-    contextWindow: null,
-    roster: []
-  };
-}
-
 /** 聚合快照 body。wiring 子集见 routes/snapshot.ts 的 Pick。 */
 export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "tokenStore" | "usageStore" | "inference" | "providerStore" | "drawStore" | "publisher" | "logger">): Promise<Snapshot> {
   const { settings, tokenStore, usageStore, inference, providerStore, drawStore, publisher } = wiring;
@@ -201,6 +181,12 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     } satisfies Snapshot["draw"];
   })());
 
+  // 块级失败原因**必须进 shapeWarnings**：块本身被省略了（见下），若原因也跟着
+  // 消失，操作者只看到面板「未接入」，而真相是「Host 读不到自己的状态」——那是
+  // 可处置的信息，不能丢。格式与上面各路一致（label + code + error）。
+  if (!provider.ok) shapeWarnings.push(`provider source failed (${provider.code}): ${provider.error}`);
+  if (!draw.ok) shapeWarnings.push(`draw source failed (${draw.code}): ${draw.error}`);
+
   // 读不到就是 null（不是 0）：0 是可信的日常值，把「读不到」渲成 0 会让操作者以为
   // 今天没调用过，而真相是他不知道。面板对 null 渲染「—」（见 wire.ts DailyUsage）。
   const usedLocal = daily.ok ? daily.value.calls : null;
@@ -233,10 +219,17 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
       sample: modelIds.slice(0, 20),
       error: models.ok ? null : models.error
     },
-    // provider 块（M4 §11）：软失败，失败给降级形状而非整条快照失败。
-    provider: provider.ok ? provider.value : providerDegraded(provider.error),
-    // 出图块：同一条纪律。失败时**省略**整个块（wire 里 `draw?` 是可选），面板
-    // 走 drawOf 的降级形状——比硬塞一个可能误导的「未开启」更诚实。
+    // provider 块（M4 §11）：软失败，失败时**省略**整个块——与出图块同一条纪律
+    // （wire 里两者都是可选）。
+    //
+    // 这里曾经塞一个填满默认值的「降级块」（开关关、roster 空、allowed:"all"），
+    // 而那个形状**看起来就是一个答案**：面板据此认为块在，于是不再走
+    // `GET /provider` 的兜底，只能拿编出来的值渲染——真相却是「读不到」。省略
+    // 让兜底真的跑起来（兜底也失败才用 DEGRADED_PROVIDER），也让「降级形状」只剩
+    // 客户端那一份，而不是 Host 编一份、客户端再编一份。
+    ...(provider.ok ? { provider: provider.value } : {}),
+    // 出图块：同一条纪律。失败时省略，面板走 drawOf 的降级形状——比硬塞一个可能
+    // 误导的「未开启」更诚实。
     ...(draw.ok ? { draw: draw.value } : {}),
     shapeWarnings,
     // quotaError 为 M4 预留（wire.ts 语义）；v0.1 的失败都走 shapeWarnings /

@@ -85,6 +85,22 @@
     ]
   },
   {
+    "target": "src/host/snapshot-aggregate.ts",
+    "test": "routes.test.mjs",
+    "mutants": [
+      {
+        "name": "provider 块失败时塞回降级块（客户端据此跳过 /provider 兜底，只能拿编出来的值渲染）",
+        "from": "    ...(provider.ok ? { provider: provider.value } : {}),",
+        "to": "    provider: provider.ok ? provider.value : { enabled: false, source: \"config\", llmAvailable: false, registered: false, error: provider.error, modelCount: 0, enabledCount: 0, allowed: \"all\", enabledIds: [], contextWindow: null, roster: [] },"
+      },
+      {
+        "name": "块级失败原因不进 shapeWarnings（操作者只看到「未接入」，看不见「Host 读不到自己的状态」）",
+        "from": "  if (!provider.ok) shapeWarnings.push(`provider source failed (${provider.code}): ${provider.error}`);",
+        "to": "  // provider failure warning removed"
+      }
+    ]
+  },
+  {
     "target": "src/host/draw-runtime.ts",
     "test": "draw-runtime.test.mjs",
     "mutants": [
