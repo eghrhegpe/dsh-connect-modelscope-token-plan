@@ -1,0 +1,42 @@
+{
+  "_comment": [
+    "KERNEL —— 同族插件之间的『复制账本』，由 test/family-kernel.test.mjs 用",
+    "tools/dev/cross-repo-drift.mjs 的同一判据（剥注释后的行集合重叠，Jaccard）核验。",
+    "姊妹仓库不在场时门禁明说后放行（与 drift 工具的『未发现≠错误』同语义）；在场时",
+    "任一文件跌破 floor 即红。",
+    "",
+    "为什么按姊妹分别列 floor，而不是一份清单管两个仓库：2026-10-17 实测，sensenova",
+    "有 9 个内核文件重叠 ≥91.5%，agnes 只有 2 个（其余 30%~62%，已各自演化）。硬抽一份",
+    "共同清单就是在替谎言记账。",
+    "",
+    "floor 的来源与余量：取实测值下浮 4~6 个百分点——余量给合理的局部改动（日志措辞、",
+    "错误文案这类不改结构的行）；跌破余量说明出现了**结构分家**，正是账本要抓的事。",
+    "合法的分家（一侧新增能力）应显式改这份清单：把文件移除或降 floor，并在那次改动里",
+    "说明为什么。清单要变，必须明着变。",
+    "",
+    "路径按 drift 的 pair.file 形态（相对 src/，剥掉 src/{host,client,shared}/ 前缀）。",
+    "100% 的文件用 floor 1.0：它们已逐行同源，改一侧必须同步另一侧。",
+    "头注自我描述核对（claimsMismatch 必须为 0）是 drift 自己的 --strict 语义，一并跑。"
+  ],
+  "sensenova": {
+    "siblingDir": "../dsh-connect-sensenova-token-plan",
+    "files": {
+      "client/apply.ts": 1.0,
+      "host/llm-retry.ts": 1.0,
+      "host/llm-adapter-core.ts": 0.9,
+      "client/runtime.ts": 0.9,
+      "client/toggle-switch.ts": 0.9,
+      "host/llm-error-fix.ts": 0.9,
+      "host/util.ts": 0.9,
+      "host/coalesced-fetch.ts": 0.88,
+      "host/publish-core.ts": 0.85
+    }
+  },
+  "agnes": {
+    "siblingDir": "../dsh-connect-agnes-token-plan",
+    "files": {
+      "client/apply.ts": 1.0,
+      "host/llm-retry.ts": 1.0
+    }
+  }
+}
