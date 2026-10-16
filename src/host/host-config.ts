@@ -74,6 +74,19 @@ export const CONFIG_DEFAULTS = Object.freeze({
    * §坑 5）。宁可多等，不要把一张已经在生成的图扔掉。
    */
   drawTimeoutMs: 900_000,
+  /**
+   * 一次出图**工具调用**愿意等的时间（毫秒）。
+   *
+   * 与 `drawTimeoutMs`（总放弃线）是两件事：那个回答「这张图值不值得继续等」，
+   * 这个回答「一轮对话该被占住多久」。两者混为同一个数，就是把上游排队的代价
+   * 转嫁成 agent 的停顿——实测排队 61s–537s，一次调用 await 到底等于让整轮
+   * 对话陪着排队。
+   *
+   * 取 90s：能一次拿完实测最快那一档（61s）；更慢的本来就必须分段查（工具返回
+   * `status: pending` + `jobId`，带它再调用即续查），再往上加只是把「等得久」
+   * 换成「卡得久」。
+   */
+  drawWaitMs: 90_000,
   /** Host 应答的默认主机名；操作者的列表是「只增不替」。 */
   admittedHosts: ["localhost", "127.0.0.1", "[::1]", "::1"]
 });
@@ -114,8 +127,10 @@ export interface ResolvedSettings {
   drawEnabled: boolean;
   /** 出图默认模型（空串 = 自动）。 */
   drawModelId: string;
-  /** 单次出图总预算（毫秒），含提交与轮询。 */
+  /** 单次出图总预算（毫秒）：从提交算起的总放弃线，跨多次工具调用累计。 */
   drawTimeoutMs: number;
+  /** 单次工具调用愿意等的时间（毫秒）；等不到就返回 pending 让 agent 稍后续查。 */
+  drawWaitMs: number;
   allowedHosts: Set<string>;
 }
 
@@ -157,6 +172,9 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         drawEnabled: source.drawEnabled === true,
         drawModelId: str(source.drawModelId, CONFIG_DEFAULTS.drawModelId),
         drawTimeoutMs: clampInt(source.drawTimeoutMs, CONFIG_DEFAULTS.drawTimeoutMs, 30_000, 900_000),
+        // 单次等待预算：下界 10s（再低就没必要分段了），上界 = 总放弃线（超过它的
+        // 等待没有意义，工具里还会再夹一次）。
+        drawWaitMs: clampInt(source.drawWaitMs, CONFIG_DEFAULTS.drawWaitMs, 10_000, 900_000),
         // 允许主机名：默认集只增不替（typo 不能把面板锁在外面）。
         allowedHosts: resolveAllowedHosts(source)
       },
@@ -177,6 +195,7 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         drawEnabled: false,
         drawModelId: CONFIG_DEFAULTS.drawModelId,
         drawTimeoutMs: CONFIG_DEFAULTS.drawTimeoutMs,
+        drawWaitMs: CONFIG_DEFAULTS.drawWaitMs,
         allowedHosts: new Set(CONFIG_DEFAULTS.admittedHosts)
       },
       configError: redactSecrets(errMsg(error))

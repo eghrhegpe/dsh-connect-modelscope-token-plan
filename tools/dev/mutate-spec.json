@@ -85,6 +85,53 @@
     ]
   },
   {
+    "target": "src/host/draw-runtime.ts",
+    "test": "draw-runtime.test.mjs",
+    "mutants": [
+      {
+        "name": "预算耗尽时报 failed 而不是 pending（两段式塌回一次性阻塞：agent 失去续查把手）",
+        "from": "    if (Date.now() >= deadline) return { kind: \"pending\", polls };",
+        "to": "    if (Date.now() >= deadline) return { kind: \"failed\", message: \"timeout\" };"
+      },
+      {
+        "name": "总放弃线检查消失（一张永远不出图的任务可以被无限续查）",
+        "from": "    if (elapsedMs >= timeoutMs) {",
+        "to": "    if (false) {"
+      },
+      {
+        "name": "续查不查作业表（不认识的 jobId 会带着 undefined 去调上游）",
+        "from": "        if (job === null) {",
+        "to": "        if (false) {"
+      },
+      {
+        "name": "工具硬护栏回到总放弃线（一次调用又把 agent 卡满 15 分钟）",
+        "from": "    timeoutMs: waitMs + 10_000,",
+        "to": "    timeoutMs: timeoutMs + 10_000,"
+      }
+    ]
+  },
+  {
+    "target": "src/host/draw-jobs.ts",
+    "test": "draw-jobs.test.mjs",
+    "mutants": [
+      {
+        "name": "容量满了不淘汰（长跑会话把内存慢慢养成泄漏）",
+        "from": "    while (jobs.size > maxJobs) {",
+        "to": "    while (false) {"
+      },
+      {
+        "name": "get 返回表内引用（外部改动能污染表）",
+        "from": "      return found === undefined ? null : { ...found };",
+        "to": "      return found === undefined ? null : found;"
+      },
+      {
+        "name": "notePolls 改赋值（跨调用累计的轮询数被清零）",
+        "from": "      found.polls += Math.max(0, Math.floor(polls));",
+        "to": "      found.polls = Math.max(0, Math.floor(polls));"
+      }
+    ]
+  },
+  {
     "target": "src/host/provider-reconcile.ts",
     "test": "reconcile.test.mjs",
     "mutants": [

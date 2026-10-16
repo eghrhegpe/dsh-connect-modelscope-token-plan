@@ -13,6 +13,7 @@
 //   · 提交响应恒为 SUCCEED → 连最终 FAILED 的 FLUX 那次提交也报 SUCCEED。
 
 import { strict as assert } from "node:assert";
+import { DRAW_WAIT_BUDGET_MS } from "../src/host/draw.ts";
 import {
   DRAW_TOOL_NAME,
   buildGenerationsEndpoint,
@@ -20,8 +21,12 @@ import {
   pickDrawModel,
   drawModelIds,
   splitImageUrls,
-  runDrawOnce
+  runDrawOnce,
+  submitDrawTask,
+  awaitDrawTask,
+  defineDrawTool
 } from "../src/host/draw-runtime.ts";
+import { createDrawJobs } from "../src/host/draw-jobs.ts";
 
 const checks = [];
 function section(name, body) {
@@ -300,9 +305,175 @@ section("超时文案必须说清「任务可能仍在生成」，不能让人�
   assert.match(err.message, /task|任务/, "应带上 task_id 便于排查");
 });
 
+// ── 两段式原语 ────────────────────────────────────────────────────────────────
+// 这两个函数是「一次调用不再阻塞整轮对话」的承重：提交与等待能分开，工具才可能
+// 在 waitMs 处返回 pending 而不是 await 到底。
+section("submitDrawTask 只认 task_id，忽略提交响应的 task_status", async () => {
+  const { fetchImpl } = scriptedFetch([res(200, { task_id: "t1", task_status: "SUCCEED" })]);
+  const out = await submitDrawTask({ fetchImpl, ...BASE });
+  assert.deepEqual(out, { taskId: "t1" });
+});
+
+section("submitDrawTask 提交失败直接抛，不带 task_id 就不该有第二段", async () => {
+  const { fetchImpl, calls } = scriptedFetch([res(401, '{"message":"nope"}')]);
+  await assert.rejects(() => submitDrawTask({ fetchImpl, ...BASE }), /令牌无效/);
+  assert.equal(calls.length, 1);
+});
+
+section("awaitDrawTask 三种结局：done / failed / pending", async () => {
+  const done = await awaitDrawTask({
+    ...BASE,
+    taskId: "t1",
+    fetchImpl: scriptedFetch([res(200, { task_status: "RUNNING" }), res(200, { task_status: "SUCCEED", output_images: ["u"] })]).fetchImpl,
+    waitMs: 5_000,
+    pollIntervalMs: 1
+  });
+  assert.equal(done.kind, "done");
+  assert.deepEqual(done.images, ["u"]);
+
+  const failed = await awaitDrawTask({
+    ...BASE,
+    taskId: "t1",
+    fetchImpl: scriptedFetch([res(200, { task_status: "FAILED", errors: { code: 0, message: "" } })]).fetchImpl,
+    waitMs: 5_000,
+    pollIntervalMs: 1
+  });
+  assert.equal(failed.kind, "failed");
+  assert.match(failed.message, /未给出失败原因/, "失败文案沿用纯逻辑层的诚实边界");
+
+  // 预算耗尽 = pending，**不是失败**：这是两段式能成立的那一句话。
+  const pending = await awaitDrawTask({
+    ...BASE,
+    taskId: "t1",
+    fetchImpl: scriptedFetch([res(200, { task_status: "RUNNING" })]).fetchImpl,
+    waitMs: 3,
+    pollIntervalMs: 1
+  });
+  assert.equal(pending.kind, "pending", "预算耗尽必须返回 pending，不能抛错");
+  assert.ok(pending.polls >= 1, "pending 也要报轮询次数（诊断用）");
+});
+
+// ── 两段式工具：一次调用不再阻塞整轮对话 ──────────────────────────────────────
+/** 装配一个工具（捕获 peer 的 defineTool 入参，直接调它的 execute）。 */
+function makeTool({ steps, settings = {}, jobs, getEntries, cooldown }) {
+  const { fetchImpl, calls } = scriptedFetch(steps);
+  let def = null;
+  defineDrawTool({
+    defineTool: (d) => { def = d; return d; },
+    fetchImpl,
+    resolveApiKey: async () => "ms-test-key",
+    getEntries: getEntries ?? (async () => [{ id: "Qwen/Qwen-Image-Edit", tasks: ["image-to-image"] }]),
+    settings: {
+      apiBase: BASE.apiBase,
+      drawModelId: "",
+      drawTimeoutMs: 900_000,
+      drawWaitMs: 5,
+      ...settings
+    },
+    ...(jobs !== undefined ? { jobs } : {}),
+    ...(cooldown !== undefined ? { cooldown } : {}),
+    pollIntervalMs: 1
+  });
+  return { def, calls };
+}
+
+section("第一段：等不到终态就返回 pending + jobId，不把整轮对话堵在 await 上", async () => {
+  const { def, calls } = makeTool({
+    steps: [res(200, { task_id: "t1" }), res(200, { task_status: "RUNNING" })]
+  });
+  const out = await def.execute({ prompt: "a cat" });
+  assert.equal(out.status, "pending");
+  assert.equal(out.jobId, "t1", "jobId 就是上游 task_id——可直接与上游日志对上");
+  assert.equal(out.url, "", "还没出图就不该给 URL");
+  assert.match(out.hint, /仍在生成中/);
+  assert.match(out.hint, /jobId t1/, "必须把续查的把手写在明面上");
+  // 一次调用只发「一次提交 + 若干次轮询」，且轮询都在极短预算内结束了。
+  assert.equal(calls[0].options.method, "POST");
+  assert.ok(calls.length < 60, `等待预算必须被遵守（实测 ${calls.length} 次请求）`);
+});
+
+section("第二段：带 jobId 只查询，不重复提交（续查不产生新任务）", async () => {
+  const jobs = createDrawJobs();
+  jobs.create({ taskId: "t1", model: "Qwen/Qwen-Image-Edit", prompt: "a cat" });
+  const { def, calls } = makeTool({
+    jobs,
+    // 预算要够跑两轮（RUNNING → SUCCEED），否则这一遍会以 pending 收场。
+    settings: { drawWaitMs: 300 },
+    steps: [res(200, { task_status: "RUNNING" }), res(200, { task_status: "SUCCEED", output_images: ["https://oss/a.png"] })]
+  });
+  const out = await def.execute({ jobId: "t1" });
+  assert.equal(out.status, "done", "续查等到终态就直接给图");
+  assert.deepEqual([out.url, out.prompt], ["https://oss/a.png", "a cat"]);
+  assert.ok(
+    calls.every((c) => c.options.method === "GET"),
+    `续查不得再发提交（实测方法：${calls.map((c) => c.options.method).join(",")}）`
+  );
+});
+
+section("pending 不进冷却：续查这条路不能被上一次「还没好」堵死", async () => {
+  const jobs = createDrawJobs();
+  const cooldown = { fail: () => { throw new Error("pending 不该进冷却"); }, remainingMs: () => 0, clear: () => {} };
+  const { def } = makeTool({
+    jobs,
+    cooldown,
+    steps: [res(200, { task_id: "t1" }), res(200, { task_status: "RUNNING" })]
+  });
+  const out = await def.execute({ prompt: "a cat" });
+  assert.equal(out.status, "pending", "pending 若进冷却，这里会抛而不是返回");
+});
+
+section("真失败才进冷却（上游 FAILED）", async () => {
+  let failed = 0;
+  const cooldown = { fail: () => { failed += 1; }, remainingMs: () => 0, clear: () => {} };
+  const { def } = makeTool({
+    cooldown,
+    steps: [res(200, { task_id: "t1" }), res(200, { task_status: "FAILED", errors: { code: 0, message: "" } })]
+  });
+  await assert.rejects(() => def.execute({ prompt: "a cat" }), /未给出失败原因/);
+  assert.equal(failed, 1, "真失败必须记一次冷却");
+});
+
+section("jobId 不在作业表里 → 可操作错误，且不冒充出图失败", async () => {
+  const { def } = makeTool({ steps: [] });
+  await assert.rejects(
+    () => def.execute({ jobId: "not-a-job" }),
+    /不在本次会话的作业表里/,
+    "插件重启后作业表是空的，必须说清而不是报个莫名的上游错误"
+  );
+});
+
+section("越过总放弃线才放弃，且仍说清「任务可能仍在生成」", async () => {
+  const jobs = createDrawJobs();
+  // 手工塞一条「16 分钟前提交的」作业：总放弃线是从提交算起跨调用累计的，
+  // 默认总预算 15 分钟，所以它已经越线（不必真的等 15 分钟来测这条）。
+  jobs.create({ taskId: "t-old", model: "Qwen/Qwen-Image-Edit", prompt: "a cat", now: Date.now() - 960_000 });
+  const { def } = makeTool({ jobs, steps: [res(200, { task_status: "RUNNING" })] });
+  const err = await def.execute({ jobId: "t-old" }).then(() => null, (e) => e);
+  assert.ok(err !== null, "越过总放弃线应当抛错（放弃这张图）");
+  assert.match(err.message, /超过总预算/);
+  assert.match(err.message, /可能仍在生成/, "放弃 ≠ 任务死亡，这条仍然要说清");
+});
+
+section("工具硬护栏按 waitMs 设，不再是 15 分钟的总放弃线", async () => {
+  const { def } = makeTool({ steps: [res(200, { task_id: "t1" })] });
+  assert.ok(
+    def.timeoutMs < 60_000,
+    `一次调用最多只能占住 waitMs 量级（实测 ${def.timeoutMs}ms）；等于总放弃线 = 又把 agent 卡回 15 分钟`
+  );
+  assert.ok(DRAW_WAIT_BUDGET_MS >= 60_000, "默认等待预算应能一次拿完实测最快那一档（61s）");
+});
+
 // ── 工具定义 ──────────────────────────────────────────────────────────────────
 section("工具名带插件前缀，不与 dsh-draw-router 撞名", () => {
   assert.equal(DRAW_TOOL_NAME, "modelscope_draw_image");
+});
+
+section("两段式的参数与输出契约：jobId 进参、status/jobId 出参", async () => {
+  const { def } = makeTool({ steps: [res(200, { task_id: "t1" })] });
+  assert.equal(def.parameters.jobId?.type, "string", "jobId 必须是显式参数，agent 才知道怎么续查");
+  assert.match(def.parameters.prompt.description, /jobId/, "prompt 在续查时被忽略，说明里要写");
+  assert.deepEqual(Object.keys(def.output.schema.properties).sort(), ["hint", "jobId", "model", "prompt", "source", "status", "url"]);
+  assert.match(def.description, /TWO-PHASE|pending/, "工具描述必须说清是两段式");
 });
 
 // ── 跑 ────────────────────────────────────────────────────────────────────────

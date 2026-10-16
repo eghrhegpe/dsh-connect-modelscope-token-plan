@@ -141,7 +141,9 @@ export async function registerDrawTool(
         settings: {
           apiBase: settings.apiBase,
           drawModelId: settings.drawModelId,
-          drawTimeoutMs: settings.drawTimeoutMs
+          // 两个预算各归各位：总放弃线 vs 单次调用愿意等的时间（两段式）。
+          drawTimeoutMs: settings.drawTimeoutMs,
+          drawWaitMs: settings.drawWaitMs
         },
         isDisposed
       })

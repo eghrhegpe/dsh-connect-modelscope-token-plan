@@ -60,6 +60,20 @@ export const DRAW_POLL_INTERVAL_MS = 15_000;
 export const DRAW_POLL_DEADLINE_MS = DRAW_TIMEOUT_MS;
 
 /**
+ * 一次**工具调用**里愿意等的时间（毫秒）。
+ *
+ * 出图工具是给 agent 用的，一次调用阻塞 = 一整轮对话被占住。15 分钟的总预算
+ * （{@link DRAW_TIMEOUT_MS}）是「这张图值不值得继续等」的上限，不是「一次调用
+ * 该不该堵住 agent」的上限——两者同一个数，就是把上游排队的代价转嫁成对话的
+ * 停顿。
+ *
+ * 取 90s：实测耗时 61s–537s 大幅波动，90s 能一次拿完最快那一档（61s），而
+ * 更慢的本来就必须分段查（见 `draw-runtime.ts` 的两段式工具）。再往上加只是
+ * 把「等得久」换成「卡得久」，并不改变「慢的图要分几次查」这个事实。
+ */
+export const DRAW_WAIT_BUDGET_MS = 90_000;
+
+/**
  * 轮询必须携带的头名与取值。
  *
  * 漏掉它 → 上游返回 `task not found` + `FAILED`，而任务其实在正常跑。这是本协议
