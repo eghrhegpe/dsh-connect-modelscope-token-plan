@@ -66,6 +66,21 @@ DSH_DOM_TARGET=src node tools/dev/mutate.mjs tools/dev/mutate-dom-render-react.j
   input 必须用 `HTMLInputElement.prototype` 的原生 setter 改值，否则被值追踪器判成
   「没有变化」。写第一版时当场踩了前者。
 
+### 跑对话框胶囊那一档：`mutate-composer-pill.json`
+
+```
+DSH_DOM_TARGET=src node tools/dev/mutate.mjs tools/dev/mutate-composer-pill.json
+```
+
+两条测试各管一半：`test/composer-pill.test.mjs` 钉纯规则（座席只注册一次、provider
+归属四态、`null` ≠ `0`、三档定级、陈旧边界、字典与样式族），`test/dom-render-react.test.mjs`
+的 §6 钉它们在真 reconciler 下落到 DOM 上（非归属整块缺席且零请求、两个读数上屏、
+28px 与无框进 CSSOM、三档墨色互不相同、失败保留上次读数并标「上次数据」、首帧「读取中」不是 0）。
+实测：7 条变异 **全部被抓住**（C1 就是把 `providerOf` 退回「是字符串就算可用」——空串
+`next` 于是遮住仍可用的 `lastUsed`，切模型那一帧胶囊消失；这条规则本身就是新套件当场
+抓出来的缺陷，所以它的变异必须继续红）。`test/composer-pill.test.mjs` 也有
+`DSH_DOM_TARGET=src` 入口，理由同上：变异改 src，产物入口看不见。
+
 ### 四个判定，看清它们的区别
 
 | 判定 | 含义 |

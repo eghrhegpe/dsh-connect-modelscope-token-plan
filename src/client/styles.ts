@@ -127,5 +127,54 @@ export const S = {
   // leaving a whole list adrift: this panel keeps every list inside its section card
   // block that already wears a card, and an unframed list beside a framed one
   // read as an unfinished half rather than as a deliberate hierarchy.
-  modelPanel: { border: "1px solid var(--dsw-alias-border-l1)", borderRadius: 12, background: "var(--dsw-alias-bg-layer-1)", padding: "12px 14px" }
+  modelPanel: { border: "1px solid var(--dsw-alias-border-l1)", borderRadius: 12, background: "var(--dsw-alias-bg-layer-1)", padding: "12px 14px" },
+
+  // ── 对话框用量胶囊（conversation.input.right 座席）──────────────────────────
+  // 这一族按**宿主输入框工具栏**的尺度定：28px 高 / 12px 字 / 无框 / 透明底，
+  // 不按本插件自己的卡片尺度（那是 13px 字 + 1px 框）。本插件不注入样式表
+  // （同 toggle-switch.ts 的裁定），所以这些是 inline style；颜色只取宿主 token，
+  // 换肤与明暗随之走，一个写死的主题色都不留。
+  //
+  // `borderStyle: "none"` 与 `borderWidth: 0` 必须**分开写**：写成
+  // `border: "none"` 时 UA 的 border-image 仍会画出一圈框（jsdom 还会把
+  // `border: 0` 解成非法值），胶囊于是带着一个本不该存在的方块，而它在
+  // `getComputedStyle` 之外看不出来是哪儿来的。
+  pillTrigger: {
+    appearance: "none",
+    WebkitAppearance: "none",
+    height: 28,
+    borderStyle: "none",
+    borderWidth: 0,
+    background: "none",
+    // 显式 inherit：`<button>` 的 UA 默认字色是 ButtonText，在深色外壳里会
+    // 自己变黑，跟工具栏其它图标不是一套墨。
+    color: "inherit",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "0 10px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 600,
+    lineHeight: "18px",
+    // 胶囊本身没有点击行为（tooltip 才是它的内容），所以不给手型光标，
+    // 也不给它按钮的按下反馈——但保留可聚焦：键盘用户聚焦后能读到
+    // aria-label 里的来源与口径说明。
+    cursor: "default",
+    flexShrink: 0,
+    whiteSpace: "nowrap"
+  },
+  pillDot: { width: 8, height: 8, borderRadius: 999, flex: "none", background: "var(--dsw-alias-label-secondary)" },
+  // 套餐 / 来源前缀压暗一档：它是「这些数字属于谁」的注脚，不是读数本身。
+  pillPlan: { opacity: 0.72 },
+  // 「上次数据」：斜体 + 更淡，弱到不抢读数，又明确到不会被当成当前值。
+  pillStale: { opacity: 0.62, fontStyle: "italic" },
+  // 三档墨色（绿 / 红 / 灰）。**没有黄色**：黄色在姊妹插件里表示「已用 ≥80%」，
+  // 而魔粒余额没有官方上限，任何「低于 N 魔粒算黄」的阈值都是本插件凭空发明的
+  // 分母。要么绿（读数是正数）、要么红（官方给的读数确实是 0）、要么灰（读不到）。
+  pillTierOk: "#22c55e",
+  pillTierExhausted: "#ef4444",
+  pillTierUnknown: "#9ca3af",
+  // 只有余额读数确实为 0 时才把正文染成告警色——健康读数保持 inherit。
+  pillTierExhaustedText: { color: "var(--dsw-alias-state-error-primary)" }
 };

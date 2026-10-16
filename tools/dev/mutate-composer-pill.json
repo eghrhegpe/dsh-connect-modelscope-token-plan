@@ -1,0 +1,49 @@
+[
+  {
+    "target": "src/client/composer-usage-pill.ts",
+    "test": "test/composer-pill.test.mjs",
+    "mutants": [
+      {
+        "name": "C1 providerOf 退回「是字符串就算可用」——空串 next 于是遮住仍可用的 lastUsed（切模型那一帧胶囊消失，改动前就是这个形状）",
+        "from": "  return typeof provider === \"string\" && provider !== \"\" ? provider : undefined;",
+        "to": "  return typeof provider === \"string\" ? provider : undefined;"
+      },
+      {
+        "name": "C2 tierOf 永不判耗尽（余额真的为 0 也当健康）",
+        "from": "  return available > 0 ? \"ok\" : \"exhausted\";",
+        "to": "  return \"ok\";"
+      },
+      {
+        "name": "C3 staleOf 永不判陈旧（读失败也照旧显示成当前值）",
+        "from": "  return input.updatedAt > 0 && input.now - input.updatedAt > input.cadenceMs * STALE_CADENCES;",
+        "to": "  return false;"
+      },
+      {
+        "name": "C4 availableOf 把「读不到」当 0（null ≠ 0 纪律被拆）",
+        "from": "  const available = balance?.available;\n  return typeof available === \"number\" && Number.isFinite(available) ? available : null;",
+        "to": "  const available = balance?.available;\n  return typeof available === \"number\" && Number.isFinite(available) ? available : 0;"
+      }
+    ]
+  },
+  {
+    "target": "src/client/composer-usage-pill.ts",
+    "test": "test/dom-render-react.test.mjs",
+    "mutants": [
+      {
+        "name": "R-pill-1 耗尽档的圆点墨色退回绿色（三档在屏幕上不再可区分）",
+        "from": "  exhausted: S.pillTierExhausted,",
+        "to": "  exhausted: S.pillTierOk,"
+      },
+      {
+        "name": "R-pill-2 门控失效：任何 provider 都渲染胶囊（非归属会话也开始发请求）",
+        "from": "  if (selectedProviderOf(selection) !== MODELSCOPE_PROVIDER) return null;",
+        "to": "  if (false) return null;"
+      },
+      {
+        "name": "R-pill-3 首帧不再区分「还没读到」与读数（读取中被画成「— 魔粒」）",
+        "from": "      pending ? \"…\" : readingText(available, usedToday, tt)",
+        "to": "      readingText(available, usedToday, tt)"
+      }
+    ]
+  }
+]

@@ -132,7 +132,17 @@ export const zh = {
   "present.no": "未配置",
   "validity.yes": "有效",
   "validity.no": "未校验",
-  "validity.bad": "无效"
+  "validity.bad": "无效",
+
+  // 对话框用量胶囊（输入框工具栏 `conversation.input.right` 座席）。两个读数的
+  // 来源不同，所以正文里必须各带各的口径：魔粒来自官方接口
+  // （`composer.balanceUnit`），次数来自 Host 侧的本地日桶——`composer.localCalls`
+  // 里的「本地」不是修饰语，是「这个数字官方查不到」的说明。别把两句并成一句。
+  "composer.prefix": "魔搭",
+  "composer.pillTitle": "魔搭额度：官方魔粒余额 + 今日本地调用次数",
+  "composer.balanceUnit": "魔粒",
+  "composer.localCalls": "今日本地 {calls} 次",
+  "composer.stale": "上次数据"
 };
 
 /** English dictionary, key-parity pinned by the type. */
@@ -264,7 +274,16 @@ export const en: typeof zh = {
   "present.no": "not configured",
   "validity.yes": "verified",
   "validity.no": "unverified",
-  "validity.bad": "invalid"
+  "validity.bad": "invalid",
+
+  // Composer usage pill (the `conversation.input.right` seat). The two readings
+  // come from different places, so each one names its own source: the balance is
+  // the official figure, the count is this plugin's own local day bucket.
+  "composer.prefix": "ModelScope",
+  "composer.pillTitle": "ModelScope quota: official Magicube balance + today's local call count",
+  "composer.balanceUnit": "Magicubes",
+  "composer.localCalls": "local today {calls}",
+  "composer.stale": "stale data"
 };
 
 export type DictionaryKey = keyof typeof zh;

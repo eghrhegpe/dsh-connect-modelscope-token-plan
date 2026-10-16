@@ -2,6 +2,16 @@
 
 ## [未发布]
 
+**新增对话框用量胶囊**（输入框工具栏 `conversation.input.right` 座席，只在会话当前选中的 provider 是 `modelscope-token-plan` 时出现）
+
+- 正文两个读数、各标各的来源：`魔搭 · 143 魔粒 · 今日本地 7 次`。前半是**官方魔粒余额**（`snapshot.balance.available`），后半是 Host 侧本地日桶（`snapshot.quota.daily.usedLocal`）——后者的「本地」二字是承重的，官方接口没有「今日」这一项，不写清就会被读成官方计数（口径见 README「诚实声明」）。
+- **刻意没有百分比，也没有黄色档**：魔粒余额是存量、官方没有发布任何上限或低额阈值，画一条进度条或定一个「低于 N 魔粒算黄」的阈值，都是发明一个没人公布过的分母。三档只剩：绿（读数是正数）、红（官方读数确实是 0）、灰（读不到）。
+- **`null` ≠ `0` 一路贯彻到胶囊**：读不到渲染「—」，绝不渲染 0；0 是读数（余额确实耗尽），走告警色。读失败时保留上一次的数值并加「上次数据」标记（陈旧阈值 = Host 声明的 `pollSeconds` × 3，默认 30s → 90s；「从没读到」不算陈旧）。
+- **门控在组件边界**：外层只调一次 `useProjection("modelSelection")` 决定内层挂不挂，轮询 hook 全在内层，切模型不会踩 hook 顺序（内层被摘即停轮询，非归属会话一个请求都不发）。归属判定用**非空字符串**判 `next`，空 `next`（`{}` / `{provider:""}`）不许遮住仍可用的 `lastUsed`——这条规则是本次新写的套件当场抓出来的缺陷：第一版照「`typeof provider === "string"` 即算可用」写，`{provider:""}` 是字符串，于是切模型那一帧胶囊消失。
+- 外观全在 `styles.ts` 的 `S.pill*` 一族（本插件不注入样式表），按宿主工具栏尺度定：28px 高 / 12px 字 / 无框 / 透明底 / 只取宿主 token。其中的坑已写进注释：无框必须 `borderStyle:"none"` + `borderWidth:0` **分开写**，写成 `border:"none"` 时 UA 的 border-image 仍会画出一圈框。
+- **门禁**：新增 `test/composer-pill.test.mjs`（纯规则面：座席只注册一次、provider 字面量与 `src/host/llm-models.ts` 的 `LLM_PROVIDER_ID` 逐字一致、门控四态、`null`≠0、三档定级、陈旧边界、字典与样式族），并给 `test/dom-render-react.test.mjs` 加了 §6（真 reconciler 下：非归属整块缺席且零请求、空 `next` 不遮 `lastUsed`、两个读数上屏、28px 与无框真的进了 CSSOM、三档圆点墨色互不相同、失败保留上次读数并标「上次数据」、首帧「读取中」不是 0）与 §7（胶囊卸载只清掉自己的 interval）。套件数 31（30 个 `*.test.mjs` + `build-gate`）。
+- **顺带修**：胶囊模块头部原先把口径纪律指向一个不存在的 `docs/usage-tracking.md`；本仓库没有独立的计量文档，唯一家是 README「诚实声明」一节，指针已改。
+
 **CI 门禁修好两处「上游数据引发的红」**（都与功能改动无关：同一个提交在 10-06 是绿的，10-15 重跑同一提交也红）
 
 - **npm 10（Node 22 自带）装不上依赖**：`npm error Cannot read properties of null (reading 'edgesOut')`，十几秒就死在 `npm install`。根因链条实测为：tsdown 声明可选 peer `@vitejs/devtools: "*"` → 该包 `0.8.0`（2026-10-14 发布）的 peer 里新增 `@vitejs/devtools-vitest` → vitest 的可选 peer 是 jsdom / happy-dom / canvas，**npm 10 的 peer 解析在那里崩**，npm 11 正常。`overrides` 回退 rolldown / cac / rolldown-plugin-dts 都无效、`--omit=optional` 无效，而 `--legacy-peer-deps` 立即成功——所以崩点在 peer 解析而非某个包。修法：项目根加 `.npmrc`（`legacy-peer-deps=true`），CI 与本地开发者（npm 10）一起修好，不必改 workflow。本仓库的 peerDependencies **全部**标了 optional，peer 校验本就没有可执行对象，关掉自动 peer 解析无实际损失。

@@ -10,6 +10,10 @@
  *   §4 列表换序时勾选跟着**模型 id** 走，不跟着位置走；
  *   §5 React 自己的开发期告警为零（非法 DOM 属性、受控/非受控切换、缺 key……替身
  *      永远不会说这些话，所以这一类只能在这里钉）。
+ * 另加 §6 对话框用量胶囊：provider 门控（非归属时整块缺席且不发请求）、两个读数
+ * 上屏、工具栏 28px / 无框真的进了 CSSOM、以及「读不到 ≠ 0」「失败保留上次读数并
+ * 标『上次数据』」这三条口径纪律——纯规则面在 `test/composer-pill.test.mjs`，这里
+ * 钉的是它们在真 reconciler 下真的落到了 DOM 上。
  * mini 替身在同样两条检查上的实测对照：`页根节点是同一个对象 = false`、
  * `重渲染后焦点还在输入框 = false（activeElement = BODY）`——这就是本套件存在的理由。
  *
@@ -74,14 +78,24 @@ const realSetInterval = globalThis.setInterval;
 const realClearInterval = globalThis.clearInterval;
 const liveTimers = new Set();
 const specs = [];
-globalThis.setInterval = (fn, ms, ...rest) => { const id = realSetInterval(fn, ms, ...rest); liveTimers.add(id); specs.push(ms); return id; };
+/** 每个 interval 的回调也留一份：§6 要靠手动「走一拍」触发第二轮轮询。 */
+const specFns = [];
+globalThis.setInterval = (fn, ms, ...rest) => { const id = realSetInterval(fn, ms, ...rest); liveTimers.add(id); specs.push(ms); specFns.push(fn); return id; };
 globalThis.clearInterval = (id) => { liveTimers.delete(id); return realClearInterval(id); };
 const calls = [];
+/**
+ * 快照的回答方式：`"ok"` 正常、`"fail"` 报 HTTP 500（用来测「保留上次数值 +
+ * 标上次数据」的降级）、`"hang"` 永不回答（用来测「首帧还没读到」不是 0）。
+ * 只影响快照那一条 GET，写盘路由不受影响。
+ */
+let snapshotMode = "ok";
 globalThis.fetch = async (url, init = {}) => {
   const record = { url: String(url), method: String(init.method ?? "GET").toUpperCase(), body: init.body === undefined ? null : String(init.body), signal: init.signal ?? null };
   calls.push(record);
   if (record.signal?.aborted === true) { const error = new Error("aborted"); error.name = "AbortError"; throw error; }
   const isSnapshot = record.method === "GET" && record.url === HOST.SNAPSHOT_PATH;
+  if (isSnapshot && snapshotMode === "hang") return new Promise(() => {});
+  if (isSnapshot && snapshotMode === "fail") return { ok: false, status: 500, json: async () => ({}) };
   return { ok: true, status: 200, json: async () => (isSnapshot ? snapshotBody() : record.method === "POST" ? { ok: true } : { ok: true }) };
 };
 
@@ -94,10 +108,12 @@ const B = "Qwen/Qwen3-8B";
 const C = "ZhipuAI/GLM-4.5-Air";
 const row = (id, name, extra = {}) => ({ id, name, vision: false, available: true, quotaExhausted: false, ...extra });
 let rosterOrder = [row(A, "DeepSeek V3"), row(B, "Qwen3 8B"), row(C, "GLM-4.5-Air", { available: false, quotaExhausted: true })];
+/** 余额是**可替换**的：胶囊那节要在同一棵树里切「为正 / 为 0 / 读不到」三种读数。 */
+let balanceFixture = { available: 143, total: 143, frozen: 0, fetchedAt: null, error: null };
 const snapshotBody = () => ({
   ok: true, name: SLUG, version: "0.2.0", now: "2026-10-15T00:00:00Z", pollSeconds: 30, cacheSeconds: 60,
   token: { present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false, readError: null },
-  balance: { available: 143, total: 143, frozen: 0, fetchedAt: null, error: null },
+  balance: balanceFixture,
   quota: { daily: { usedLocal: 7 }, perModel: [], countingNote: "local-counting" },
   events: [], trend: { days: 14, buckets: [] }, models: { available: true, count: 3, sample: [A], error: null },
   provider: { enabled: false, source: "config", llmAvailable: true, registered: false, error: null, modelCount: 3, enabledCount: 0, allowed: "all", enabledIds: [], roster: rosterOrder },
@@ -108,11 +124,13 @@ const snapshotBody = () => ({
 // ── 被测组件：产物或源码，两个入口 ──
 let registration = null;
 let PanelPage;
+let ComposerUsagePill;
 let zh;
 if (SRC_MODE) {
   const { provideClientReact } = await import("../src/client/runtime.ts");
   provideClientReact(React);
   PanelPage = (await import("../src/client/panel-page.ts")).PanelPage;
+  ComposerUsagePill = (await import("../src/client/composer-usage-pill.ts")).ComposerUsagePill;
   zh = (await import("../src/client/i18n.ts")).zh;
 } else {
   // loader 捕获装在 jsdom 的 window 上（不是换一个假 window——本套件的 window 是真的）。
@@ -121,6 +139,7 @@ if (SRC_MODE) {
   assert.ok(registration, "client.js 必须调用 window.__ModuleLoader__.load");
   const { panel } = registration.factory(() => React);
   PanelPage = panel.components.PanelPage;
+  ComposerUsagePill = panel.components.ComposerUsagePill;
   zh = panel.dictionaries.zh;
 }
 const tt = (key) => zh[key];
@@ -195,9 +214,95 @@ const tokenPost = calls.find((c) => c.method === "POST" && c.url === HOST.TOKEN_
 assert.ok(tokenPost, "点保存真的 POST /token");
 assert.deepEqual(JSON.parse(tokenPost.body ?? "null"), { token: "ms-real-token-9" }, "payload 里是打进 DOM 的那个值");
 
-// §6 卸载收干净 + 全程零 React 开发期告警
+// §6 对话框用量胶囊（conversation.input.right 座席）：门控、两个读数、以及工具
+// 栏尺度真的进了 CSSOM。用**第二个 root**（面板那份还在树上），卸载时各自收尾。
+const pillHost = document.createElement("div");
+document.body.appendChild(pillHost);
+const pillRoot = createRoot(pillHost);
+/** 槽位把 `useProjection` 当 prop 递给组件；这里用一个返回固定投影的替身。 */
+const renderPill = (selection) =>
+  act(async () => { pillRoot.render(React.createElement(ComposerUsagePill, { tt, useProjection: () => selection })); });
+const pillButton = () => pillHost.querySelector("button");
+const pillText = () => pillHost.querySelector(".dsh-modelscope-composer-pill-text")?.textContent ?? "";
+const dotInk = () => {
+  const dot = pillHost.querySelector(".dsh-modelscope-composer-pill-dot");
+  return dot === null ? null : window.getComputedStyle(dot).backgroundColor;
+};
+
+// (a) 非归属 provider：整块缺席，而且一个请求都不发（内层组件根本没挂）。
+const callsBeforeForeign = calls.length;
+await renderPill({ next: { provider: "sensenova-token-plan", model: "SenseChat-5" } });
+assert.equal(pillHost.children.length, 0, "非归属 provider 时不渲染任何东西");
+assert.equal(calls.length, callsBeforeForeign, "非归属 provider 时不发任何请求");
+
+// (b) picker 切换的过渡帧：`next` 是空对象，但不许遮住仍可用的 `lastUsed`。
+await renderPill({ next: {}, lastUsed: { provider: "modelscope-token-plan" } });
+assert.ok(pillButton(), "空 next 不许把胶囊藏起来（否则切模型的那几帧会闪没）");
+
+// (c) 归属 provider：真实 snapshotBody（余额 143 / 本地 7 次）上屏。
+await renderPill({ next: { provider: "modelscope-token-plan", model: "Qwen/Qwen3-8B" } });
+const pill = pillButton();
+assert.ok(pill, "归属 provider 时胶囊在");
+assert.equal(pill.className, "dsh-modelscope-composer-pill");
+assert.ok(pillText().includes("143 魔粒"), `余额读数上屏：${pillText()}`);
+assert.ok(pillText().includes("7 次"), `今日本地次数上屏：${pillText()}`);
+assert.ok(pillText().includes("本地"), "第二个数字必须自带「本地」口径（官方没有这一项）");
+assert.equal(window.getComputedStyle(pill).height, "28px", "胶囊按宿主工具栏的 28px 渲染（inline style 真的进了 CSSOM）");
+assert.equal(pill.style.borderStyle, "none", "无框走 borderStyle（border 简写会被 UA 的 border-image 画出框）");
+assert.ok((pill.getAttribute("title") ?? "").includes(zh["composer.pillTitle"]), "tooltip 带来源与口径说明");
+const greenInk = dotInk();
+assert.ok(greenInk !== null && greenInk !== "", "绿点墨色真的进了 CSSOM");
+const pillTick = specFns[specFns.length - 1]; // 胶囊自己的那一拍（面板的那一拍更早）
+
+// (d) 官方读数确实是 0 → 红点（0 是读数，不是「读不到」）。
+balanceFixture = { available: 0, total: 143, frozen: 0, fetchedAt: null, error: null };
+await act(async () => { await pillTick(); });
+assert.equal(pillText().includes("0 魔粒"), true, "0 是读数，必须画出来（不是 —）");
+const redInk = dotInk();
+assert.notEqual(redInk, greenInk, "耗尽档的圆点色与健康档必须不同");
+assert.match(redInk ?? "", /rgb\(239,\s*68,\s*68\)|#ef4444/, `耗尽档应当是红色，实际 ${redInk}`);
+
+// (e) 读不到余额（null + error）→ 灰点 + 「—」，且**绝不**画成 0。
+balanceFixture = { available: null, total: null, frozen: null, fetchedAt: null, error: "upstream 500" };
+await act(async () => { await pillTick(); });
+assert.ok(pillText().includes("— 魔粒"), `读不到画「—」：${pillText()}`);
+assert.equal(pillText().includes("0 魔粒"), false, "「读不到」绝不能画成 0 魔粒");
+const greyInk = dotInk();
+assert.notEqual(greyInk, redInk, "未知档与耗尽档的圆点色必须不同");
+assert.notEqual(greyInk, greenInk, "未知档与健康档的圆点色必须不同");
+assert.ok((pill.getAttribute("title") ?? "").includes("upstream 500"), "tooltip 说明余额为什么没有（原文透传）");
+
+// (f) 失败降级：第二轮读失败 → 保留上一次的数值，并标「上次数据」。
+snapshotMode = "fail";
+await act(async () => { await pillTick(); });
+assert.ok(pillText().includes("— 魔粒"), "读失败时保留上一次的读数（不是清成空白）");
+const staleMark = pillHost.querySelector(".dsh-modelscope-composer-pill-stale");
+assert.ok(staleMark, "读失败必须出现「上次数据」标记");
+assert.ok(staleMark.textContent.includes(zh["composer.stale"]), "标记文案来自字典，不是写死的");
+snapshotMode = "ok";
+
+// (g) 首帧还没读到（请求挂着）→ 「读取中」，不是 0。必须是**全新挂载**，
+// 否则看到的是上一份残留数据而非首帧。同一容器二次 createRoot 会被 React 警告，
+// 所以换一个容器。
+await act(async () => { pillRoot.unmount(); });
+const pendingHost = document.createElement("div");
+document.body.appendChild(pendingHost);
+const pendingRoot = createRoot(pendingHost);
+snapshotMode = "hang";
+await act(async () => {
+  pendingRoot.render(React.createElement(ComposerUsagePill, { tt, useProjection: () => ({ next: { provider: "modelscope-token-plan" } }) }));
+});
+const pendingText = pendingHost.querySelector(".dsh-modelscope-composer-pill-text")?.textContent ?? "";
+assert.equal(pendingText.includes("0"), false, `首帧不许出现任何 0：${pendingText}`);
+assert.ok(pendingText.includes("…"), `首帧是「读取中」：${pendingText}`);
+snapshotMode = "ok";
+
+// §7 卸载收干净 + 全程零 React 开发期告警
+await act(async () => { pendingRoot.unmount(); });
+assert.equal(pendingHost.children.length, 0, "胶囊卸载清空自己的容器");
+assert.equal(liveTimers.size, 1, "胶囊全部卸载后只剩面板那一个 interval");
 await act(async () => { root.unmount(); });
-assert.equal(liveTimers.size, 0, "卸载清掉轮询 interval");
+assert.equal(liveTimers.size, 0, "面板卸载后一个定时器都不剩");
 assert.equal(container.children.length, 0, "卸载清空容器");
 console.error = realError;
 console.warn = realWarn;

@@ -24,6 +24,19 @@
 tools registry 没有 unregister）。实测协议（异步两段式、必需头、提交态不可信、
 计费与耗时口径）见 [docs/SPIKE-image-gen.md](docs/SPIKE-image-gen.md)。
 
+## 对话框胶囊（v0.2 起）
+
+注册 provider 之后，输入框工具栏会多一枚胶囊（用户不需要打开 Plugins 页就能看见额度）：
+
+```
+魔搭 · 143 魔粒 · 今日本地 7 次
+```
+
+- **前半**是官方魔粒余额（`balance.available`，真实值，与面板头条同一个数）；**后半**是今日本地调用次数（Host 侧本地日桶，只统计经本插件的调用）。两个数字来源不同，所以后段必须带「本地」——官方接口没有「今日」这一项，不写清就会被读成官方计数。
+- **只在会话当前选中的 provider 是 `modelscope-token-plan` 时出现**（读宿主 session 作用域的 `modelSelection` 投影），切到别的 provider 即整块消失，且一个请求都不发。
+- **没有百分比、没有黄色档**。魔粒余额是**存量**、官方没有发布任何上限或低额阈值：画进度条或定一个「低于 N 魔粒算黄」的阈值，都是给一个没人公布过的分母配数。三档只有绿（读数是正数）/ 红（官方读数确实是 0）/ 灰（读不到）。
+- **读不到 ≠ 0**（与面板同一条纪律）：读不到时该段渲染「—」，0 只在官方真的给了 0 时出现并走告警色；读失败保留上一次的数值，并标「上次数据」（阈值 = Host 声明的 `pollSeconds` × 3）。tooltip 里带余额时间、失败原文与本地计数缺失的原因。
+
 ## 三条事实（写代码前先认清）
 
 1. **官方有「魔粒」余额端点**：`GET {siteBase}/openapi/v1/magicubes/balance`（Bearer 访问令牌，匿名 401），返回 `{success, data:{total_balance, available_balance, frozen_amount}}`（2026-10-04 实测，见 [docs/SPIKE.md](docs/SPIKE.md)）。推理响应本身仍不带任何额度头。

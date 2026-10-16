@@ -1,9 +1,10 @@
 /**
  * dsh-connect-modelscope-token-plan — Client half (entry).
  *
- * 在 Plugins 页注册 `plugins.bundle.config` 卡（三 tab：额度 / 模型 / 接入）。
- * 数据来自 Host 的只读快照路由，仅在本卡挂载期间轮询。源码经 tsdown 打成根
- * client.js（IIFE）；测试加载**产物**，浏览器跑什么测试就跑什么。
+ * 在 Plugins 页注册 `plugins.bundle.config` 卡（三 tab：额度 / 模型 / 接入），并在
+ * 输入框工具栏注册对话框用量胶囊（`conversation.input.right`，见
+ * composer-usage-pill.ts）。两者读同一份 Host 只读快照，只在自己挂载期间轮询。
+ * 源码经 tsdown 打成根 client.js（IIFE）；测试加载**产物**，浏览器跑什么测试就跑什么。
  * @module dsh-connect-modelscope-token-plan/client
  */
 
@@ -22,6 +23,19 @@ import { en, zh } from "./i18n.ts";
 import { S } from "./styles.ts";
 import { BalanceCard, EventsList, LocalDailyCard, ModelUsageTable, ProviderCard, SectionCard, TokenForm, TrendBars } from "./cards.ts";
 import { PanelPage } from "./panel-page.ts";
+import {
+  ComposerUsagePill,
+  ModelscopePill,
+  MODELSCOPE_PROVIDER,
+  selectedProviderOf,
+  availableOf,
+  usedTodayOf,
+  tierOf,
+  balanceText,
+  callsText,
+  readingText,
+  staleOf
+} from "./composer-usage-pill.ts";
 import { usePollingInterval } from "./use-polling-interval.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
 import { getJson, postJson, writeFailure } from "./http.ts";
@@ -54,11 +68,25 @@ function clientFactory(loaderRequire: (specifier: string) => unknown): {
       getJson,
       postJson,
       writeFailure,
+      // 胶囊的纯函数面：门控、读数提取（null ≠ 0）、三档定级、两段文案与陈旧判定。
+      // 放在 helpers 而不是 components 里，是因为它们不碰 React——测试可以直接
+      // 断言规则本身，不必先挂一棵树。
+      MODELSCOPE_PROVIDER,
+      selectedProviderOf,
+      availableOf,
+      usedTodayOf,
+      tierOf,
+      balanceText,
+      callsText,
+      readingText,
+      staleOf,
     }),
     components: Object.freeze({
       BalanceCard,
+      ComposerUsagePill,
       EventsList,
       LocalDailyCard,
+      ModelscopePill,
       ModelUsageTable,
       PanelPage,
       ProviderCard,

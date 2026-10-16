@@ -160,7 +160,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"present.no": "未配置",
 			"validity.yes": "有效",
 			"validity.no": "未校验",
-			"validity.bad": "无效"
+			"validity.bad": "无效",
+			"composer.prefix": "魔搭",
+			"composer.pillTitle": "魔搭额度：官方魔粒余额 + 今日本地调用次数",
+			"composer.balanceUnit": "魔粒",
+			"composer.localCalls": "今日本地 {calls} 次",
+			"composer.stale": "上次数据"
 		};
 		en = {
 			"panel.title": "ModelScope Access · Quota",
@@ -272,7 +277,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"present.no": "not configured",
 			"validity.yes": "verified",
 			"validity.no": "unverified",
-			"validity.bad": "invalid"
+			"validity.bad": "invalid",
+			"composer.prefix": "ModelScope",
+			"composer.pillTitle": "ModelScope quota: official Magicube balance + today's local call count",
+			"composer.balanceUnit": "Magicubes",
+			"composer.localCalls": "local today {calls}",
+			"composer.stale": "stale data"
 		};
 	}));
 
@@ -690,7 +700,43 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				borderRadius: 12,
 				background: "var(--dsw-alias-bg-layer-1)",
 				padding: "12px 14px"
-			}
+			},
+			pillTrigger: {
+				appearance: "none",
+				WebkitAppearance: "none",
+				height: 28,
+				borderStyle: "none",
+				borderWidth: 0,
+				background: "none",
+				color: "inherit",
+				display: "inline-flex",
+				alignItems: "center",
+				gap: 6,
+				padding: "0 10px",
+				borderRadius: 999,
+				fontSize: 12,
+				fontWeight: 600,
+				lineHeight: "18px",
+				cursor: "default",
+				flexShrink: 0,
+				whiteSpace: "nowrap"
+			},
+			pillDot: {
+				width: 8,
+				height: 8,
+				borderRadius: 999,
+				flex: "none",
+				background: "var(--dsw-alias-label-secondary)"
+			},
+			pillPlan: { opacity: .72 },
+			pillStale: {
+				opacity: .62,
+				fontStyle: "italic"
+			},
+			pillTierOk: "#22c55e",
+			pillTierExhausted: "#ef4444",
+			pillTierUnknown: "#9ca3af",
+			pillTierExhaustedText: { color: "var(--dsw-alias-state-error-primary)" }
 		};
 	}));
 
@@ -817,7 +863,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	* 把 wire/路由返回的 provider 块归一成 `ProviderStatus`；不合法一律降级。
 	* 形状由 wire.ts 钉死，本函数只做防御性归一（旧 Host 可能缺字段）。
 	*/
-	function providerOf(raw) {
+	function providerOf$1(raw) {
 		if (raw === null || typeof raw !== "object") return DEGRADED_PROVIDER;
 		const p = raw;
 		const ids = Array.isArray(p.enabledIds) ? p.enabledIds.map((id) => String(id ?? "")).filter((id) => id !== "") : [];
@@ -1240,7 +1286,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	* 事实，picker 那边由 Host 自己丢掉它们，面板不替它删。
 	*/
 	function ProviderCard({ provider, busy, error, onToggle, onSaveList, onReset, tokenPresent, tt }) {
-		const status = providerOf(provider);
+		const status = providerOf$1(provider);
 		const enabled = status.enabled === true;
 		const hostIds = status.enabledIds;
 		const hostKey = useMemo(() => JSON.stringify(hostIds), [hostIds]);
@@ -1765,12 +1811,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const rawProvider = data?.provider;
 		const hasProviderBlock = rawProvider !== void 0 && rawProvider !== null;
 		const [fetchedProvider, setFetchedProvider] = useState(null);
-		const provider = hasProviderBlock ? providerOf(rawProvider) : fetchedProvider ?? DEGRADED_PROVIDER;
+		const provider = hasProviderBlock ? providerOf$1(rawProvider) : fetchedProvider ?? DEGRADED_PROVIDER;
 		useEffect(() => {
 			if (hasProviderBlock) return void 0;
 			let cancelled = false;
 			getJson(PROVIDER_PATH).then((body) => {
-				if (!cancelled && body !== null && body.ok === true) setFetchedProvider(providerOf(body));
+				if (!cancelled && body !== null && body.ok === true) setFetchedProvider(providerOf$1(body));
 			}).catch(() => {});
 			return () => {
 				cancelled = true;
@@ -2045,6 +2091,175 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	}));
 
 //#endregion
+//#region src/client/composer-usage-pill.ts
+/**
+	* 一个候选自带的 provider，空串算「没有」。
+	*
+	* `typeof provider === "string"` 是不够的判据：`""` 也是字符串。照类型判定会让
+	* `{ provider: "" }` 被当成一个「可用的 next」，于是它遮住仍然可用的 `lastUsed`
+	* ——切模型那一帧胶囊就消失。所以这里判的是**非空字符串**。
+	*/
+	function providerOf(candidate) {
+		const provider = candidate?.provider;
+		return typeof provider === "string" && provider !== "" ? provider : void 0;
+	}
+	/**
+	* 会话当前指向的 provider。
+	*
+	* `next` 优先于 `lastUsed`（切换已落地但还没发出去时，选择器显示的就是 `next`），
+	* 但**只在 `next` 真的带了一个非空 provider 时**才优先：picker 刚切完、新选择还没
+	* 落到 `next` 上的那几帧 `next` 是 `{}` 或 `{ provider: "" }`，照「有 next 就用
+	* next」读会得到 `undefined`，于是归属模型在「切换」这个动作本身上把胶囊藏起来。
+	* 两侧都没有可用 provider 时返回 `undefined`——那才是真的判不出来。
+	*/
+	function selectedProviderOf(projection) {
+		const source = projection ?? {};
+		return providerOf(source.next) ?? providerOf(source.lastUsed);
+	}
+	/**
+	* 余额读数；`null` 表示**不知道**（没读到 / 上游没给 / 字段不是有限数）。
+	*
+	* 特意不接受 `error` 参数做二次判断：错误文本只影响 tooltip 的措辞，不影响
+	* 「数字可不可信」。把两者揉在一个判定里，会让「上次读到的 143 仍然有效」这种
+	* 情形（`error` 非空但 `available` 有值）被误打成未知。
+	*/
+	function availableOf(balance) {
+		const available = balance?.available;
+		return typeof available === "number" && Number.isFinite(available) ? available : null;
+	}
+	/** 今日本地调用次数；`null` 同上，表示读不到（不是 0）。 */
+	function usedTodayOf(snapshot) {
+		const used = snapshot?.quota?.daily?.usedLocal;
+		return typeof used === "number" && Number.isFinite(used) ? used : null;
+	}
+	/** 由余额读数定档；`null`（未读到）与 `0`（读到了、就是零）在此分道。 */
+	function tierOf(available) {
+		if (available === null) return "unknown";
+		return available > 0 ? "ok" : "exhausted";
+	}
+	/** 「余额」段的正文：读不到画「—」+ 单位，读到了画数字 + 单位。 */
+	function balanceText(available, tt) {
+		return `${available === null ? "—" : count(available)} ${tt("composer.balanceUnit")}`;
+	}
+	/** 「今日本地」段的正文：读不到画「—」，读到了画次数。 */
+	function callsText(usedToday, tt) {
+		return format(tt("composer.localCalls"), { calls: usedToday === null ? "—" : count(usedToday) });
+	}
+	/**
+	* 胶囊正文：余额段 + 本地次数段，各带各的口径。两段都必须出现——只画有值的那
+	* 一段会让「哪一段是空的」变成排版事故（读者分不清是没读到还是这一栏根本不在），
+	* 而「—」明确说了是前者。
+	*/
+	function readingText(available, usedToday, tt) {
+		return `${balanceText(available, tt)} · ${callsText(usedToday, tt)}`;
+	}
+	/**
+	* 数字是否已经算「上次数据」。
+	*
+	* 两个触发条件各自独立：读失败（`error` 非空，上一轮的数值还留在屏幕上）本身就是
+	* 陈旧；而长时间没有**成功**的读（`updatedAt` 不动）说明定时轮询没在按时回来
+	* ——失败退避或页面被挂起都会这样。取 3 个声明周期而不是 1 个：一次偶发失败就会
+	* 拉长间隔，卡在 1 个周期上会让每一次抖动都把读数打成陈旧的。
+	*
+	* `updatedAt === 0` 表示**从没读到过**，那不是「陈旧」而是「还没有」——调用方据此
+	* 决定不标；本函数只在有读数的前提下判断，故返回 false。
+	*/
+	function staleOf(input) {
+		if (input.error !== null && input.error !== void 0) return input.updatedAt > 0;
+		return input.updatedAt > 0 && input.now - input.updatedAt > input.cadenceMs * STALE_CADENCES;
+	}
+	/**
+	* tooltip 的一行：只把**读者下一步会问的**事实拼进来——数字是哪来的（前缀）、
+	* 余额为什么没有（错误原文）、什么时候读的（fetchedAt）、本地计数为什么没有
+	* （quota 那一路的提示）、以及数字是不是旧的。逐段 `filter` 掉空值，不留下
+	* 「 ·  · 」这样的空槽。
+	*/
+	function titleOf(props) {
+		const { tt, balance, usedToday, stale } = props;
+		const parts = [tt("composer.pillTitle")];
+		const failure = balance?.error;
+		parts.push(typeof failure === "string" && failure !== "" ? format(tt("balance.unavailable"), { error: failure }) : null);
+		const fetchedAt = balance?.fetchedAt;
+		parts.push(typeof fetchedAt === "string" && fetchedAt !== "" ? format(tt("balance.fetched"), { time: isoTime(fetchedAt) }) : null);
+		parts.push(usedToday === null ? tt("quota.unavailable") : null);
+		parts.push(stale ? tt("composer.stale") : null);
+		return parts.filter((part) => part !== null).join(" · ");
+	}
+	/**
+	* 内层：只在会话选中本插件的模型时挂载。轮询 hook 在这里，被挂/摘即起停——
+	* 非归属 provider 的会话不发任何请求。
+	*/
+	function ModelscopePill(props) {
+		const { tt } = props;
+		const { data, error, loadedOnce, updatedAt } = useSnapshotPolling();
+		const balance = data?.balance ?? null;
+		const available = availableOf(balance);
+		const usedToday = usedTodayOf(data);
+		const cadenceMs = statedCadenceMs(data?.pollSeconds, DEFAULT_CADENCE_MS);
+		const stale = staleOf({
+			error,
+			updatedAt,
+			now: Date.now(),
+			cadenceMs
+		});
+		const pending = !loadedOnce && data === null;
+		const tier = tierOf(available);
+		const title = titleOf({
+			tt,
+			balance,
+			usedToday,
+			stale
+		});
+		return h("button", {
+			type: "button",
+			className: "dsh-modelscope-composer-pill",
+			title,
+			"aria-label": title,
+			style: S.pillTrigger
+		}, h("span", {
+			className: "dsh-modelscope-composer-pill-dot",
+			"aria-hidden": "true",
+			style: {
+				...S.pillDot,
+				background: TIER_INK[tier]
+			}
+		}), h("span", {
+			className: "dsh-modelscope-composer-pill-plan",
+			style: S.pillPlan
+		}, `${tt("composer.prefix")} · `), h("span", {
+			className: "dsh-modelscope-composer-pill-text",
+			style: tier === "exhausted" ? S.pillTierExhaustedText : void 0
+		}, pending ? "…" : readingText(available, usedToday, tt)), stale ? h("span", {
+			className: "dsh-modelscope-composer-pill-stale",
+			style: S.pillStale
+		}, ` · ${tt("composer.stale")}`) : null);
+	}
+	/**
+	* 外层门控：固定一处调 `useProjection`，再决定内层挂谁。非归属 provider 返回
+	* `null`（不渲染任何东西，也不跑任何请求）。
+	*/
+	function ComposerUsagePill(props) {
+		const selection = props.useProjection?.("modelSelection");
+		if (selectedProviderOf(selection) !== "modelscope-token-plan") return null;
+		return h(ModelscopePill, { tt: props.tt });
+	}
+	var MODELSCOPE_PROVIDER, DEFAULT_CADENCE_MS, STALE_CADENCES, TIER_INK;
+	var init_composer_usage_pill = __esmMin((() => {
+		init_runtime();
+		init_styles();
+		init_format();
+		init_use_snapshot_polling();
+		MODELSCOPE_PROVIDER = "modelscope-token-plan";
+		DEFAULT_CADENCE_MS = 3e4;
+		STALE_CADENCES = 3;
+		TIER_INK = {
+			ok: S.pillTierOk,
+			exhausted: S.pillTierExhausted,
+			unknown: S.pillTierUnknown
+		};
+	}));
+
+//#endregion
 //#region src/client/apply.ts
 /**
 	* 注册字典与配置卡。卡片由 Host 的 renderSlot("plugins.bundle.config", …)
@@ -2086,6 +2301,17 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		} catch (error) {
 			console.warn(`[${NS}] config card registration failed:`, error);
 		}
+		try {
+			disposers.push(ctx.slots.inject("conversation.input.right", () => ctx.slots.register({
+				name: "conversation.input.right",
+				id: `${NS}-composer-pill`,
+				locale: NS,
+				order: 4,
+				inject: () => ({ tt })
+			}, ComposerUsagePill)));
+		} catch (error) {
+			console.warn(`[${NS}] composer pill registration failed:`, error);
+		}
 		ctx.effect(() => () => {
 			for (const dispose of disposers.splice(0)) try {
 				dispose();
@@ -2097,6 +2323,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		init_const();
 		init_i18n();
 		init_panel_page();
+		init_composer_usage_pill();
 		inject = ["slots", "locale"];
 	}));
 
@@ -2112,6 +2339,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		init_styles();
 		init_cards();
 		init_panel_page();
+		init_composer_usage_pill();
 		init_use_polling_interval();
 		init_use_snapshot_polling();
 		init_http();
@@ -2121,7 +2349,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			const panel = Object.freeze({
 				interpretSnapshot,
 				viewOf,
-				providerOf,
+				providerOf: providerOf$1,
 				errorOfStatus,
 				dictionaries: Object.freeze({
 					zh,
@@ -2143,12 +2371,23 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 					useSnapshotPolling,
 					getJson,
 					postJson,
-					writeFailure
+					writeFailure,
+					MODELSCOPE_PROVIDER,
+					selectedProviderOf,
+					availableOf,
+					usedTodayOf,
+					tierOf,
+					balanceText,
+					callsText,
+					readingText,
+					staleOf
 				}),
 				components: Object.freeze({
 					BalanceCard,
+					ComposerUsagePill,
 					EventsList,
 					LocalDailyCard,
+					ModelscopePill,
 					ModelUsageTable,
 					PanelPage,
 					ProviderCard,
