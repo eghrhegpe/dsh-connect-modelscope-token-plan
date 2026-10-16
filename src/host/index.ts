@@ -24,11 +24,12 @@
 import { createTokenStore } from "./ms-auth.ts";
 import { createFileUsageStore } from "./usage-store.ts";
 import { createInferenceClient } from "./inference-client.ts";
-import { createFileProviderStore, resolveEnabledIds } from "./provider-store.ts";
+import { createFileProviderStore } from "./provider-store.ts";
 import { createFileDrawStore } from "./draw-store.ts";
 import { registerDrawTool } from "./draw-register.ts";
 import { resetDrawToolNote } from "./draw-tool-state.ts";
 import { createProviderPublisher } from "./provider-publish.ts";
+import { createProviderReconciler } from "./provider-reconcile.ts";
 import { profileSegment } from "./state-store.ts";
 import { registerRoutes } from "./routes.ts";
 import { resolveSettings, inject, name } from "./host-config.ts";
@@ -115,66 +116,20 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     logger: ctx.logger
   });
 
-  /**
-   * 当前允许清单：落盘优先，读不到回退内存最近一次 publish 的清单。
-   *
-   * 判据与另外两个消费者（`snapshot-aggregate.ts` 的面板块、`routes/provider.ts`
-   * 的 GET）**共用** {@link resolveEnabledIds}——空清单是「不过滤，提供全部模型」，
-   * 那是 provider-store 的契约，不是「没有答案」。本函数曾经自己写成
-   * `stored.length > 0` 才算数，于是**可读的空清单**（操作者按 versionNote 的建议
-   * 删掉 provider.json，或清单被保存为空）会让面板说 all、轮询却继续按内存里的旧
-   * 清单注册：面板与 Host 对「正在提供什么」各说一套。只有读**抛错**（`.catch`
-   * → null）才回退内存。
-   * @returns {Promise<string[]>}
-   */
-  const currentEnabledIds = async (): Promise<string[]> =>
-    resolveEnabledIds(
-      await providerStore.enabledIds().catch(() => null),
-      publisher.state.enabledIds
-    );
-
-  /**
-   * 一次目录轮询：拉目录，再 publish 当前 offer。
-   *
-   * **窗口覆盖必须参与**：catalogSignature 含窗口值，轮询若用未打标条目 publish，
-   * 用户保存覆盖后的每次轮询都会因「签名不同」把注册摘下重挂（覆盖每 pollSeconds
-   * 静默回退一次、适配器每轮重建）。所以 fetch **前**先读落盘覆盖传给 fetchModels，
-   * 与 `currentEnabledIds` 同一模式。
-   *
-   * fetch **后**再读一次：目录拉取可能耗时数百毫秒，期间用户可能保存了新覆盖——
-   * 保存路由已经用新值 publish 过，此时用旧标条目 publish 反而把注册**倒退**一个
-   * 周期；这种窗口内跳过本轮即可（下一轮轮询自然带新值）。清单沿用 fetch 后读的
-   * 老顺序（捕获 fetch 期间的编辑），两条时序理由同源。
-   * @returns {Promise<void>}
-   */
-  const runPoll = async (): Promise<void> => {
-    // 轮询失败不影响面板：下一轮再试，快照侧另有降级形状。但**原因不能丢**——
-    // 目录持续拉不到时，面板只会看到 models.available:false，没有任何一行说清是
-    // 上游拒了、还是网络断了、还是令牌过期；那条可观测性只能靠这里。两段**分开**
-    // 记：「目录拉到了但注册失败」与「目录根本没拉到」对操作员是完全不同的处置，
-    // 合成一条 "poll failed" 就把可诊断信息抹掉了。
-    // 脱敏在收口处做（与 snapshot-aggregate 的 soft() 同一纪律），不靠上游自觉。
-    const contextWindow = await providerStore.contextWindow().catch(() => null);
-    let catalog: Awaited<ReturnType<typeof inference.fetchModels>> | null = null;
-    try {
-      catalog = await inference.fetchModels(contextWindow);
-    } catch (error) {
-      ctx.logger?.warn?.(
-        `${name}: catalog fetch failed (${redactSecrets(errMsg(error))}) — the next poll retries; the panel keeps its degraded models block`
-      );
-      return;
-    }
-    // fetch 期间覆盖被改 → 本轮条目带着旧标：publish 会把刚保存的新值倒退回去，
-    // 跳过（保存路由已 publish 过正确值；普通轮询 contextWindow 与此刻一致）。
-    if ((await providerStore.contextWindow().catch(() => null)) !== contextWindow) return;
-    try {
-      await publisher.publish(catalog.entries, await currentEnabledIds(), []);
-    } catch (error) {
-      ctx.logger?.warn?.(
-        `${name}: publish failed (${redactSecrets(errMsg(error))}) — the catalog is current, only the provider registration did not land`
-      );
-    }
-  };
+  // ── M4：provider 注册的 desired-state reconciler ──
+  // 目录轮询与四条 provider 路由曾经是两个各自为政的 driver 往同一个注册态里
+  // 写——runPoll 为此把窗口覆盖**读两遍**（fetch 前后各一次，「期间被改就
+  // 跳过本轮、等下一个 pollSeconds」），那是没有 desired-state 控制器的补丁。
+  // 现在两者都只是「标记 dirty」：收敛逻辑只有一处（读 desired → 拉目录 →
+  // 复查 desired → publish，见 provider-reconcile.ts），保存路由 await 返回时
+  // 新值一定已落地，不再有丢一次更新等一轮的窗口。
+  const { reconcile } = createProviderReconciler({
+    settings,
+    providerStore,
+    inference,
+    publisher,
+    logger: ctx.logger
+  });
 
   const wiring = {
     settings,
@@ -185,15 +140,17 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     providerStore,
     drawStore,
     publisher,
+    reconcile,
     logger: ctx.logger
   };
 
   const offs = registerRoutes(ctx, wiring);
   ctx.effect(() => {
-    // M4 seed：挂载时立即跑一次轮询，让重启的 Host 在第一次目录拉到后就有模型，
-    // 且**用落盘的允许清单**注册（而非空清单）——见 fix A/C。读不到目录就等下一轮
-    // 轮询；开关/清单保存在 provider-store，provider 路由直接 publish。
-    void runPoll();
+    // M4 seed：挂载时立即收敛一次，让重启的 Host 在第一次目录拉到后就有模型，
+    // 且**用落盘的允许清单**注册（reconciler 读 desired 时走 resolveEnabledIds，
+    // 而非空清单）——见 fix A/C。读不到目录就等下一轮；开关/清单保存在
+    // provider-store，provider 路由同样只触发收敛。
+    void reconcile();
 
     // 出图工具（opt-in，默认关）：与 provider 注册是**两条独立的开关**——「把魔搭
     // 当 chat provider」和「给 agent 一个出图工具」回答的是不同问题，合并没有好处。
@@ -203,11 +160,11 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     // 翻转要到下次 Host 启动才生效——这正是 sensenova 那份的面板文案也要说明的事。
     void registerDrawTool(ctx, wiring, deps);
 
-    // 目录轮询：每 `pollSeconds` 一次，拉目录、读落盘清单、`publish`。变化检测在
-    // `publishProviderOnce` 内按 `catalogSignature` 比对——未变则空转不重建
-    // （见 fix B）；开关翻转、清单保存由 provider 路由直接 publish，不在这里。
+    // 目录轮询：每 `pollSeconds` 一次触发收敛。变化检测在 `publishProviderOnce`
+    // 内按 `catalogSignature` 比对——未变则空转不重建（见 fix B）；开关翻转、
+    // 清单保存由 provider 路由触发同一条收敛链，不在这里各写一遍。
     const timer = setInterval(() => {
-      void runPoll();
+      void reconcile();
     }, settings.pollSeconds * 1000);
 
     // 返回的是卸载清理：Cordis 在 fiber dispose 时跑它——提前跑会把刚注册的

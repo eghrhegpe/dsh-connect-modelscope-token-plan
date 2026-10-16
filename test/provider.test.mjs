@@ -561,11 +561,16 @@ import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_S
 // §11 三处消费者必须**真的用上**共用判据。
 //
 // 上一节钉的是 resolveEnabledIds 的分支；但这次的缺陷形态是「同一个问题在三处各写
-// 一套」，所以还要钉住三个调用点没有偷偷写回自己的规则——尤其是 index.ts 那条
+// 一套」，所以还要钉住三个调用点没有偷偷写回自己的规则——尤其是轮询侧那条
 // `stored.length > 0`（把可读的空清单当成「没有答案」）。源码级断言在本仓已有先例
 // （credentials.test.mjs 钉脱敏表达式），这里用同一种手法守住这一行。
+//
+// 消费者集合随 M4 的控制面收编变了：轮询侧不再由 index.ts 直接读清单，而是
+// provider-reconcile.ts 的收敛环（读 desired → publish）。判据的**消费点**因此
+// 是 reconciler / 快照聚合 / provider 路由三处；index.ts 的钉子从「用上判据」
+// 翻成「不再自己 publish」——收敛只有一处，双驱动收编是本仓当前的结构事实。
 {
-  for (const file of ["src/host/index.ts", "src/host/snapshot-aggregate.ts", "src/host/routes/provider.ts"]) {
+  for (const file of ["src/host/provider-reconcile.ts", "src/host/snapshot-aggregate.ts", "src/host/routes/provider.ts"]) {
     const text = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
     assert.ok(
       text.includes("resolveEnabledIds("),
@@ -576,6 +581,10 @@ import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_S
   assert.ok(
     !index.includes("Array.isArray(stored) && stored.length > 0"),
     "index.ts 不得再把「空清单」读成「没有答案」（那正是面板与轮询各说一套的来源）"
+  );
+  assert.ok(
+    !index.includes("publisher.publish("),
+    "index.ts 不得直接 publish——轮询与路由的收敛已收编到 provider-reconcile.ts，这里再发一条就是双驱动复活"
   );
 }
 

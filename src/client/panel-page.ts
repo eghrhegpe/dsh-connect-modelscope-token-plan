@@ -4,7 +4,7 @@
  * @module dsh-connect-modelscope-token-plan/client/panel-page
  */
 import { SectionCard, BalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm, ProviderCard, DrawCard } from "./cards.ts";
-import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, HIDE_ALL_MODELS } from "./const.ts";
+import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH } from "./const.ts";
 import { format, errorText, isoTime } from "./format.ts";
 import { getJson, postJson, writeFailure } from "./http.ts";
 import { viewOf, providerOf, drawOf, DEGRADED_PROVIDER, DEGRADED_DRAW } from "./snapshot.ts";
@@ -13,6 +13,7 @@ import { h, useCallback, useEffect, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
 import type { ProviderStatus, DrawStatus, Snapshot } from "../shared/wire.ts";
+import { normalizeRosterSave } from "../shared/allow-list.ts";
 
 /** 三个固定视角。 */
 export type TabId = "quota" | "models" | "access";
@@ -116,12 +117,10 @@ export function PanelPage({ tt, localeSubscribe }: {
   }, [load, postWrite, tt]);
   const toggleProvider = useCallback((enabled: boolean) => void runProviderWrite(PROVIDER_PATH, { enabled }), [runProviderWrite]);
   const saveRoster = useCallback((enabledIds: string[]) => {
-    // 哨兵独占态归一（与 ProviderCard 同一口径，防御任何绕过它的调用方）：
-    // 含哨兵 → 只留哨兵（全隐藏）；否则剔除可能混进的哨兵（空 = 全部提供）。
-    const normalized = enabledIds.includes(HIDE_ALL_MODELS)
-      ? [HIDE_ALL_MODELS]
-      : enabledIds.filter((id) => id !== HIDE_ALL_MODELS);
-    void runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds: normalized });
+    // 哨兵独占态归一：与 ProviderCard、Host 的 parseAllowedList 同一份
+    // （shared/allow-list.ts）——含哨兵 → 只留哨兵（全隐藏）；否则剔除可能
+    // 混进的哨兵与空串（空 = 全部提供）。
+    void runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds: normalizeRosterSave(enabledIds) });
   }, [runProviderWrite]);
   const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
   // 全局上下文窗口覆盖：与开关/清单同一写入口（成功后刷快照回显落盘值）。

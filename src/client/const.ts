@@ -43,11 +43,12 @@ export const DRAW_PATH = `/api/${NS}/draw`;
 /** 出图开关与模型偏好回到 patch 默认的路由。 */
 export const DRAW_RESET_PATH = `/api/${NS}/draw/reset`;
 /**
- * 「什么都不提供」的哨兵 id：与 host/llm-models.ts 的 `HIDE_ALL_MODELS`
- * 同一个字面量。空清单的语义是「不过滤（全部提供）」，所以「全部隐藏」
+ * 「什么都不提供」的哨兵 id。字面量住在 `shared/wire.ts`（`enabledIds` 线编码的
+ * 一部分，Host 的 `llm-models.ts` 同源再导出），这里再导出——Client 侧 import
+ * 路径与旧版一致。空清单的语义是「不过滤（全部提供）」，所以「全部隐藏」
  * 只能走这个哨兵——两端拼错一处就是「点隐藏反而全放出来」。
  */
-export const HIDE_ALL_MODELS = "__hide_all__";
+export { HIDE_ALL_MODELS } from "../shared/wire.ts";
 
 /**
  * 魔搭访问令牌页：用户在这里生成/重置令牌。纯公开 URL——客户端只在新标签页

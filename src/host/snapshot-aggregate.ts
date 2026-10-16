@@ -14,7 +14,8 @@
 import { PLUGIN_VERSION, name } from "./host-config.ts";
 import { CODE } from "./codes.ts";
 import { resolveEnabledIds } from "./provider-store.ts";
-import { rosterWithAvailability, resolveAllowedList, imageGenModelIds } from "./llm-models.ts";
+import { rosterWithAvailability, imageGenModelIds } from "./llm-models.ts";
+import { parseAllowedList, enabledCountOf } from "../shared/allow-list.ts";
 import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "./switch-precedence.ts";
 import { drawToolNote } from "./draw-tool-state.ts";
 import { errMsg, redactSecrets } from "./util.ts";
@@ -153,18 +154,15 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     // 轮询侧那套把「空清单」读成「没有答案」，于是面板与 Host 会各说一套。
     const stored = await providerStore.enabledIds().catch(() => null);
     const enabledIds = resolveEnabledIds(stored, publisher.state.enabledIds);
+    // 允许清单的三态与启用数都从 shared/allow-list.ts 的联合上取——快照与
+    // provider 路由共用同一份解释（各自写一套三元链的时代结束了）。
+    const allowedList = parseAllowedList(enabledIds);
+    const enabledCount = enabledCountOf(allowedList, roster.map((row) => row.id));
     // 窗口覆盖同样落盘（同一份 provider.json）；读抛错按「未设置」降级，与开关
     // 同一纪律——读不到不能把整块 provider 状态打掉。roster 行的 contextWindow
     // 已由 fetchModels 在归一前打上覆盖/策展标记（contextSource 随行透传），
     // 这里不再二次加工。
     const contextWindow = await providerStore.contextWindow().catch(() => null);
-    const allowed = resolveAllowedList(enabledIds);
-    const allowSet = new Set(enabledIds);
-    const enabledCount = allowed === "all"
-      ? roster.length
-      : allowed === "list"
-        ? roster.filter((row) => allowSet.has(row.id)).length
-        : 0;
     return {
       enabled,
       source,
@@ -173,7 +171,7 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
       error: typeof publisher.state.error === "string" ? publisher.state.error : null,
       modelCount: roster.length,
       enabledCount,
-      allowed,
+      allowed: allowedList.mode,
       enabledIds,
       contextWindow,
       roster

@@ -12,6 +12,30 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
 
 //#endregion
+//#region src/shared/wire.ts
+	var HIDE_ALL_MODELS, SNAPSHOT_REQUIRED_KEYS;
+	var init_wire = __esmMin((() => {
+		HIDE_ALL_MODELS = "__hide_all__";
+		SNAPSHOT_REQUIRED_KEYS = Object.freeze([
+			"ok",
+			"name",
+			"version",
+			"now",
+			"pollSeconds",
+			"cacheSeconds",
+			"token",
+			"balance",
+			"quota",
+			"events",
+			"trend",
+			"models",
+			"provider",
+			"shapeWarnings",
+			"quotaError"
+		]);
+	}));
+
+//#endregion
 //#region src/client/const.ts
 	function modelscopeModelUrl(id) {
 		return `${MODELSCOPE_MODEL_URL_BASE}/${id.split("/").map(encodeURIComponent).join("/")}`;
@@ -39,8 +63,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		if (tokens >= 1024) return `${Math.round(tokens / 1024)}K`;
 		return String(tokens);
 	}
-	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
+	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
 	var init_const = __esmMin((() => {
+		init_wire();
 		NS = "dsh-connect-modelscope-token-plan";
 		PANEL_ID = NS;
 		SNAPSHOT_PATH = `/api/${NS}/snapshot`;
@@ -54,7 +79,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		PROVIDER_RESET_PATH = `/api/${NS}/provider/reset`;
 		DRAW_PATH = `/api/${NS}/draw`;
 		DRAW_RESET_PATH = `/api/${NS}/draw/reset`;
-		HIDE_ALL_MODELS = "__hide_all__";
 		MODELSCOPE_TOKEN_URL = "https://modelscope.cn/my/myaccesstoken";
 		MODELSCOPE_USAGE_URL = "https://modelscope.cn/magicube/usage?tab=consume";
 		MODELSCOPE_MODEL_URL_BASE = "https://www.modelscope.cn/models";
@@ -772,26 +796,35 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	}));
 
 //#endregion
-//#region src/shared/wire.ts
-	var SNAPSHOT_REQUIRED_KEYS;
-	var init_wire = __esmMin((() => {
-		SNAPSHOT_REQUIRED_KEYS = Object.freeze([
-			"ok",
-			"name",
-			"version",
-			"now",
-			"pollSeconds",
-			"cacheSeconds",
-			"token",
-			"balance",
-			"quota",
-			"events",
-			"trend",
-			"models",
-			"provider",
-			"shapeWarnings",
-			"quotaError"
-		]);
+//#region src/shared/codes.ts
+	var CODE;
+	var init_codes = __esmMin((() => {
+		CODE = Object.freeze({
+			CONFIG_ERROR: "config_error",
+			NETWORK_ERROR: "network_error",
+			TIMEOUT_ERROR: "timeout_error",
+			AUTH_ERROR: "auth_error",
+			RATE_LIMITED: "rate_limited",
+			QUOTA_EXCEEDED: "quota_exceeded",
+			UPSTREAM_ERROR: "upstream_error",
+			/**
+			* 插件自身抛错（聚合器、状态层、路由之外的意外）。
+			*
+			* 曾经只作为 `soft()` / `failureCode()` 的兜底字符串出现在快照里，没进这张
+			* 表——于是 Client 的 `GUIDANCE_BY_CODE` 也没法映射它（那份映射被测试钉住
+			* 「每个键必须在 CODE 里」），最需要人看的内部错误反而没有引导文案。
+			* 正式收进码表，两端从此同一份真源。
+			*/
+			INTERNAL_ERROR: "internal_error",
+			/**
+			* Client 自产码：Host 响应无法解读成快照（非 JSON / 缺 ok 字段）时，
+			* 面板用它走引导文案，而不是把裸英文串（"unexpected payload"）上屏。
+			*
+			* 本表是 `GUIDANCE_BY_CODE` 的键集真源——新增 client 码必须同时进
+			* 这张表，两侧才同步。
+			*/
+			PAYLOAD_ERROR: "payload_error"
+		});
 	}));
 
 //#endregion
@@ -866,7 +899,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	function interpretSnapshot(body) {
 		const payload = body;
 		if (payload && payload.ok === false) {
-			const code = typeof payload.code === "string" && payload.code !== "" ? payload.code : CLIENT_CODE.PAYLOAD_ERROR;
+			const code = typeof payload.code === "string" && payload.code !== "" ? payload.code : CODE.PAYLOAD_ERROR;
 			return {
 				data: null,
 				error: {
@@ -879,7 +912,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			data: null,
 			error: {
 				message: null,
-				code: CLIENT_CODE.PAYLOAD_ERROR
+				code: CODE.PAYLOAD_ERROR
 			}
 		};
 		const raw = payload;
@@ -988,11 +1021,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			shapeWarnings
 		};
 	}
-	var CLIENT_CODE, DEGRADED_PROVIDER, DEGRADED_DRAW, GUIDANCE_BY_CODE, FORM_EXCLUDED_CODES;
+	var DEGRADED_PROVIDER, DEGRADED_DRAW, GUIDANCE_BY_CODE, FORM_EXCLUDED_CODES;
 	var init_snapshot = __esmMin((() => {
 		init_format();
 		init_wire();
-		CLIENT_CODE = Object.freeze({ PAYLOAD_ERROR: "payload_error" });
+		init_codes();
 		DEGRADED_PROVIDER = Object.freeze({
 			enabled: false,
 			source: "config",
@@ -1115,6 +1148,73 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		TRACK_H = 17;
 		THUMB = 12;
 		TRAVEL = 13;
+	}));
+
+//#endregion
+//#region src/shared/allow-list.ts
+/**
+	* 把线编码的 `enabledIds` 解析成联合——**全插件只有这一处解释**。
+	*
+	* 判据（与旧 `resolveAllowedList` 的承诺一致，且现在 `filterByEnabled` 等
+	* 消费者也真的按它做）：
+	*   1. 非数组或空数组            → `all`（新装没做过选择，仍提供全部）；
+	*   2. 含哨兵（哪怕还混着别的 id）→ `none`（哨兵是独占态，优先于任何真实 id）；
+	*   3. 其余非空清单              → `list`（严格白名单；条目滤掉非字符串与空串、
+	*      去重保序——落盘前 `provider-store` 已归一遍，这里是解释不是归一）。
+	*
+	* 注意 `[""]` 这类「滤完什么都不剩」的脏清单归 `list` 且 `ids: []`：过滤
+	* 结果为空，与旧行为一致（它匹配不到任何真实 id）。
+	* @param {unknown} enabledIds - 线编码的允许清单。
+	* @returns {AllowedList} 联合。
+	*/
+	function parseAllowedList(enabledIds) {
+		if (!Array.isArray(enabledIds) || enabledIds.length === 0) return { mode: "all" };
+		if (enabledIds.includes("__hide_all__")) return { mode: "none" };
+		const ids = [];
+		const seen = /* @__PURE__ */ new Set();
+		for (const entry of enabledIds) {
+			const id = typeof entry === "string" ? entry : "";
+			if (id === "" || seen.has(id)) continue;
+			seen.add(id);
+			ids.push(id);
+		}
+		return {
+			mode: "list",
+			ids
+		};
+	}
+	/**
+	* 面板草稿 → 落盘清单的归一：哨兵独占态。
+	*
+	* 草稿含哨兵（「全部隐藏」）时落盘值只保留哨兵——不能让它与真实 id 混排：
+	* Host 把混排判 `none`，而面板会把混排里的真实 id 画成勾中，「已启用 N」
+	* 与实际提供 0 个撒谎（踩过，见 cards.ts 的注释）。其余情况剥掉哨兵、
+	* 滤掉空串后原样落盘。
+	* @param {readonly unknown[]} draft - 面板勾选的草稿。
+	* @returns {string[]} 落盘的 `enabledIds`。
+	*/
+	function normalizeRosterSave(draft) {
+		return rosterSaveOf(parseAllowedList(draft));
+	}
+	/**
+	* 联合 → 落盘清单（{@link parseAllowedList} 的逆运算）：`none` 序列化成
+	* 哨兵清单，`all` 序列化成空清单（「不过滤」的拼写），`list` 原样带出 id。
+	* @param {AllowedList} list - 联合。
+	* @returns {string[]} 线编码的 `enabledIds`。
+	*/
+	function rosterSaveOf(list) {
+		switch (list.mode) {
+			case "all": return [];
+			case "none": return [HIDE_ALL_MODELS];
+			case "list": return [...list.ids];
+		}
+	}
+	/** 「全部隐藏」的落盘清单（{@link rosterSaveOf} 的 `none` 特例；每次新数组）。 */
+	function hideAllRoster() {
+		return rosterSaveOf({ mode: "none" });
+	}
+	var init_allow_list = __esmMin((() => {
+		init_wire();
 	}));
 
 //#endregion
@@ -1328,13 +1428,17 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const hostIds = status.enabledIds;
 		const hostKey = useMemo(() => JSON.stringify(hostIds), [hostIds]);
 		const [draft, setDraft] = useState(() => hostIds.slice());
-		const hideAllMode = draft.includes(HIDE_ALL_MODELS);
+		const hideAllMode = parseAllowedList(draft).mode === "none";
 		useEffect(() => {
-			setDraft(hostIds.includes("__hide_all__") ? [HIDE_ALL_MODELS] : hostIds);
+			setDraft(normalizeRosterSave(hostIds));
 		}, [hostKey]);
 		const roster = status.roster;
 		const rosterIds = roster.map((row) => row.id);
-		const toggleOne = (id) => setDraft((current) => current.includes(id) ? current.filter((x) => x !== id) : [...current.filter((x) => x !== HIDE_ALL_MODELS), id]);
+		const toggleOne = (id) => setDraft((current) => {
+			const ids = parseAllowedList(current);
+			const kept = ids.mode === "list" ? [...ids.ids] : [];
+			return kept.includes(id) ? kept.filter((x) => x !== id) : [...kept, id];
+		});
 		const ticked = hideAllMode ? 0 : roster.filter((row) => draft.includes(row.id)).length;
 		const degraded = status.error === "unavailable";
 		let statusNode;
@@ -1463,8 +1567,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			style: S.rosterBulk,
 			disabled: busy,
 			onClick: () => {
-				setDraft([HIDE_ALL_MODELS]);
-				onSaveList([HIDE_ALL_MODELS]);
+				const none = hideAllRoster();
+				setDraft(none);
+				onSaveList(none);
 			}
 		}, tt("provider.hideAll")), h("button", {
 			type: "button",
@@ -1652,6 +1757,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		init_const();
 		init_snapshot();
 		init_toggle_switch();
+		init_allow_list();
 		EVENT_KIND_KEY = {
 			quota: "events.quota",
 			rate_limit: "events.rate_limit",
@@ -1964,8 +2070,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		]);
 		const toggleProvider = useCallback((enabled) => void runProviderWrite(PROVIDER_PATH, { enabled }), [runProviderWrite]);
 		const saveRoster = useCallback((enabledIds) => {
-			const normalized = enabledIds.includes("__hide_all__") ? [HIDE_ALL_MODELS] : enabledIds.filter((id) => id !== HIDE_ALL_MODELS);
-			runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds: normalized });
+			runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds: normalizeRosterSave(enabledIds) });
 		}, [runProviderWrite]);
 		const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
 		const saveContextWindow = useCallback((contextWindow) => {
@@ -2190,6 +2295,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		init_use_snapshot_polling();
 		init_runtime();
 		init_styles();
+		init_allow_list();
 	}));
 
 //#endregion

@@ -15,7 +15,7 @@
 // 它的 release handle 能摘掉——这正是「注册了但没人能摘」的危害来源。
 
 import { strict as assert } from "node:assert";
-import { createProviderPublisher, catalogSignature, quotaSignatureOf, syncSignaturesAfterPublish } from "../src/host/provider-publish.ts";
+import { createProviderPublisher, catalogSignature, quotaSignatureOf, syncSignaturesAfterPublish, publisherPhaseOf } from "../src/host/provider-publish.ts";
 
 const ENTRIES = [{ id: "deepseek-ai/DeepSeek-V4.1-Flash", name: "DS" }];
 
@@ -464,6 +464,24 @@ function makePublisher({ llm, panel = true, gate } = {}) {
     "恢复失败路径必须 release：否则 releaseAdapter 握着一只活的注册却对面板说未注册"
   );
   assert.equal(adapters.size, 0, "Host 里不得留下任何适配器（面板口径与 Host 事实必须一致）");
+}
+
+// §13 相位推导：`registered` / `error` 的编码状态被命名化，且 disposed 压过一切。
+//
+// 两道空转守卫的条件（关侧 = idle、开侧 = serving）以前是散在注释里的裸布尔
+// 表达式；现在是有名字的相位。这一节钉住命名与编码的一一对应——改编码的人
+// 会先撞到这一节。
+assert.equal(publisherPhaseOf({ registered: false, error: null }, false), "idle", "没注册且无错 = 开关关着的稳态");
+assert.equal(publisherPhaseOf({ registered: true, error: null }, false), "serving", "已注册且无错 = offer 在服务");
+assert.equal(publisherPhaseOf({ registered: true, error: "boom" }, false), "failing", "回滚到旧对但新 offer 没落地 = 必须继续重试（不得空转跳过）");
+assert.equal(publisherPhaseOf({ registered: false, error: "boom" }, false), "broken", "没注册且有错 = 继续重试自愈");
+for (const state of [
+  { registered: false, error: null },
+  { registered: true, error: null },
+  { registered: true, error: "boom" },
+  { registered: false, error: "boom" }
+]) {
+  assert.equal(publisherPhaseOf(state, true), "disposed", "disposed 压过一切相位");
 }
 
 console.log("provider-publish.test.mjs: all checks passed");

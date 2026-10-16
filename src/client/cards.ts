@@ -8,9 +8,10 @@ import { count, format, isoTime } from "./format.ts";
 import { h, useEffect, useMemo, useState } from "./runtime.ts";
 import type { DictionaryKey, Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
-import { HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, modelscopeModelUrl, FEATURED_OWNERS, catalogOwner, formatWindow } from "./const.ts";
+import { MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, modelscopeModelUrl, FEATURED_OWNERS, catalogOwner, formatWindow } from "./const.ts";
 import { providerOf, drawOf } from "./snapshot.ts";
 import { ToggleSwitch } from "./toggle-switch.ts";
+import { parseAllowedList, normalizeRosterSave, hideAllRoster } from "../shared/allow-list.ts";
 import type { BalanceData, ProviderStatus, DrawStatus, QuotaEvent, Snapshot, TrendBucket, TokenStatus } from "../shared/wire.ts";
 
 /** 可折叠 section 卡：全宽头部按钮 + 旋转 chevron；open/onToggle 由 props 进。 */
@@ -281,15 +282,16 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
   const hostIds = status.enabledIds;
   const hostKey = useMemo(() => JSON.stringify(hostIds), [hostIds]);
   const [draft, setDraft] = useState<string[]>(() => hostIds.slice());
-  // 哨兵态是独占态：draft 含 HIDE_ALL_MODELS 时，整个清单就是「全部隐藏」
-  // （Host 的 resolveAllowedList 判「含哨兵即 none」）。勾选、计数与保存都
-  // 按这个口径，混排（哨兵 + 真实 id）不会出现。
-  const hideAllMode = draft.includes(HIDE_ALL_MODELS);
+  // 哨兵态是独占态：draft 经 shared/allow-list.ts 的 parseAllowedList 解释，
+  // mode === "none" 时整个清单就是「全部隐藏」（Host 同一份解释）。勾选、
+  // 计数与保存都按这个口径，混排（哨兵 + 真实 id）不会出现。
+  const hideAllMode = parseAllowedList(draft).mode === "none";
   // 只在 Host 值真正移动时跟过去（保存后由调用方 load() 回显，不靠本地乐观）。
   useEffect(() => {
     // 归一：Host 落盘值若带哨兵（旧版混排残留），只保留哨兵，别把真实 id
-    // 画成勾中——面板显示必须与 Host 的「含哨兵即 none」一致。
-    setDraft(hostIds.includes(HIDE_ALL_MODELS) ? [HIDE_ALL_MODELS] : hostIds);
+    // 画成勾中——面板显示必须与 Host 的「含哨兵即 none」一致（同一份
+    // normalizeRosterSave，序列化规则只有一处）。
+    setDraft(normalizeRosterSave(hostIds));
     // 刻意只依赖 hostKey：hostIds 每次轮询都是新数组，列它会在每帧覆盖在编辑的勾选。
   }, [hostKey]);
 
@@ -297,11 +299,11 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
   const rosterIds = roster.map((row) => row.id);
   // 勾一个真实模型 = 退出「全部隐藏」：哨兵是独占态，不能被真实 id 稀释成
   // 混排清单（Host 会把混排判成 none，而面板会把它画成勾中——UI 与落盘撒谎）。
-  const toggleOne = (id: string) => setDraft((current) =>
-    current.includes(id)
-      ? current.filter((x) => x !== id)
-      : [...current.filter((x) => x !== HIDE_ALL_MODELS), id]
-  );
+  const toggleOne = (id: string) => setDraft((current) => {
+    const ids = parseAllowedList(current);
+    const kept = ids.mode === "list" ? [...ids.ids] : [];
+    return kept.includes(id) ? kept.filter((x) => x !== id) : [...kept, id];
+  });
   const ticked = hideAllMode ? 0 : roster.filter((row) => draft.includes(row.id)).length;
 
   // 状态行，顺序即优先级：具体失败 > 能力缺口 > 已注册 > 未注册。
@@ -399,7 +401,7 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
           }, tt("provider.allowAll")),
           h("button", {
             type: "button", style: S.rosterBulk, disabled: busy,
-            onClick: () => { setDraft([HIDE_ALL_MODELS]); onSaveList([HIDE_ALL_MODELS]); }
+            onClick: () => { const none = hideAllRoster(); setDraft(none); onSaveList(none); }
           }, tt("provider.hideAll")),
           h("button", {
             type: "button", style: S.primary, disabled: busy,

@@ -9,6 +9,11 @@
  *   - 单点 `registerPair`（带 factory-await + shape 检查）被 publish 与 rollback
  *     两条路共用；失败时**恢复旧对**，坏 publish 不会把已在服务的模型也拉下来。
  *
+ * 结构性纪律（本文件新立的）：一次 publish 拆成 **gather（可挂起）**与
+ * **commit（不可挂起）**两半，commit 是**非 async 函数**——「disposed 复查与
+ * registerAdapter 之间没有 await」由此前的注释论证升级为语言级保证。相位
+ * （idle/serving/failing/broken/disposed）从契约字段推导，不双写。
+ *
  * 与 sensenova 版的关系：**结构同源、代码不等价**——去注释后代码行重叠 77%
  * （2026-10-16 实测；复核：`node tools/dev/cross-repo-drift.mjs`）。所以差异**不止**
  * 三个标签：除工厂导出名 `"createModelScopeAdapter"`、`registerPair` 用的
@@ -84,6 +89,62 @@ export interface ProviderPublisherState extends PublisherStateBase {
   /** 额度耗尽集合的廉价签名；某个池过零时翻转。 */
   quotaSignature: string;
 }
+
+/**
+ * publisher 的相位——`registered` / `error` 两个契约字段编码状态的命名化。
+ *
+ * 存在理由是给两道空转守卫的判断条件一个名字（旧版散在注释里的
+ * `registered === true && error === null` 之类的条件），并让「发布到哪一步了」
+ * 在测试里可断言。它**不**是第三份存储：见 {@link publisherPhaseOf} 的推导
+ * 纪律。
+ */
+export type PublisherPhase = "idle" | "serving" | "failing" | "broken" | "disposed";
+
+/**
+ * 从 publisher 的契约状态**推导**相位——单源，不双写。
+ *
+ * `registered` / `error` 是 `publish-core.ts` 的共享契约字段（`swapRegistration`
+ * 与 `unregister` 直接写它们）。并行维护一个 `phase` 字段就是双写，双写必然
+ * 漂移且方向静默；推导让相位永远不可能与那两个字段矛盾。
+ *
+ * 相位与两道空转守卫的对应（旧版注释里的条件，现在是有名字的状态）：
+ *   - `idle`     = 没注册且无错：开关关着的稳态 → 关侧空转守卫可跳过；
+ *   - `serving`  = 已注册且无错：offer 已 live → 开侧空转守卫可跳过；
+ *   - `failing`  = 已注册但有错：回滚到了旧对、但新 offer 没落地 → **必须继续
+ *     重试**（跳过就是静默丢弃用户刚保存的清单）；
+ *   - `broken`   = 没注册且有错：上次发布失败且什么都没在服务 → 继续重试自愈；
+ *   - `disposed` = 插件已 dispose：任何 publish 都是 no-op。
+ * @param {{registered: boolean, error: string|null}} state - publisher 状态。
+ * @param {boolean} disposed - publish 队列的 disposed 闸状态。
+ * @returns {PublisherPhase} 相位。
+ */
+export function publisherPhaseOf(state: { registered: boolean; error: string | null }, disposed: boolean): PublisherPhase {
+  if (disposed) return "disposed";
+  if (state.registered) return state.error === null ? "serving" : "failing";
+  return state.error === null ? "idle" : "broken";
+}
+
+/**
+ * 一次 publish 的执行计划：gather（可挂起）的产出，commit（不可挂起）的输入。
+ *
+ * `done` = gather 已经把这条路走完（跳过 / 注销 / 构建失败），带上结果；
+ * `commit` = 适配器构建好了，只剩同步提交——`llm` 与 `previous*` 快照随计划
+ * 带着走，commit 因此不需要回头读任何会变的东西。
+ */
+export type PublishPlan =
+  | { kind: "done"; result: { ok: boolean; skipped?: boolean; error?: unknown } }
+  | {
+      kind: "commit";
+      llm: object;
+      built: { providerIds: string[]; adapter: unknown };
+      previousBuilt: unknown;
+      // 三个领域快照的类型与 `ProviderPublisherState` 的字段一一对应——onRollback
+      // 把它们原样写回 state，类型必须对得上（写不回 state 的快照不是快照）。
+      previousEntries: any[];
+      previousEnabledIds: string[];
+      previousUnavailable: string[];
+    };
+
 
 /**
  * provider 发布器。
@@ -190,31 +251,39 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
     state.quotaSignature === quotaSignatureOf(state.unavailableIds);
 
   /**
-   * 为一个目录/允许清单快照（重）构建并注册 provider。
-   *
-   * 重建并重注册而非原地改：`PiAiAdapter` 内部 memoize profiles 快照，只有新的注册
-   * 才能改变提供的模型列表。注册失败时**恢复上一对**，所以坏 publish 永远不能把
-   * 已在服务的模型拉下来。
-   * @param {object[]} entries - 归一目录条目。
-   * @param {string[]} enabledIds - 允许清单（空 = 全部）。
-   * @param {string[]} [unavailableModelIds] - 要从 picker 的 offer 里丢掉的额度耗尽 id。
-   * @returns {Promise<{ok: boolean, skipped?: boolean, error?: unknown}>}
+   * 发布相位——两道空转守卫的判断条件从此有名字（推导见 {@link publisherPhaseOf}）。
+   * @param {boolean} disposed - 当前是否已 dispose。
+   * @returns {PublisherPhase}
    */
-  const publishProviderOnce = async (entries: unknown, enabledIds: unknown, unavailableModelIds: string[] = []) => {
-    // 插件 dispose 之后才到的 publish，会把 provider 注册进一个已经撤下本插件的
-    // Host：没有主人、没有 release，屏幕上也没说它从哪来。
-    if (queue.isDisposed()) return { ok: false, skipped: true };
+  const phaseOf = (disposed: boolean): PublisherPhase => publisherPhaseOf(state, disposed);
+
+  /**
+   * gather 阶段：一次 publish 的**可挂起**半边。
+   *
+   * 读面板开关、解析 llm 服务、解析适配器工厂、构建适配器——四个 await 全住
+   * 在这里。产出两种计划：`done`（跳过 / 注销 / 构建失败，都已执行完）或
+   * `commit`（适配器构建好了，只剩同步提交）。
+   *
+   * 领域字段（entries / enabledIds / unavailableIds）在查询开关**之前**写入，
+   * 开关关分支刻意不回滚它们——这个不对称是承重的，不是疏忽：`routes/provider.ts`
+   * 与 roster 保存会在开关重新打开时正好从这些字段重新 publish，所以用户的
+   * 允许清单编辑与最后一次拉到的目录**必须**熬过关闭期。把 `previous*` 还回去
+   * 会静默丢掉两者——开关关闭期间做的保存，会在开关重新打开时消失。
+   * `swapRegistration` 的 `onRollback` 会还它们，但只对注册真的抛了的路径——
+   * 那种失败必须让先前在服务的对继续服务，这是与「开关关着」不同的承诺。
+   * @param {unknown} entries - 归一目录条目。
+   * @param {unknown} enabledIds - 允许清单（空 = 全部）。
+   * @param {string[]} unavailableModelIds - 额度耗尽的模型 id。
+   * @returns {Promise<PublishPlan>} 执行计划。
+   */
+  const gatherPublish = async (entries: unknown, enabledIds: unknown, unavailableModelIds: string[]): Promise<PublishPlan> => {
+    // 插件 dispose 之后才到的 publish，会把 provider 注册进一个已经撤下本
+    // 插件的 Host：没有主人、没有 release，屏幕上也没说它从哪来。
+    if (queue.isDisposed()) return { kind: "done", result: { ok: false, skipped: true } };
     const previousBuilt = state.built;
     const previousEntries = state.entries;
     const previousEnabledIds = state.enabledIds;
     const previousUnavailable = state.unavailableIds;
-    // 三个领域字段在查询开关**之前**写入，下面的开关关分支刻意不回滚它们。这个
-    // 不对称是承重的，不是疏忽：`routes/provider.ts` 与 roster 保存会在开关重新
-    // 打开时正好从这些字段重新 publish，所以用户的允许清单编辑与最后一次拉到的
-    // 目录**必须**熬过关闭期。把 `previous*` 还回去会静默丢掉两者——开关关闭期间
-    // 做的保存，会在开关重新打开时消失。`swapRegistration` 的 `onRollback` 会还
-    // 它们，但只对注册真的抛了的路径——那种失败必须让先前在服务的
-    // 对继续服务，这是与「开关关着」不同的承诺。
     state.entries = Array.isArray(entries) ? entries : [];
     state.enabledIds = Array.isArray(enabledIds) ? enabledIds : [];
     state.unavailableIds = Array.isArray(unavailableModelIds) ? unavailableModelIds : [];
@@ -229,19 +298,19 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
       // 空转守卫：开关关着、且上次也确实没注册、签名也没漂（offer 没变），就别跑
       // unregister——否则每个轮询周期都做一次无意义（且会发 llm/adapters-updated
       // 事件的）注销。见 fix B：签名比对让「目录没变」的轮询不再 churn。
-      if (state.registered === false && state.error === null && offerUnchanged()) {
-        return { ok: true, skipped: true };
+      // `idle` 相位 = 旧条件 `registered === false && error === null`。
+      if (phaseOf(false) === "idle" && offerUnchanged()) {
+        return { kind: "done", result: { ok: true, skipped: true } };
       }
       const result = unregister({ state, release });
       syncSignaturesAfterPublish(state); // 让下次开关内轮的空转判断有正确基准
-      return result;
+      return { kind: "done", result };
     }
     const llm = resolveRegistrationService({ state, getLlm: effectiveGetLlm, release });
-    if (llm === null) return { ok: false, error: state.error };
-    let createModelScopeAdapter;
-    let built;
+    if (llm === null) return { kind: "done", result: { ok: false, error: state.error } };
+    let built: { providerIds: string[]; adapter: unknown };
     try {
-      createModelScopeAdapter = await resolveAdapterFactory();
+      const createModelScopeAdapter = await resolveAdapterFactory();
       // 用 await 而不是假设同步：factory 一旦变成 async，就会把一个 Promise 交给
       // `registerAdapter`，Host 于是被提供一个 adapter 为 `undefined` 的 provider——
       // 一种表现为模型路由坏掉、离它的成因很远的失败。
@@ -256,7 +325,7 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
         // 观察层缺席即不套（`exactOptionalPropertyTypes` 下条件展开，不能传
         // undefined 让它与「显式无观察层」变成两件事）。
         ...(usage !== undefined ? { usage } : {})
-      });
+      }) as { providerIds: string[]; adapter: unknown };
       // 同一个理由，换个说法：适配器是 Host 级注册的，所以 factory 返回别的形状
       // 必须在这里失败，而不是发布一个无法服务请求的 provider。
       if (!isBuiltAdapter(built)) throw new Error(BAD_FACTORY_SHAPE_ERROR);
@@ -266,54 +335,67 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
       const described = describeBuildFailure(e);
       state.error = described.note;
       warnBuildFailure(effectiveLogger, "ModelScope", described);
-      return { ok: false, error: described.error };
+      return { kind: "done", result: { ok: false, error: described.error } };
     }
     // 空转守卫（注册路径）：开关开着、且 offer 与失败状态都没变——这次 publish 与上
     // 次重建出来的结果完全一致——就**不要重建** provider 对（否则每轮询周期都摘下再
-    // 挂上同一个对，期间任何在途请求可能被打断）。见 fix B。注意只在「已成功注册」
-    // 且「无错误」时跳过；失败态必须继续尝试重注册自愈。
-    if (state.registered === true && state.error === null && offerUnchanged()) {
-      return { ok: true, skipped: true };
+    // 挂上同一个对，期间任何在途请求可能被打断）。见 fix B。`serving` 相位 = 旧条件
+    // `registered === true && error === null`；`failing` 刻意不在跳过之列——回滚到旧对
+    // 但新 offer 没落地时，跳过就等于静默丢弃用户的保存。
+    if (phaseOf(false) === "serving" && offerUnchanged()) {
+      return { kind: "done", result: { ok: true, skipped: true } };
     }
-    // ── 闸门第二次检查（承重，见下）──
-    //
-    // :188 那次检查只覆盖到第一个 await，而注册发生在**最后一次** await 之后
-    // （effectivePanelSwitch → resolveAdapterFactory（首次是动态 import，最宽的窗口）
-    // → createModelScopeAdapter → swapRegistration）。teardown 落在这段窗口里时，
-    // 闸门不会重跑，于是 registerAdapter 把适配器注册进一个**已经把本插件撤下的
-    // Host**，而 teardown 早就跑完、release 永不调用——泄漏的对持有 tokenStore 与
-    // 整个 Cordis ctx 的闭包，形成僵尸 provider：picker 里那个 provider 还在、还能
-    // 路由，而面板路由已注销，用户没有界面能关掉它。
-    //
-    // 为什么 peer 的 fiber 兜底救不了：`registerAdapter` 用的是 **llm 服务自己的**
-    // `ctx.effect`（peer 源码里 `.bind(this)` 到 llm 服务），插件卸载不会dispose它，
-    // 宿主注册表永久持有该 adapter。
-    //
-    // 为什么这个位置严密：从这里到 `registerAdapter` 之间**没有任何 await**
-    // （swapRegistration 内部全是同步调用），单线程下无法插入 teardown。若teardown
-    // 发生在本次检查**之后**，它执行 release() 时能看到新写入的 releaseAdapter 并摘
-    // 掉——两种时序都正确。检查刻意留在本文件（publisher）而**不**放进
-    // `swapRegistration`：那是 publish-core 的共享骨头，不该知道 disposed 的概念。
+    return { kind: "commit", llm, built, previousBuilt, previousEntries, previousEnabledIds, previousUnavailable };
+  };
+
+  /**
+   * commit 阶段：一次 publish 的**不可挂起**半边。
+   *
+   * **这个函数刻意不是 `async`**——语言禁止在非 async 函数里写 `await`，所以
+   * 从下面的 disposed 复查到 `swapRegistration` 内部的 `registerAdapter` 之间
+   * **不可能**插入挂起点。旧版靠一句「这个位置严密：从这里到 registerAdapter
+   * 之间没有任何 await」的注释论证这件事；现在由函数签名本身保证——想在这里
+   * 加 await，编译期就过不去。临界区的正确性由结构承载，不由注释承载。
+   *
+   * 为什么这道复查必须有（gather 入口那次只覆盖到第一个 await，而注册发生在
+   * **最后一次** await 之后）：teardown 落在这段窗口里时，入口闸门不会重跑，
+   * 于是 registerAdapter 把适配器注册进一个**已经把本插件撤下的 Host**，而
+   * teardown 早就跑完、release 永不调用——泄漏的对持有 tokenStore 与整个
+   * Cordis ctx 的闭包，形成僵尸 provider：picker 里那个 provider 还在、还能
+   * 路由，而面板路由已注销，用户没有界面能关掉它。
+   *
+   * 为什么 peer 的 fiber 兜底救不了：`registerAdapter` 用的是 **llm 服务自己的**
+   * `ctx.effect`（peer 源码里 `.bind(this)` 到 llm 服务），插件卸载不会 dispose
+   * 它，宿主注册表永久持有该 adapter。
+   *
+   * 若 teardown 发生在本次检查**之后**，它执行 release() 时能看到新写入的
+   * releaseAdapter 并摘掉——两种时序都正确。检查刻意留在本文件（publisher）而
+   * **不**放进 `swapRegistration`：那是 publish-core 的共享骨头，不该知道
+   * disposed 的概念。
+   * @param {Extract<PublishPlan, {kind: "commit"}>} plan - gather 产出的提交计划。
+   * @returns {{ok: boolean, skipped?: boolean, error?: unknown}}
+   */
+  const commitPublish = (plan: Extract<PublishPlan, { kind: "commit" }>): { ok: boolean; skipped?: boolean; error?: unknown } => {
     if (queue.isDisposed()) return { ok: false, skipped: true };
     // swap（连同背后的 rollback）是共享机制：失败的重新注册必须恢复先前在服务的对。
     // 在这边被恢复的是目录身份——entries、允许清单与额度耗尽集合（不能还指着一个
     // 我们没能发布的集合）。
     //
     // `requestedSignature` 必须在 swap **之前**取：此刻 state.entries/enabledIds 还是
-    // 本次请求的值（上一段刚写入），swap 失败时 onRollback 会把它们换成恢复后的那份。
+    // 本次请求的值（gather 刚写入），swap 失败时 onRollback 会把它们换成恢复后的那份。
     const requestedSignature = catalogSignature(state.entries, state.enabledIds);
     const result = swapRegistration({
-      llm,
-      built,
-      previousBuilt,
+      llm: plan.llm,
+      built: plan.built,
+      previousBuilt: plan.previousBuilt,
       state,
       release,
       registerPair,
       emit,
       onRollback: () => {
-        state.entries = previousEntries;
-        state.enabledIds = previousEnabledIds;
-        state.unavailableIds = previousUnavailable;
+        state.entries = plan.previousEntries;
+        state.enabledIds = plan.previousEnabledIds;
+        state.unavailableIds = plan.previousUnavailable;
       }
     });
     // 成功的 publish 之后同步签名（与轮询用的公式同源，由 syncSignaturesAfterPublish
@@ -329,6 +411,23 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
       state.error = null;
     }
     return result;
+  };
+
+  /**
+   * 为一个目录/允许清单快照（重）构建并注册 provider。
+   *
+   * 形状 = gather（可挂起）+ commit（不可挂起）：全部 await 住在前者，后者是
+   * 非 async 函数。重建并重注册而非原地改：`PiAiAdapter` 内部 memoize profiles
+   * 快照，只有新的注册才能改变提供的模型列表。注册失败时**恢复上一对**，所以
+   * 坏 publish 永远不能把已在服务的模型拉下来。
+   * @param {object[]} entries - 归一目录条目。
+   * @param {string[]} enabledIds - 允许清单（空 = 全部）。
+   * @param {string[]} [unavailableModelIds] - 要从 picker 的 offer 里丢掉的额度耗尽 id。
+   * @returns {Promise<{ok: boolean, skipped?: boolean, error?: unknown}>}
+   */
+  const publishProviderOnce = async (entries: unknown, enabledIds: unknown, unavailableModelIds: string[] = []) => {
+    const plan = await gatherPublish(entries, enabledIds, unavailableModelIds);
+    return plan.kind === "done" ? plan.result : commitPublish(plan);
   };
 
   /**

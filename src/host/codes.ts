@@ -1,5 +1,7 @@
 /**
- * 错误分类的单一真源（对齐姊妹插件的 codes.ts 纪律）。
+ * Host 侧的 429 分诊分类函数。**码表本身已迁至 `shared/codes.ts`**（双端同读，
+ * 见那里的搬迁理由）；本文件只剩「读上游响应」的 Host 独有行为，并把 CODE
+ * 再导出一次，让 Host 各模块的 `from "./codes.ts"` 导入路径不变。
  *
  * 魔搭的分类现实（SPIKE.md）：上游不带任何额度头，额度耗尽与每分钟限频都只
  * 会以 429 + 文案出现，所以 429 的分诊是**按 body 文案**做的保守二分——
@@ -11,39 +13,11 @@
 
 import { looksLikeRateLimit, hasHardQuotaWordingIn } from "./llm-error-fix.ts";
 
-/**
- * 面板按它分流的稳定码表 —— Client 的 `GUIDANCE_BY_CODE` 以这份表的键为契约，
- * 新增/改名必须同步 Client，否则内部错误没有引导文案（见下 `INTERNAL_ERROR`）。
- */
-export const CODE = Object.freeze({
-  CONFIG_ERROR: "config_error",
-  NETWORK_ERROR: "network_error",
-  TIMEOUT_ERROR: "timeout_error",
-  AUTH_ERROR: "auth_error",
-  RATE_LIMITED: "rate_limited",
-  QUOTA_EXCEEDED: "quota_exceeded",
-  UPSTREAM_ERROR: "upstream_error",
-  /**
-   * 插件自身抛错（聚合器、状态层、路由之外的意外）。
-   *
-   * 曾经只作为 `soft()` / `failureCode()` 的兜底字符串出现在快照里，没进这张
-   * 表——于是 Client 的 `GUIDANCE_BY_CODE` 也没法映射它（那份映射被测试钉住
-   * 「每个键必须在 CODE 里」），最需要人看的内部错误反而没有引导文案。
-   * 正式收进码表，两端从此同一份真源。
-   */
-  INTERNAL_ERROR: "internal_error",
-  /**
-   * Client 自产码：Host 响应无法解读成快照（非 JSON / 缺 ok 字段）时，
-   * 面板用它走引导文案，而不是把裸英文串（"unexpected payload"）上屏。
-   *
-   * 本表是 `GUIDANCE_BY_CODE` 的键集真源（panel.test §2 钉「每个键必须在
-   * CODE 里」、§3c 钉「每个码必须有引导」）——新增 client 码必须同时进
-   * 这张表，两侧才同步。
-   */
-  PAYLOAD_ERROR: "payload_error"
-});
-
-export type CodeValue = (typeof CODE)[keyof typeof CODE];
+// 码表的单一真源在 shared——这里再导出，Host 侧 import 路径与旧版一致。
+export { CODE } from "../shared/codes.ts";
+export type { CodeValue } from "../shared/codes.ts";
+import { CODE } from "../shared/codes.ts";
+import type { CodeValue } from "../shared/codes.ts";
 
 /**
  * 把上游 HTTP 状态归类成稳定码。
@@ -90,12 +64,7 @@ export function classifyRateLimit(message: string): "quota" | "rate_limit" {
   if (typeof message !== "string" || message.length === 0) return "rate_limit";
   if (looksLikeRateLimit(message)) return "rate_limit";
   // 走到这里 = 没有限频信号。命中硬额度措辞才是真耗尽；否则读不懂 → rate_limit。
-  return hasHardQuotaWording(message) ? "quota" : "rate_limit";
-}
-
-/** 文本是否含硬额度措辞（真耗尽，不纠正）——直接问 llm-error-fix 的那张表。 */
-function hasHardQuotaWording(message: string): boolean {
-  return hasHardQuotaWordingIn(message);
+  return hasHardQuotaWordingIn(message) ? "quota" : "rate_limit";
 }
 
 /**

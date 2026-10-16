@@ -32,7 +32,7 @@
     "mutants": [
       {
         "name": "删掉 restorePreviousPair 调用（注册失败后旧对不会被恢复）",
-        "from": "    restorePreviousPair({ llm, previousBuilt, state, registerPair });",
+        "from": "    restorePreviousPair({ llm, previousBuilt, state, registerPair, release });",
         "to": "    // restorePreviousPair removed"
       }
     ]
@@ -42,14 +42,66 @@
     "test": "provider-publish.test.mjs",
     "mutants": [
       {
-        "name": "offerUnchanged 恒为 false（注册路径空转守卫失效，每次 publish 都重建 provider）",
-        "from": "state.registered === true && state.error === null && offerUnchanged()",
-        "to": "state.registered === true && state.error === null && false"
+        "name": "开侧空转守卫恒为 false（每次 publish 都重建 provider）",
+        "from": "    if (phaseOf(false) === \"serving\" && offerUnchanged()) {",
+        "to": "    if (phaseOf(false) === \"serving\" && false) {"
       },
       {
         "name": "删掉 disposed 第二次闸门检查（teardown 与 publish 竞态 → 僵尸 provider）",
         "from": "    if (queue.isDisposed()) return { ok: false, skipped: true };\n    // swap（连同背后的 rollback）是共享机制：失败的重新注册必须恢复先前在服务的对。",
         "to": "    // ── 闸门第二次检查已移除 ──\n    // swap（连同背后的 rollback）是共享机制：失败的重新注册必须恢复先前在服务的对。"
+      },
+      {
+        "name": "disposed 不再压过一切（dispose 后相位被报成 idle，守卫会放行 publish → 僵尸 provider）",
+        "from": "  if (disposed) return \"disposed\";",
+        "to": "  if (disposed) return \"idle\";"
+      },
+      {
+        "name": "failing 相位消失（回滚态误判为已服务 → 空转守卫跳过重试，静默丢弃用户刚保存的清单）",
+        "from": "  if (state.registered) return state.error === null ? \"serving\" : \"failing\";",
+        "to": "  if (state.registered) return \"serving\";"
+      }
+    ]
+  },
+  {
+    "target": "src/shared/allow-list.ts",
+    "test": "allow-list.test.mjs",
+    "mutants": [
+      {
+        "name": "哨兵检查消失（[哨兵, \"a/A\"] 混排被当白名单 → 同一个清单有两个答案）",
+        "from": "  if (enabledIds.includes(HIDE_ALL_MODELS)) return { mode: \"none\" };",
+        "to": "  // sentinel check removed"
+      },
+      {
+        "name": "空清单判成 none（新装默认变成「什么都不提供」）",
+        "from": "  if (!Array.isArray(enabledIds) || enabledIds.length === 0) return { mode: \"all\" };",
+        "to": "  if (!Array.isArray(enabledIds) || enabledIds.length === 0) return { mode: \"none\" };"
+      },
+      {
+        "name": "「全部隐藏」的 enabledCount 数成 roster 全长（面板撒谎：显示全启用，实际提供 0）",
+        "from": "    case \"all\":\n      return rosterIds.length;\n    case \"none\":\n      return 0;",
+        "to": "    case \"all\":\n      return rosterIds.length;\n    case \"none\":\n      return rosterIds.length;"
+      }
+    ]
+  },
+  {
+    "target": "src/host/provider-reconcile.ts",
+    "test": "reconcile.test.mjs",
+    "mutants": [
+      {
+        "name": "desired 在 fetch 期间被改不置 dirty（收敛不重跑 → 刚保存的新值要等一个 pollSeconds）",
+        "from": "    if (desiredKey(after) !== desiredKey(before)) {\n      dirty = true;\n      return;\n    }",
+        "to": "    if (desiredKey(after) !== desiredKey(before)) {\n      return;\n    }"
+      },
+      {
+        "name": "fetch 失败后照常往下走（发布空目录 → 一次抖动撤下全部已服务模型）",
+        "from": "      logger?.warn?.(\n        `${name}: catalog fetch failed (${redactSecrets(errMsg(error))}) — the current offer stays registered; the next pass retries`\n      );\n      return;",
+        "to": "      logger?.warn?.(\n        `${name}: catalog fetch failed (${redactSecrets(errMsg(error))}) — the current offer stays registered; the next pass retries`\n      );"
+      },
+      {
+        "name": "触发不置 dirty（在途期间到达的保存被吞 → 新值永远不落地）",
+        "from": "    dirty = true;\n    const result = chain = chain.then(async () => {",
+        "to": "    const result = chain = chain.then(async () => {"
       }
     ]
   }

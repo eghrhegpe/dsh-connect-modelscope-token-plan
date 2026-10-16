@@ -72,6 +72,17 @@ export interface ModelEntry {
 }
 
 /**
+ * 代表「什么都不提供」的哨兵 id——`ProviderStatus.enabledIds` 线编码的一部分。
+ *
+ * 空的允许清单已经表示「不过滤（全部提供）」，所以「全部隐藏」只能走这个哨兵：
+ * 一个永远不可能成为真实模型 id 的字符串，作为清单里唯一的项。裸 `[]` 不能同时
+ * 表示「全部模型」与「没有模型」。两侧（Host 的 `llm-models.ts` 与 Client 的
+ * `const.ts`）都从本模块再导出——它曾经是两边各写一份的字面量，拼错一处就是
+ * 「点隐藏反而全放出来」。
+ */
+export const HIDE_ALL_MODELS = "__hide_all__";
+
+/**
  * Provider 注册状态块（M4，§11）：面板「接入模型」开关区与模型勾选区读它。
  *
  * 与 models 块的分工：`models` 只回答「上游目录通不通、有几个模型」；`provider`

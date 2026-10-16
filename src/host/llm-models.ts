@@ -26,6 +26,7 @@
  */
 
 import { str, num } from "./util.ts";
+import { parseAllowedList, isIdAllowed } from "../shared/allow-list.ts";
 
 /**
  * 一条归一后的目录条目。
@@ -63,11 +64,10 @@ export const LLM_API_KEY_NAME = "ModelScope token";
  * 按一个匹配不到任何东西的 id 过滤，这就是用户要的 offer。裸 `[]` 不能同时表示
  * 「全部模型」与「没有模型」。
  *
- * provider 路由与快照用同一个字面量（浏览器 bundle 无法 import 本模块，所以
- * `client.js` 里还有一份）——两侧改名必须一起改，否则面板的「全部隐藏」会
- * 静默变成「全部提供」。
+ * 字面量住在 `shared/wire.ts`（线编码的一部分），这里再导出——Host 侧 import
+ * 路径与旧版一致。三态解释收敛在 `shared/allow-list.ts` 的判别联合里。
  */
-export const HIDE_ALL_MODELS = "__hide_all__";
+export { HIDE_ALL_MODELS } from "../shared/wire.ts";
 
 /**
  * 每 token 单价对额度制路由不可知，四处一律报零。
@@ -455,14 +455,15 @@ export function toPiDescriptor(entry: CatalogEntry, options: { providerId?: stri
  *
  * 空清单已经占用了「不过滤」，所以「什么都不提供」必须有第二种拼写——这正是
  * `HIDE_ALL_MODELS` 存在的原因。注意「含哨兵但还塞了别的 id」仍按 `"none"` 处理
- * （哨兵语义优先，与 `filterByEnabled` 的「匹配不到任何真实 id」完全一致）。
+ * （哨兵语义优先）——这一条以前只有本函数与 `isModelEnabled` 做到，
+ * `filterByEnabled` 会把混排里的真实 id 放出来，同一个清单两个答案；现在三家的
+ * 解释都收敛到 `shared/allow-list.ts` 的 {@link parseAllowedList}，本函数只是
+ * 它的一句模式投影。
  * @param {string[]} enabledIds - 允许清单。
  * @returns {"all"|"none"|"list"}
  */
 export function resolveAllowedList(enabledIds: string[]): "all" | "none" | "list" {
-  if (!Array.isArray(enabledIds) || enabledIds.length === 0) return "all";
-  if (enabledIds.includes(HIDE_ALL_MODELS)) return "none";
-  return "list";
+  return parseAllowedList(enabledIds).mode;
 }
 
 /**
@@ -471,35 +472,35 @@ export function resolveAllowedList(enabledIds: string[]): "all" | "none" | "list
  * **空清单 = 不过滤**：新装没做过选择，仍应提供全部模型。一旦非空就是严格白
  * 名单；名单里点名了本目录没有的 id 也无害——它只是匹配不到东西。
  *
- * `HIDE_ALL_MODELS` 哨兵靠「匹配不到任何真实 id」表达「什么都不提供」，因为空
- * 清单已经被「不过滤」占用了。这里直接走 {@link resolveAllowedList} 的三态：
- * 含哨兵的清单属 `"none"`，过滤结果必然是空（哨兵不是真实 id），与
- * `isModelEnabled` 的口径一致（fix D）。
+ * 三态判定走 {@link parseAllowedList}（与 `resolveAllowedList` / `isModelEnabled`
+ * 同一份解释）：含哨兵的清单属 `"none"`，过滤结果必然是空——包括「哨兵混排
+ * 真实 id」这种旧实现会漏成「提供那些真实 id」的形状（fix D 的收口：解释只有
+ * 一份，`switch` 漏分支是编译错误）。
  * @param {object[]} entries - 归一目录条目。
  * @param {string[]} [enabledIds] - 允许清单；空/缺省关闭过滤。
  * @returns {object[]} 仍被提供的条目，按目录顺序。
  */
 export function filterByEnabled(entries: unknown, enabledIds?: unknown): object[] {
-  const list = Array.isArray(enabledIds) ? enabledIds : [];
-  if (list.length === 0) return Array.isArray(entries) ? entries : [];
-  const allow = new Set(list.map((id) => str(id, "")));
-  return (Array.isArray(entries) ? entries : []).filter((entry) => allow.has(str((entry as CatalogEntry)?.id, "")));
+  const list = parseAllowedList(enabledIds);
+  const all = Array.isArray(entries) ? entries : [];
+  if (list.mode === "all") return all;
+  if (list.mode === "none") return [];
+  const allow = new Set(list.ids);
+  return all.filter((entry) => allow.has(str((entry as CatalogEntry)?.id, "")));
 }
 
 /**
  * 某个模型 id 在给定允许清单下会不会被提供。
  *
- * 与 {@link filterByEnabled} 同一套语义：空清单提供一切，含 `HIDE_ALL_MODELS`
- * 哨兵（= `"none"`）什么都不提供，其余非空清单是严格白名单（fix D）。
+ * 与 {@link filterByEnabled} 同一套语义（同一份 {@link parseAllowedList}）：
+ * 空清单提供一切，含 `HIDE_ALL_MODELS` 哨兵（= `"none"`）什么都不提供，
+ * 其余非空清单是严格白名单（fix D）。
  * @param {string[]|undefined} enabledIds - 允许清单。
  * @param {string} id - 要问的模型 id。
  * @returns {boolean}
  */
 export function isModelEnabled(enabledIds: string[] | undefined, id: string): boolean {
-  const list = Array.isArray(enabledIds) ? enabledIds : [];
-  if (list.length === 0) return true;
-  if (list.includes(HIDE_ALL_MODELS)) return false; // 哨兵 = 什么都不提供
-  return list.includes(str(id, ""));
+  return isIdAllowed(parseAllowedList(enabledIds), str(id, ""));
 }
 
 /**

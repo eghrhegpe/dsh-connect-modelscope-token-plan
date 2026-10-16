@@ -17,7 +17,8 @@
  */
 import { PROVIDER_PATH } from "./paths.ts";
 import { resolveEnabledIds } from "../provider-store.ts";
-import { rosterWithAvailability, resolveAllowedList } from "../llm-models.ts";
+import { rosterWithAvailability } from "../llm-models.ts";
+import { parseAllowedList, enabledCountOf } from "../../shared/allow-list.ts";
 import { resolveSwitchEnabled, switchSource } from "../switch-precedence.ts";
 import { optional } from "../util.ts";
 import { writeJson, refuseMethod, withOrigin, readJsonBodyOr400, readJsonBody, respondError, redactedError, MAX_JSON_BODY_BYTES } from "./http.ts";
@@ -30,6 +31,11 @@ import { writeJson, refuseMethod, withOrigin, readJsonBodyOr400, readJsonBody, r
  * 只会比这个宽）。允许清单的持久化（`enabledIds`/`saveEnabledIds`）由
  * `provider-store.ts` 提供（§8）；在它带上这两个方法前，roster 保存只走内存
  * publish，GET 从 publisher 的活状态回读——这是可接受的降级，不是静默失败。
+ *
+ * **写路径不再自己 publish**：保存后只触发 `reconcile`（desired-state 收敛，
+ * 见 `provider-reconcile.ts`）。四个写路由曾经各自 `readEntries` + `publish`
+ * 一遍——与轮询是两个各自为政的 driver，且 fetch 失败会被降级成空目录发布
+ * （把已服务的模型全部撤下）。现在「保存 → 标记 dirty → 收敛」只有一条路。
  */
 interface ProviderRouteWiring {
   settings: import("../host-config.ts").ResolvedSettings;
@@ -49,8 +55,9 @@ interface ProviderRouteWiring {
       registered: boolean;
       error: string | null;
     };
-    publish: (entries: unknown[], enabledIds: string[], unavailable?: string[]) => Promise<unknown>;
   };
+  /** 保存后触发一次收敛（注册态反映 desired 后 resolve）。 */
+  reconcile: () => Promise<void>;
   inference: {
     // 与 host-contextOptions 语义对齐：fetchModels 可携带全局窗口覆盖（null =
     // 跟随目录）。readEntries 每次重注册都把 store 里的覆盖传下去。
@@ -87,18 +94,12 @@ async function readEnabledIds(store: ProviderRouteWiring["providerStore"], publi
 }
 
 /**
- * `allowed` 的分类：委托给 `llm-models.ts` 的单一口径
- * {@link resolveAllowedList}（fix D：快照与 provider 路由以前各写一套分类，会漂移）。
- *
- * 旧版 `allowedOf` 只认「恰好哨兵」为 `"none"`，`["__hide_all__","other"]` 会被错判成
- * `"list"`；统一到 `resolveAllowedList` 后，含哨兵即 `"none"`，与 `filterByEnabled` /
- * `isModelEnabled` 口径一致。
- * @param {string[]} enabledIds - 允许清单。
- * @returns {"all"|"none"|"list"}
+ * `allowed` 的分类与 `enabledCount` 的计数：都从 `shared/allow-list.ts` 的
+ * {@link parseAllowedList} 联合上取（fix D：快照与 provider 路由以前各写一套
+ * 分类，会漂移；旧版 `allowedOf` 只认「恰好哨兵」为 `"none"`，
+ * `["__hide_all__","other"]` 会被错判成 `"list"`——统一到联合后，含哨兵即
+ * `"none"`，与 `filterByEnabled` / `isModelEnabled` 同一份解释）。
  */
-function allowedOf(enabledIds: string[]): "all" | "none" | "list" {
-  return resolveAllowedList(enabledIds);
-}
 
 /**
  * 注册 provider 路由（三条路径）。wiring 子集：settings / providerStore /
@@ -108,7 +109,7 @@ function allowedOf(enabledIds: string[]): "all" | "none" | "list" {
  * @returns {Function} 依次调用三个 `off()` 的注销回调。
  */
 export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
-  const { settings, providerStore, publisher, inference, logger } = wiring;
+  const { settings, providerStore, publisher, reconcile, inference, logger } = wiring;
 
   /**
    * 组装一份 §9 响应形状。GET 与成功后的 POST 共用，所以两个方向不可能对「当前
@@ -124,9 +125,11 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
     // 目录原始窗口，而顶层面板显示覆盖值——同一份快照自相矛盾。
     const entries = await readEntries(inference, providerStore);
     const roster = rosterWithAvailability(entries, []);
-    const allowed = allowedOf(enabledIds);
+    // 联合只解析一次：`allowed` 是它的 mode 投影，`enabledCount` 走它的计数
+    // （all = roster 全部；none = 0；list = roster 中真正命中的条数，过期的 id
+    // 不虚增，与 snapshot-aggregate 同一份 enabledCountOf）。
+    const allowedList = parseAllowedList(enabledIds);
     const modelCount = roster.length;
-    const allowSet = new Set(enabledIds);
     return {
       ok: true,
       enabled: resolveSwitchEnabled(panelSwitch, settings.registerProvider),
@@ -135,14 +138,8 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
       registered: publisher.state.registered === true,
       error: typeof publisher.state.error === "string" ? publisher.state.error : null,
       modelCount,
-      // 启用数：all = roster 全部；none = 0；list = roster 中真正命中的条数（按
-      // allowSet 过滤，过期的 id 不再虚增计数，与 snapshot-aggregate 口径一致）。
-      enabledCount: allowed === "all"
-        ? modelCount
-        : allowed === "none"
-          ? 0
-          : roster.filter((row) => allowSet.has(row.id)).length,
-      allowed,
+      enabledCount: enabledCountOf(allowedList, roster.map((row) => row.id)),
+      allowed: allowedList.mode,
       enabledIds,
       contextWindow,
       roster,
@@ -174,11 +171,11 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
       }
       try {
         await providerStore.save(body.enabled);
-        // 开关只决定「提不提供模型」，不决定「提供哪些」——所以用当前目录立即重
-        // 注册，而不是等下一次轮询。失败在 publish 内部回滚到上一对并落进
+        // 开关只决定「提不提供模型」，不决定「提供哪些」——落盘后触发收敛：
+        // reconciler 带**当前窗口覆盖**拉目录、按**落盘清单**重注册，不等
+        // 下一次轮询。失败在 publish 内部回滚到上一对并落进
         // publisher.state.error。
-        const entries = await readEntries(inference, providerStore);
-        await publisher.publish(entries, await readEnabledIds(providerStore, publisher.state.enabledIds), []);
+        await reconcile();
       } catch (error) {
         respondError(response, error);
         return;
@@ -206,11 +203,11 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
       }
       const ids = body.enabledIds.filter((id: unknown): id is string => typeof id === "string" && id !== "");
       try {
-        // 持久化允许清单（provider-store 具备时）；没有就先只 publish，清单随下次
-        // 重注册生效。
+        // 持久化允许清单（provider-store 具备时）；随后触发收敛——reconciler
+        // 用**落盘的**清单重注册（不是本环传进来的这份：落盘优先是
+        // resolveEnabledIds 的判据，见 provider-reconcile.ts）。
         await providerStore.saveEnabledIds?.(ids);
-        const entries = await readEntries(inference, providerStore);
-        await publisher.publish(entries, ids, []);
+        await reconcile();
       } catch (error) {
         respondError(response, error);
         return;
@@ -238,11 +235,11 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
         return;
       }
       try {
-        // 持久化覆盖（provider-store 具备时）；没有就先只 publish，覆盖随下次
-        // 重注册生效——与 roster 路由对 saveEnabledIds 的降级同一形状。
+        // 持久化覆盖（provider-store 具备时）；随后触发收敛——覆盖随本次重注册
+        // 生效（reconciler 读 desired 时把覆盖喂给 fetchModels），不再有
+        // 「先存窗口、再存清单把未打标目录注册上去」的窗口。
         await providerStore.saveContextWindow?.(body.contextWindow);
-        const entries = await readEntries(inference, providerStore);
-        await publisher.publish(entries, await readEnabledIds(providerStore, publisher.state.enabledIds), []);
+        await reconcile();
       } catch (error) {
         respondError(response, error);
         return;
@@ -266,11 +263,11 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
       await readJsonBody(request, MAX_JSON_BODY_BYTES).catch(() => ({ ok: false, error: "ignored" }));
       try {
         // 忘掉面板开关（回到 patch 默认，本插件默认 false = 不注册）并清空允许清单
-        // = 不过滤全部模型。
+        // = 不过滤全部模型。随后触发收敛：reset 的语义是「回到插件出厂设置」，
+        // 注册态必须当场反映它。
         await providerStore.forget();
         await providerStore.saveEnabledIds?.([]);
-        const entries = await readEntries(inference, providerStore);
-        await publisher.publish(entries, [], []);
+        await reconcile();
       } catch (error) {
         respondError(response, error);
         return;

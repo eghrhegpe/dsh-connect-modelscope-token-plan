@@ -86,5 +86,13 @@ export interface Wiring {
   drawStore: ReturnType<typeof import("./draw-store.ts").createFileDrawStore>;
   /** provider 注册状态机（M4 §7）：publish/dispose/release 与 state。 */
   publisher: ReturnType<typeof import("./provider-publish.ts").createProviderPublisher>;
+  /**
+   * provider 注册的 desired-state reconciler 触发口（M4 §7 的控制面收编）。
+   *
+   * 目录轮询与四条 provider 路由都只是「标记 dirty」——收敛（读 desired →
+   * 拉目录 → 复查 desired → publish）只有这一处。await 它返回的 promise 即
+   * 「本次触发已被消费，注册态已反映 desired」。
+   */
+  reconcile: () => Promise<void>;
   logger?: { warn?: (message: string, error?: unknown) => void };
 }

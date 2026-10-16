@@ -1,8 +1,10 @@
 /**
  * 决策层：把快照应答读成面板视图；wire 码 → 文案键的表。
  *
- * GUIDANCE_BY_CODE 是 Host codes.ts 的**唯一刻意副本**（浏览器无法 import
- * Host 模块）；副本被 test 钉住（每个键必须存在于 CODE），改名两边都会红。
+ * GUIDANCE_BY_CODE 的**键集以 `CodeValue` 为类型契约**（`shared/codes.ts` 的
+ * CODE 表）：Host 新增一个码而这里没跟，是编译错误——不再只靠「副本漂移两者
+ * 都会红」的测试兜底。码表本身双端同读 shared，浏览器 import Host 模块的旧
+ * 理由已随 shared/wire.ts 的运行时值一起过期。
  * @module dsh-connect-modelscope-token-plan/client/snapshot
  */
 import { format } from "./format.ts";
@@ -10,6 +12,8 @@ import type { zh } from "./i18n.ts";
 import type { Tt } from "./runtime.ts";
 import type { Snapshot, SnapshotResponse, ProviderStatus, DrawStatus } from "../shared/wire.ts";
 import { SNAPSHOT_REQUIRED_KEYS } from "../shared/wire.ts";
+import { CODE } from "../shared/codes.ts";
+import type { CodeValue } from "../shared/codes.ts";
 
 /**
  * 面板视图层的失败形状（与 wire.ts 的 `SnapshotFailure` 同名异形曾是漂移源，
@@ -22,13 +26,11 @@ export interface PanelFailure {
 }
 
 /**
- * Client 自产的稳定码（Host `codes.ts` CODE 表的同名副本，值由 panel.test
- * §2/§3c 钉住必须在 Host 表内）。唯一用途：Host 响应**无法解读成快照**时
- * 走 GUIDANCE_BY_CODE 的引导文案，而不是把裸英文串上屏。
+ * Client 自产码就是共享码表里的 `PAYLOAD_ERROR`（`shared/codes.ts`）——曾经
+ * 这里有一张 `CLIENT_CODE` 同名副本，理由是「浏览器无法 import Host 模块」；
+ * shared/ 早双端同读，副本已删。唯一用途：Host 响应**无法解读成快照**时走
+ * GUIDANCE_BY_CODE 的引导文案，而不是把裸英文串上屏。
  */
-export const CLIENT_CODE = Object.freeze({
-  PAYLOAD_ERROR: "payload_error"
-});
 
 /** (data, error) 对：恰好一边非空。 */
 export interface SnapshotRead {
@@ -114,9 +116,10 @@ export interface SnapshotView {
 export function interpretSnapshot(body: unknown): SnapshotRead {
   const payload = body as { ok?: unknown; error?: unknown; code?: unknown } | null | undefined;
   if (payload && payload.ok === false) {
-    // ok:false 的失败码由 Host 给（auth_error 等）；缺码时用 client 自产的
-    // 稳定码，消息保留 Host 原文（可能缺席——有引导文案时 message 不上屏）。
-    const code = typeof payload.code === "string" && payload.code !== "" ? payload.code : CLIENT_CODE.PAYLOAD_ERROR;
+    // ok:false 的失败码由 Host 给（auth_error 等）；缺码时用共享码表里
+    // client 自产的那个稳定码，消息保留 Host 原文（可能缺席——有引导文案时
+    // message 不上屏）。
+    const code = typeof payload.code === "string" && payload.code !== "" ? payload.code : CODE.PAYLOAD_ERROR;
     return {
       data: null,
       error: { message: typeof payload.error === "string" && payload.error !== "" ? payload.error : null, code }
@@ -125,7 +128,7 @@ export function interpretSnapshot(body: unknown): SnapshotRead {
   if (!payload || payload.ok !== true) {
     // 整个载荷不可读（非 JSON / 登录墙 HTML / 缺 ok 字段）：不猜内容，只给
     // 稳定码 + 引导文案。曾经这里是裸英文串 "unexpected payload"——i18n 泄漏。
-    return { data: null, error: { message: null, code: CLIENT_CODE.PAYLOAD_ERROR } };
+    return { data: null, error: { message: null, code: CODE.PAYLOAD_ERROR } };
   }
   const raw = payload as unknown as Record<string, unknown>;
   const missingKeys = SNAPSHOT_REQUIRED_KEYS.filter((key) => raw[key] === undefined);
@@ -266,8 +269,12 @@ export function drawOf(raw: unknown): DrawStatus {
   };
 }
 
-/** wire 码 → 文案键。副本被 test/panel.test.mjs 钉住。 */
-export const GUIDANCE_BY_CODE: Readonly<Record<string, keyof typeof zh>> = Object.freeze({
+/**
+ * wire 码 → 文案键。键集是 `CodeValue` 的**全函数**（类型即契约）：Host 码表
+ * 新增一个码而这里没跟，tsc 直接红——副本漂移从「测试兜底」升级为「编译错误」。
+ * 值仍是 Client 侧 i18n 键（文案归字典，这里只做映射）。
+ */
+export const GUIDANCE_BY_CODE: Readonly<Record<CodeValue, keyof typeof zh>> = Object.freeze({
   auth_error: "panel.authError",
   config_error: "panel.configError",
   network_error: "panel.networkError",
@@ -280,8 +287,8 @@ export const GUIDANCE_BY_CODE: Readonly<Record<string, keyof typeof zh>> = Objec
   // FORM_EXCLUDED_CODES 里，needsSetup 会算成 true——把一个内部错误引导去「配
   // 令牌」，方向完全反了。
   internal_error: "panel.internalError",
-  // Client 自产码（CLIENT_CODE，Host codes.ts 表内同名值）：响应无法解读成
-  // 快照时的引导文案，替代曾经上屏的裸英文 "unexpected payload"。
+  // Client 自产码（共享码表的 PAYLOAD_ERROR）：响应无法解读成快照时的引导
+  // 文案，替代曾经上屏的裸英文 "unexpected payload"。
   payload_error: "panel.payloadError"
 });
 
@@ -308,7 +315,8 @@ export function viewOf(
     ? null
     : typeof error === "string" ? { message: error, code: null } : error;
   const needsSetup = data === null && !FORM_EXCLUDED_CODES.has((failure?.code ?? null) as string);
-  const guidanceKey = failure === null ? null : GUIDANCE_BY_CODE[failure.code as string] ?? null;
+  // 未知码（Host 给了表外字符串）查不到引导 → null：面板走通用失败行，不假装认识。
+  const guidanceKey = failure === null ? null : GUIDANCE_BY_CODE[failure.code as CodeValue] ?? null;
   const guidance = guidanceKey === null
     ? null
     : guidanceKey === "panel.configError"

@@ -285,23 +285,36 @@ for (const suffix of new Set(clientSuffixes)) {
   }
 }
 
-// §6c 哨兵字面量双端一致。`__hide_all__` 在 host/llm-models.ts 与
-// client/const.ts 各有一份拷贝——浏览器 bundle 无法从 host 模块 import，
-// 两份是设计意图（见 const.ts:35-38 的警告）。但它与路由路径不同：路由有
-// §6/§6b 双向钉住，哨兵一直只有 host 侧被 provider.test.mjs:28 钉死字面值，
-// client 侧零断言。改坏 client 那一份，npm test 全绿，而效果是「点全部隐藏」
-// 被当成普通模型 id 发给 filterByEnabled——匹配不到任何真实模型，「全部隐藏」
-// 静默变成「全部提供」。
+// §6c 哨兵字面量单一真源。`__hide_all__` 曾经在 host/llm-models.ts 与
+// client/const.ts 各有一份拷贝（理由是「浏览器 bundle 无法 import host 模块」）——
+// 该理由已过期：shared/ 模块双端都在 import。现在字面量只住 shared/wire.ts
+// 一处，两侧再导出。本节钉住三件事：① src 里只有一处定义；② 双端再导出的
+// 是同一个值（运行时相等）；③ 构建产物里字面量只出现一次（bundle 没夹带
+// 第二份）。改出第二份定义，本节红。
 {
-  const hostLlm = readFileSync(new URL("../src/host/llm-models.ts", import.meta.url), "utf8");
-  const clientConst = readFileSync(new URL("../src/client/const.ts", import.meta.url), "utf8");
-  const sentinelOf = (src) => (src.match(/HIDE_ALL_MODELS\s*=\s*"([^"]+)"/) ?? [])[1];
-  const hostSentinel = sentinelOf(hostLlm);
-  const clientSentinel = sentinelOf(clientConst);
-  assert.equal(typeof hostSentinel, "string", "host/llm-models.ts 必须定义 HIDE_ALL_MODELS");
-  assert.equal(typeof clientSentinel, "string", "client/const.ts 必须定义 HIDE_ALL_MODELS");
-  assert.equal(clientSentinel, hostSentinel,
-    `双端哨兵必须同字面量：host="${hostSentinel}" client="${clientSentinel}"`);
+  const srcFiles = ["shared/wire.ts", "host/llm-models.ts", "client/const.ts"]
+    .map((rel) => [rel, readFileSync(new URL(`../src/${rel}`, import.meta.url), "utf8")]);
+  const definitions = srcFiles.filter(([, src]) => /HIDE_ALL_MODELS\s*=\s*"/.test(src)).map(([rel]) => rel);
+  assert.deepEqual(definitions, ["shared/wire.ts"],
+    `HIDE_ALL_MODELS 只允许在 shared/wire.ts 定义一次，实际定义在：${definitions.join(", ")}`);
+  for (const rel of ["host/llm-models.ts", "client/const.ts"]) {
+    const src = srcFiles.find(([r]) => r === rel)[1];
+    assert.match(src, /export\s*\{\s*HIDE_ALL_MODELS\s*\}\s*from\s*"\.\.\/shared\/wire\.ts"/,
+      `${rel} 必须从 shared/wire.ts 再导出哨兵，而不是本地定义`);
+  }
+  // 运行时相等：双端再导出指向同一个模块实例。
+  const shared = await import("../src/shared/wire.ts");
+  const hostLlmModels = await import("../src/host/llm-models.ts");
+  assert.equal(hostLlmModels.HIDE_ALL_MODELS, shared.HIDE_ALL_MODELS, "host 侧再导出的必须是 shared 的那个值");
+  assert.equal(shared.HIDE_ALL_MODELS, "__hide_all__", "哨兵字面量被改动");
+  // 产物只夹带一份**定义**：bundle 里 rolldown 会把常量内联到引用点（字面量
+  // 计数因此不可靠），但定义式 `HIDE_ALL_MODELS = "__hide_all__"` 只允许出现
+  // 一次——第二次就是第二份副本进了 bundle，「点全部隐藏静默变成全部提供」的
+  // 回归入口。
+  const bundle = readFileSync(new URL("../client.js", import.meta.url), "utf8");
+  const definitionCount = bundle.split('HIDE_ALL_MODELS = "__hide_all__"').length - 1;
+  assert.equal(definitionCount, 1,
+    `client.js 里 HIDE_ALL_MODELS 定义应只出现 1 次（shared 单一定义），实际 ${definitionCount} 次`);
 }
 
 // §6d locale 文件 key 集合一致。i18n.ts 的运行时字典（zh/en 各 85 键）由

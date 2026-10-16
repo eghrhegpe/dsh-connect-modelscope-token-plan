@@ -209,4 +209,49 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由已注册");
   assert.equal(res.headers["cache-control"], "no-store", "错误响应不得被缓存");
 }
 
+// ── 端到端：保存开关 → 收敛 → registerAdapter 真的落地 ──
+//
+// 上面各节的 `registered:false` 有一个盲区：没有 llm 服务时，reconcile 哪怕
+// 整个变 no-op，断言也全绿。本节把两条缝都接上（ctx 提供 llm 服务、deps 提供
+// 适配器工厂缝），钉住收编后的完整链路：路由保存 → 标记 dirty → 收敛 →
+// publisher 注册进 Host。这是「双驱动收编」在路由层的验收。
+{
+  const adapters = new Map();
+  const llmService = {
+    registerAdapter(providerIds, adapter) {
+      for (const p of providerIds) adapters.set(p, adapter);
+      return () => { for (const p of providerIds) adapters.delete(p); };
+    }
+  };
+  const handlers2 = new Map();
+  apply({
+    get: (service) => (service === "llm" ? llmService : service === "credentials" ? credentialsService : undefined),
+    logger: { warn: () => {} },
+    effect: () => {},
+    webServer: {
+      register({ path, handler }) { handlers2.set(path, handler); return () => handlers2.delete(path); }
+    }
+  }, {}, {
+    env: {},
+    loadAdapterModule: async () => ({
+      createModelScopeAdapter: async () => ({ adapter: { tag: "e2e" }, providerIds: ["modelscope-token-plan"] })
+    })
+  });
+  currentFetch = async () => new Response(JSON.stringify({
+    object: "list",
+    data: [{ id: "Qwen/Qwen3.5-35B-A3B" }]
+  }), { status: 200, headers: { "content-type": "application/json" } });
+
+  const res = await call(handlers2, PROVIDER_PATH, makeReq("POST", { body: { enabled: true } }));
+  assert.equal(res.body.ok, true);
+  assert.equal(res.body.enabled, true, "面板保存值优先");
+  assert.equal(res.body.registered, true, "保存开关 → 收敛 → registerAdapter 必须真的落地（reconcile 变 no-op 这里就红）");
+  assert.ok(adapters.has("modelscope-token-plan"), "假 Host 的注册表里必须出现适配器");
+
+  // 关回去：收敛同样要真的摘掉。
+  const off = await call(handlers2, PROVIDER_PATH, makeReq("POST", { body: { enabled: false } }));
+  assert.equal(off.body.registered, false, "关开关 → 收敛 → 注销");
+  assert.equal(adapters.has("modelscope-token-plan"), false, "假 Host 的注册表必须摘干净");
+}
+
 console.log("provider-routes.test.mjs: all checks passed");

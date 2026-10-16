@@ -128,6 +128,11 @@ deps 增加 `usage?: UsageSinks` 并透传给工厂 → `index.ts` 把上面那�
   （**纯内存，重启即空**）当允许清单，而 `provider-store` 其实**已落盘**该清单。改为
   `runPoll()`：拉目录后从 `providerStore.enabledIds()` 读落盘清单（读不到回退内存），再
   `publish`；挂载时立即 `runPoll()` 取代原来的空`publish([], [], [])` seed。
+  **（2026-10-17 更新）**：该轮询已收编为 `src/host/provider-reconcile.ts` 的
+  desired-state 收敛环——读 desired（开关/清单/窗口覆盖）→ 带覆盖拉目录 →
+  复查 desired（fetch 期间被改就原地重跑，不再「跳过本轮等下一个 pollSeconds」）→
+  publish。目录轮询与四条 provider 路由现在都只是触发这同一条链；判据
+  （`resolveEnabledIds`）与「落盘优先」语义不变，fetch 失败也不再发布空目录。
 - **轮询签名空转从未接线**：`provider-publish.ts` 注释声称「按 `catalogSignature` 比对，未变则
   空转」，但 `publishProviderOnce` 从不做比较——于是每 30s 轮询都**完整摘下再挂上同一个
   provider 对**，期间在途请求可能被打断。修法：`catalogSignature` 扩展到覆盖 `name` /
