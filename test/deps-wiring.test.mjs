@@ -155,4 +155,106 @@ function allSources() {
   assert.equal(res.body.token.present, true, "注入的凭据服务给出的令牌应当被快照看见");
 }
 
+// ── §3 轮询带窗口覆盖（回归：runPoll 曾无参调 fetchModels → 覆盖每轮振荡回退）──
+//
+// 修复前：用户存 256K → 路由 publish 打标条目（签名 S_marked）→ 下一轮 poll 用
+// 未打标条目（S_unmarked）→ catalogSignature 含窗口值，签名不同 → 摘下重挂——
+// 覆盖每 pollSeconds 静默回退一次，适配器每轮重建。这里把带覆盖的 provider.json
+// 落进本测试的 DSH_HOME，断言**轮询 publish 出去的 descriptor** 真带着覆盖窗口。
+{
+  const writeFile = (await import("node:fs/promises")).writeFile;
+  const { mkdir } = await import("node:fs/promises");
+  const pluginStateDir = join(process.env.DSH_HOME, "state", "dsh-connect-modelscope-token-plan");
+  await mkdir(pluginStateDir, { recursive: true });
+  // Qwen/Qwen3-Coder：目录不声明窗口、策展表也不收（§3 只测覆盖路径）。
+  await writeFile(
+    join(pluginStateDir, "provider.json"),
+    JSON.stringify({ version: 1, enabled: true, enabledIds: null, contextWindow: 262144 })
+  );
+
+  const cleanups = [];
+  const warns = [];
+  const makeCtx = (extra = {}) => ({
+    get: () => undefined,
+    emit: () => {},
+    logger: { warn: (m) => { warns.push(m); } },
+    effect: (fn) => { const off = fn(); if (typeof off === "function") cleanups.push(off); },
+    webServer: { register: () => () => {} },
+    ...extra
+  });
+
+  const MODEL_LIST = JSON.stringify({ object: "list", data: [{ id: "Qwen/Qwen3-Coder" }] });
+  const fetchImpl = async (url) =>
+    String(url).includes("/models")
+      ? new Response(MODEL_LIST, { status: 200, headers: { "content-type": "application/json" } })
+      : new Response("{}", { status: 401 });
+
+  /**
+   * publish 链的真值取自**适配器工厂收到的条目**——这正是「带覆盖打标」能否走到
+   * 注册的最上游观测点：runPoll 若无参 fetchModels，条目就落 128k 兜底，此断言红。
+   * 假模块替代真 llm-adapter（其 peer 只在 Host 进程存在，测试进程 import 必败），
+   * 但 descriptor 由**真 buildDescriptors** 造（跑真的 llm-models.ts），保证断言
+   * 测的是生产映射逻辑而非测试自画的形状。
+   */
+  let publishedEntries = null;
+  let registered = false;
+  const { buildDescriptors } = await import("../src/host/llm-models.ts");
+
+  const session = apply(
+    makeCtx(),
+    { registerProvider: true },
+    {
+      getLlm: () => ({
+        registerAdapter: () => {
+          registered = true;
+          return () => {};
+        },
+        registerConfigurableProviders: () => () => {}
+      }),
+      credentials: {
+        async resolve() { return { value: "ms-0123456789abcdef0123456789abcdef" }; },
+        async set() {},
+        async unset() {}
+      },
+      fetchImpl,
+      env: {},
+      loadAdapterModule: async () => ({
+        createModelScopeAdapter: ({ entries }) => {
+          publishedEntries = entries;
+          const models = buildDescriptors(entries, {
+            providerId: "modelscope-token-plan",
+            baseUrl: "https://api-inference.modelscope.cn/v1",
+            enabledIds: null,
+            unavailableModelIds: []
+          });
+          return {
+            adapter: {
+              getModels: () => models,
+              providerId: "modelscope-token-plan",
+              resolveCredential: async () => "ms-0123456789abcdef0123456789abcdef"
+            },
+            providerIds: ["modelscope-token-plan"]
+          };
+        }
+      })
+    }
+  );
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  for (const off of cleanups.splice(0)) off();
+
+  assert.ok(registered, "挂载轮询（M4 seed）必须真的走完 publish → registerAdapter");
+  assert.ok(Array.isArray(publishedEntries) && publishedEntries.length > 0, "适配器工厂必须收到目录条目");
+  const entry = publishedEntries.find((e) => e?.id === "Qwen/Qwen3-Coder");
+  assert.ok(entry, "目录里的模型必须原样进工厂");
+  assert.equal(entry.contextWindow, 262144, "轮询 publish 的条目必须带落盘的窗口覆盖（修复前无参 fetchModels → 每轮回退 128k）");
+  // 再往下游走一步：descriptor（真正注册进 Host 的形状）同样带覆盖。
+  const models = buildDescriptors(publishedEntries, {
+    providerId: "modelscope-token-plan",
+    baseUrl: "https://api-inference.modelscope.cn/v1",
+    enabledIds: null,
+    unavailableModelIds: []
+  });
+  assert.equal(models[0].contextWindow, 262144, "注册 descriptor 的 contextWindow 必须是覆盖值");
+}
+
 console.log("deps-wiring.test.mjs: all checks passed");

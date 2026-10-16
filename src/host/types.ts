@@ -44,6 +44,14 @@ export interface HostDeps {
   /** 出图的 fetch 缝；缺省全局 `fetch`。同样**实际在用**。 */
   drawFetch?: (url: string, options: object) => Promise<unknown>;
   /**
+   * provider 适配器工厂模块的加载缝（publisher 的 `loadAdapterModule`，缺省真
+   * `import("./llm-adapter.ts")`）。真模块 import 的 peer（`@deepseek-ai/dsh-llm-pi-ai`）
+   * 只在 Host 进程里存在，离线测试进程加载必败——测试注入假模块（返回
+   * `{ createModelScopeAdapter }`）才能驱动完整 publish 链。此前只是 publisher 的
+   * deps 缝，没接到 HostDeps，注入到不了位。
+   */
+  loadAdapterModule?: () => Promise<object>;
+  /**
    * 令牌读取的**环境源**缝（缺省走 `process.env`）。
    *
    * 存在的理由是一只具体的鬼（2026-10-16 实测）：默认的 `process.env` 让测试

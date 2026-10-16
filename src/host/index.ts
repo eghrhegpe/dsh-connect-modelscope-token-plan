@@ -108,6 +108,10 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
       recordEvent: (input) => usageStore.recordEvent(input).catch(() => {})
     },
     emit: deps.emit ?? ((event: string) => ctx.emit?.(event)),
+    // 离线测试的适配器模块缝（§ deps-wiring）：真模块 import 的 peer 只在 Host
+    // 进程存在，测试进程必败——接通这根线，注入才能到 publisher。条件展开而非
+    // 直传：exactOptionalPropertyTypes 下 `| undefined` 不满足可选属性。
+    ...(deps.loadAdapterModule ? { loadAdapterModule: deps.loadAdapterModule } : {}),
     logger: ctx.logger
   });
 
@@ -132,9 +136,15 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   /**
    * 一次目录轮询：拉目录，再 publish 当前 offer。
    *
-   * 清单在 `fetchModels()` **之后**读（不是之前）——目录拉取可能耗时数百毫秒，
-   * 期间用户可能保存了新清单；读放在 fetch 之后、publish 之前，能捕获这段窗口
-   * 内的编辑。这是刻意的顺序，不是疏忽。
+   * **窗口覆盖必须参与**：catalogSignature 含窗口值，轮询若用未打标条目 publish，
+   * 用户保存覆盖后的每次轮询都会因「签名不同」把注册摘下重挂（覆盖每 pollSeconds
+   * 静默回退一次、适配器每轮重建）。所以 fetch **前**先读落盘覆盖传给 fetchModels，
+   * 与 `currentEnabledIds` 同一模式。
+   *
+   * fetch **后**再读一次：目录拉取可能耗时数百毫秒，期间用户可能保存了新覆盖——
+   * 保存路由已经用新值 publish 过，此时用旧标条目 publish 反而把注册**倒退**一个
+   * 周期；这种窗口内跳过本轮即可（下一轮轮询自然带新值）。清单沿用 fetch 后读的
+   * 老顺序（捕获 fetch 期间的编辑），两条时序理由同源。
    * @returns {Promise<void>}
    */
   const runPoll = async (): Promise<void> => {
@@ -144,15 +154,19 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     // 记：「目录拉到了但注册失败」与「目录根本没拉到」对操作员是完全不同的处置，
     // 合成一条 "poll failed" 就把可诊断信息抹掉了。
     // 脱敏在收口处做（与 snapshot-aggregate 的 soft() 同一纪律），不靠上游自觉。
+    const contextWindow = await providerStore.contextWindow().catch(() => null);
     let catalog: Awaited<ReturnType<typeof inference.fetchModels>> | null = null;
     try {
-      catalog = await inference.fetchModels();
+      catalog = await inference.fetchModels(contextWindow);
     } catch (error) {
       ctx.logger?.warn?.(
         `${name}: catalog fetch failed (${redactSecrets(errMsg(error))}) — the next poll retries; the panel keeps its degraded models block`
       );
       return;
     }
+    // fetch 期间覆盖被改 → 本轮条目带着旧标：publish 会把刚保存的新值倒退回去，
+    // 跳过（保存路由已 publish 过正确值；普通轮询 contextWindow 与此刻一致）。
+    if ((await providerStore.contextWindow().catch(() => null)) !== contextWindow) return;
     try {
       await publisher.publish(catalog.entries, await currentEnabledIds(), []);
     } catch (error) {

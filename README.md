@@ -29,7 +29,7 @@ tools registry 没有 unregister）。实测协议（异步两段式、必需头
 就用目录值（不受任何下层影响）；用户在这里选一个档位即对**目录没声明窗口的模型**
 全局生效，保存即重注册；**用户没设覆盖时**，插件查内置策展表（`context-catalog.ts`，
 来自 models.dev 各厂 host 交叉比对的同 id 主流窗口，2026-10-16 核对，含 DeepSeek-V4
-全系 1M、Qwen3.5/Qwen3.8-27B/Step 3.x 256K、GLM-5.2 1M 等 22 个当前目录 id）；
+全系 1M、Qwen3.5/Qwen3.8-27B/Step 3.x 256K、GLM-5.2 1M 等 19 个当前目录 id）；
 表里也没有的模型才落 128K 兜底。档位落盘在 `provider.json` 的 `contextWindow` 键
 （v1 形状的新增可选键，旧构建宽容读），roster 每行会标出该模型当前生效的窗口——
 策展表来的值带 `*` 号与悬停说明（平台未亲口声明），与目录声明/用户覆盖区分。
