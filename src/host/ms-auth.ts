@@ -93,6 +93,35 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
     return value ?? null;
   };
 
+  /**
+   * 解析当前令牌与来源（实现体）。
+   *
+   * 提成局部函数而不是只做返回对象上的方法：`state()` 也要走同一条路，而方法里
+   * 调 `this.resolve()` 是一个**解构即崩**的 footgun——`const { state } =
+   * createTokenStore(...)` 之后 `this` 是 undefined，调用直接 TypeError。当前
+   * 调用点都规规矩矩用方法调用所以没炸，但那是运气，不是设计。返回类型显式
+   * 注解：这是快照 TokenStatus.source 联合类型的上游，靠推断会把字面量联合
+   * 拓宽成 string。
+   * @returns {Promise<{value: string, source: ("credentials"|"memory"|"env"|null)}>}
+   */
+  const resolveToken = async (): Promise<{ value: string; source: "credentials" | "memory" | "env" | null }> => {
+    try {
+      const service = resolveService();
+      if (service !== null && typeof service.resolve === "function") {
+        const resolved = await service.resolve(TOKEN_REF).catch(() => undefined);
+        const value = verbatim(resolved?.value, "");
+        if (typeof value === "string" && value.trim() !== "") return { value, source: "credentials" };
+      }
+    } catch {
+      // 服务不可用：落回内存/env。
+    }
+    const held = memory.get(TOKEN_REF);
+    if (typeof held === "string" && held.trim() !== "") return { value: held, source: "memory" };
+    const fromEnv = verbatim(env[TOKEN_REF], "");
+    if (typeof fromEnv === "string" && fromEnv.trim() !== "") return { value: fromEnv, source: "env" };
+    return { value: "", source: null };
+  };
+
   return {
     /**
      * 把面板输入的令牌存成引用；原样存（不 trim），空白值视为没输入。
@@ -163,26 +192,11 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
     },
 
     /**
-     * 解析当前令牌与来源。返回类型显式注解：这是快照 TokenStatus.source
-     * 联合类型的上游，靠推断会把字面量联合拓宽成 string。
+     * 解析当前令牌与来源。
      * @returns {Promise<{value: string, source: ("credentials"|"memory"|"env"|null)}>}
      */
     async resolve(): Promise<{ value: string; source: "credentials" | "memory" | "env" | null }> {
-      try {
-        const service = resolveService();
-        if (service !== null && typeof service.resolve === "function") {
-          const resolved = await service.resolve(TOKEN_REF).catch(() => undefined);
-          const value = verbatim(resolved?.value, "");
-          if (typeof value === "string" && value.trim() !== "") return { value, source: "credentials" };
-        }
-      } catch {
-        // 服务不可用：落回内存/env。
-      }
-      const held = memory.get(TOKEN_REF);
-      if (typeof held === "string" && held.trim() !== "") return { value: held, source: "memory" };
-      const fromEnv = verbatim(env[TOKEN_REF], "");
-      if (typeof fromEnv === "string" && fromEnv.trim() !== "") return { value: fromEnv, source: "env" };
-      return { value: "", source: null };
+      return resolveToken();
     },
 
     /**
@@ -200,7 +214,9 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
      * `memory` 才真的只在本次进程存活期间存在。
      */
     async state(): Promise<TokenStatus> {
-      const { source } = await this.resolve();
+      // 调局部 resolveToken()，不调 this.resolve()——这个方法被解构传出去时
+      // `this` 是 undefined（见 resolveToken 的注释）。
+      const { source } = await resolveToken();
       return {
         present: source !== null,
         source: source === null ? "none" : source,

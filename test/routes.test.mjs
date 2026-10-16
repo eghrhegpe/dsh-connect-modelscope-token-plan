@@ -491,6 +491,14 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
       fetchBalance: async () => { throw new Error("balance endpoint refused"); }
     },
     providerStore: { enabled: async () => null, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
+    // draw.json 的 versionNote 也必须进 shapeWarnings（2026-10-17 补的读侧另一半：
+    // 未知版本宽容读作「没设过」，不说出口就是「从未保存过」，而回退方向是
+    // patch 默认——通常=关）。
+    drawStore: {
+      enabled: async () => null,
+      modelId: async () => null,
+      versionNote: async () => "draw-state: draw.json holds version 99, which this build cannot read"
+    },
     publisher: { state: { enabledIds: [], llmAvailable: false, registered: false, error: null } },
     logger: { warn: () => {} }
   });
@@ -501,6 +509,10 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   assert.notEqual(body.balance.error, null, "令牌状态读不到时不得把余额错误压成 null（我们并不知道有没有令牌）");
   assert.ok(body.shapeWarnings.some((w) => w.startsWith("token source failed")), "警告按来源标注（token 不是「用量源」）");
   assert.ok(body.shapeWarnings.some((w) => w.startsWith("daily source failed")), "警告按来源标注");
+  assert.ok(
+    body.shapeWarnings.some((w) => w.startsWith("draw-state:")),
+    "draw.json 的版本说明必须进 shapeWarnings（provider 的那半同一条纪律）"
+  );
 }
 
 // ── 同一条语义，用**真实挂载的插件**再钉一次 ──

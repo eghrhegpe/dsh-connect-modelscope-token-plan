@@ -40,10 +40,10 @@
  *
  * @module dsh-connect-modelscope-token-plan/provider-store
  */
-import { obj, degrade, errMsg, redactSecrets } from "./util.ts";
+import { obj } from "./util.ts";
 import { join } from "node:path";
 import { name } from "./host-config.ts";
-import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, readStateVersion, isKnownStateVersion, createStateReadCache, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
+import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, createStateReadCache, guardStateWrite, stateVersionNote, createStateWriteQueue, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
 
 /** The store's constructor options (declared here; `types.ts` carries none). */
 interface StoreOptions {
@@ -235,31 +235,19 @@ export function createFileProviderStore(options: StoreOptions = {}) {
    * read. An unknown NUMERIC version means a NEWER build wrote it; clobbering
    * it destroys data we cannot even see. So the write is refused with a
    * `degrade` signal, not a silent no-op — swallow the failure, not the reason.
+   * The guard itself lives in `state-store.ts` ({@link guardStateWrite}) — it is
+   * the same promise draw-store makes, and two copies of "what may be
+   * overwritten" is one copy too many.
    * @param {object} body - the JSON body to persist.
    * @returns {Promise<string|null>} the refusal reason when the write was
    *   refused (already `degrade`-logged), or `null` when it landed — the caller
    *   decides whether to surface the refusal to a user.
    */
   const writePayload = async (body: object): Promise<string | null> => {
-    let existing: number | null;
-    try {
-      existing = await readStateVersion(filePath);
-    } catch (error) {
-      // 文件在那儿却读不出来（EACCES/EBUSY/EIO）：正是本守卫要拦的那类覆盖。
-      // `readStateVersion` 只把 ENOENT 读作「没有文件」，其余 fs 错误一律抛出来，
-      // 这里据此拒写——「读不到」不等于「没有东西要保护」。
-      const reason = `provider: refusing to overwrite provider.json (cannot read it: ${redactSecrets(errMsg(error))})`;
-      degrade(reason, null, logger, null);
-      return reason;
-    }
-    if (!isKnownStateVersion(existing, KNOWN_PROVIDER_VERSIONS)) {
-      const reason = `provider: refusing to overwrite provider.json holding version ${existing} (this build knows ${KNOWN_PROVIDER_VERSIONS.join("/")})`;
-      degrade(reason, null, logger, null);
-      return reason;
-    }
-    const temporary = temporaryOf(stateDir, "provider.json");
+    const refusal = await guardStateWrite(filePath, KNOWN_PROVIDER_VERSIONS, { label: "provider", logger });
+    if (refusal !== null) return refusal;
     await ensureStateDir(stateDir);
-    await writeStateFile(filePath, JSON.stringify(body, null, 2), { temporary });
+    await writeStateFile(filePath, JSON.stringify(body, null, 2), { temporary: temporaryOf(stateDir, "provider.json") });
     return null;
   };
 
@@ -307,8 +295,11 @@ export function createFileProviderStore(options: StoreOptions = {}) {
   const parsePayloadFrom = async (file: string): Promise<ProviderPayload> => parseAt(file);
 
   // The write chain. Declared BEFORE the cache so the cache's read-through (which
-  // queues the legacy adoption onto it) refers only to things above it.
-  let writeChain: Promise<string | null> = Promise.resolve(null);
+  // queues the legacy adoption onto it) refers only to things above it. The
+  // queue itself lives in `state-store.ts` ({@link createStateWriteQueue}) —
+  // usage / draw run the same shape, and a fourth hand-written copy is how this
+  // module's own header says the drift got in.
+  const writeQueue = createStateWriteQueue();
 
   // Short-TTL read cache over the WHOLE payload: "someone else edited this
   // file" must become visible here within a tick, not after a restart, but one
@@ -340,10 +331,7 @@ export function createFileProviderStore(options: StoreOptions = {}) {
       ...(legacy.enabledIds === null ? {} : { enabledIds: legacy.enabledIds }),
       updatedAt: new Date().toISOString()
     };
-    await writeChain.then(
-      () => writePayload(inherited).then(() => undefined, () => undefined),
-      () => writePayload(inherited).then(() => undefined, () => undefined)
-    );
+    await writeQueue.enqueue(() => writePayload(inherited).then(() => undefined, () => undefined));
     return legacy;
   }, { ttlMs });
   const read = () => cache.read();
@@ -391,7 +379,7 @@ export function createFileProviderStore(options: StoreOptions = {}) {
    * @returns {Promise<string|null>} the write refusal reason, or `null`.
    */
   const patchPayload = (patch: { enabled?: boolean | null; enabledIds?: string[] | null; contextWindow?: number | null }): Promise<string | null> => {
-    const run = writeChain.then(async () => {
+    return writeQueue.enqueue(async () => {
       const current = await parsePayload();
       /** `undefined` keeps the stored key; `null` clears it (key absent). */
       const body: Record<string, unknown> = { version: PROVIDER_VERSION };
@@ -406,8 +394,6 @@ export function createFileProviderStore(options: StoreOptions = {}) {
       if (refusal === null) cache.remember({ enabled, enabledIds, contextWindow, version: PROVIDER_VERSION });
       return refusal;
     });
-    writeChain = run.catch(() => null);
-    return run;
   };
 
   return {
@@ -467,13 +453,18 @@ export function createFileProviderStore(options: StoreOptions = {}) {
       // The predicate alone cannot say that, and it must not — the write side
       // reads `null` as "no file, a write belongs" (see isKnownStateVersion).
       if (version === null || isKnownProviderVersion(version)) return null;
-      return (
-        `provider-state: provider.json holds version ${version}, which this build cannot read` +
-        ` (this build knows ${KNOWN_PROVIDER_VERSIONS.join("/")}); the saved switch and allow-list` +
-        ` are being answered as "not set", so the allow-list reads as "no filter, offer every model"` +
-        ` while the switch falls back to the config default. Upgrade this build to see the saved values,` +
-        " or delete the file to reset them."
-      );
+      // 消息骨架在 state-store（{@link stateVersionNote}）：draw-store 说的是
+      // 同一件事，两份文案只会漂。store 特有的只有 consequence 那半句。
+      return stateVersionNote({
+        label: "provider-state",
+        file: filePath,
+        version,
+        known: KNOWN_PROVIDER_VERSIONS,
+        consequence:
+          "the saved switch and allow-list are being answered as \"not set\"," +
+          " so the allow-list reads as \"no filter, offer every model\"" +
+          " while the switch falls back to the config default."
+      });
     },
     /**
      * Persist a switch value. The write is atomic (temp file + rename) so a

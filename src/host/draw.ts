@@ -23,8 +23,16 @@
  *    空串，没有顶层 `message`。任何「从错误里读出原因」的承诺都是编造——本模块的
  *    `describeDrawFailure` 因此**明确承认原因不可知**，只报可确定的形态差异。
  *
+ * 关于两个小工具（`str` / `redactSecrets`）：它们曾以**本地私有副本**的形式活在
+ * 本文件里，理由是「避免为 3 行代码引 util 的依赖面」。那条理由不成立——util.ts
+ * 自己只有 type-only import（peer-free），同包的 `draw-runtime.ts` 早就 import 它；
+ * 而私有副本已经漂移：脱敏正则少了 `sk-` 与密码键值对两组、`ms-` 的 charset 与
+ * util 版不一致（`[A-Za-z0-9-]` vs `[0-9a-f-]`）——脱敏闸漏一条就是凭据外泄
+ * （红线 1）。现在一律用 util 的单一副本。
+ *
  * @module dsh-connect-modelscope-token-plan/draw
  */
+import { redactSecrets, str } from "./util.ts";
 
 /**
  * 出图请求的截止时间（墙钟毫秒）。
@@ -236,17 +244,17 @@ export function buildDrawBody(options: {
   negativePrompt?: string;
   loras?: string | Record<string, number>;
 }) {
-  const model = strOrEmpty(options.model);
-  const prompt = strOrEmpty(options.prompt);
+  const model = str(options.model, "");
+  const prompt = str(options.prompt, "");
   const body: Record<string, unknown> = { model, prompt };
   const imageUrl = normalizeImageUrlList(options.imageUrl);
   if (imageUrl.length > 0) body.image_url = imageUrl;
-  const size = strOrEmpty(options.size);
+  const size = str(options.size, "");
   if (size !== "") body.size = size;
   if (Number.isFinite(options.steps)) body.steps = options.steps;
   if (Number.isFinite(options.guidance)) body.guidance = options.guidance;
   if (Number.isFinite(options.seed)) body.seed = options.seed;
-  const negativePrompt = strOrEmpty(options.negativePrompt);
+  const negativePrompt = str(options.negativePrompt, "");
   if (negativePrompt !== "") body.negative_prompt = negativePrompt;
   const loras = options.loras;
   if (typeof loras === "string" && loras.trim() !== "") {
@@ -334,10 +342,10 @@ export function describeDrawFailure(failure: {
     return `出图失败：HTTP ${status} —— 上游服务异常，稍后重试${tail}`;
   }
 
-  const cause = strOrEmpty(failure.cause);
+  const cause = str(failure.cause, "");
   if (cause !== "") return `出图失败：${cause}${tail}`;
 
-  const taskStatus = strOrEmpty(failure.taskStatus);
+  const taskStatus = str(failure.taskStatus, "");
   if (taskStatus === "FAILED") {
     // 实测形态：errors.code=0、message 为空串，没有顶层 message。诚实报「未知」。
     return "出图失败：上游任务 FAILED，但未给出失败原因（实测 errors.code=0、message 为空），换模型或稍后重试";
@@ -386,17 +394,4 @@ export function expectedPollCount(timeoutMs = DRAW_TIMEOUT_MS, intervalMs = DRAW
   const span = Math.max(1, Math.floor(timeoutMs));
   const step = Math.max(1, Math.floor(intervalMs));
   return Math.max(1, Math.ceil(span / step));
-}
-
-/** 读一个字符串，否则空串（本地化的小工具，避免为 3 行代码再引 util 的依赖面）。 */
-function strOrEmpty(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-/** 凭据脱敏：出图失败消息可能带上游回显的 body，令牌不能随它进日志或面板。 */
-function redactSecrets(text: string): string {
-  return text
-    .replace(/(["']?[Aa]uthorization["']?\s*[:=]\s*["']?)(?!Bearer\s)[^"',;\s]+/g, "$1[REDACTED]")
-    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 [REDACTED]")
-    .replace(/\bms-[A-Za-z0-9-]{16,}/g, "ms-[REDACTED]");
 }

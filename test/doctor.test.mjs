@@ -1,11 +1,13 @@
-// doctor 行为测试：注入 DSH_HOME 到临时目录，覆盖布局发现、usage.json 速览、
-// 损坏/未知版本症状、env 令牌在场性，以及「令牌值绝不进任何输出」的红线。
+// doctor 行为测试：注入 DSH_HOME 到临时目录，覆盖布局发现、usage.json /
+// provider.json / draw.json 三个状态文件的速览、损坏/未知版本症状、env 令牌
+// 在场性，以及「令牌值绝不进任何输出」的红线。
 import { strict as assert } from "node:assert";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { diagnose, renderReport, hintFor, SYMPTOM } from "../src/host/doctor.ts";
 import { describeProviderPayload } from "../src/host/provider-store.ts";
+import { describeDrawPayload } from "../src/host/draw-store.ts";
 import { PLUGIN_ID } from "../src/shared/wire.ts";
 
 const home = mkdtempSync(join(tmpdir(), "ms-doctor-"));
@@ -154,6 +156,77 @@ writeFileSync(join(dir, "provider.json"), "{not json", "utf8");
   );
   assert.equal(describeProviderPayload({ version: 1, enabled: "yes" }).enabled, null, "非布尔 enabled 归一化为未设置");
   assert.equal(describeProviderPayload({ version: 2, enabled: true }).versionKnown, false, "能解析但版本未知");
+}
+
+// ── §12 draw.json 速览：开关三态 + 模型偏好，三份文件都合法 → 零症状。 ──
+//
+// draw.json 是 v0.2 之后新增的第三个状态文件（出图工具的开关与模型偏好）。
+// 它曾经完全不在 doctor 射程内——文件头写着「没有 draw 三件套」，而 draw-store
+// 早就落盘了：损坏或由更新构建写入的 draw.json 没有任何诊断能报。2026-10-17 补上。
+// （§10 把 provider.json 留在损坏状态，先恢复合法，这一节要断言「三份都合法」。）
+writeFileSync(join(dir, "provider.json"), JSON.stringify({ version: 1, enabledIds: [] }));
+writeFileSync(join(dir, "draw.json"), JSON.stringify({ version: 1, enabled: true, modelId: "MusePublic/Qwen-Image-Edit" }));
+{
+  const report = await diagnose({ dshHome: home });
+  const scope = report.scopes[0];
+  assert.equal(scope.draw === null, false, "draw.json 在场必须有速览");
+  assert.equal(scope.draw.enabled, true, "保存的 true 必须与「未设置」分开");
+  assert.equal(scope.draw.modelId, "MusePublic/Qwen-Image-Edit", "模型偏好回显保存的 id");
+  assert.equal(scope.draw.versionKnown, true);
+  assert.equal(scope.unreadable.length, 0, "三份文件都合法 → 零 unreadable");
+  assert.equal(report.symptoms.length, 0);
+  const rendered = renderReport(report);
+  assert.ok(rendered.includes("draw.json"), "渲染出 draw.json 一行");
+  assert.ok(rendered.includes("MusePublic/Qwen-Image-Edit"), "渲染带出保存的模型偏好");
+}
+// 「从未设置」与「保存了关」也要分开：前者 not set，后者 off。
+writeFileSync(join(dir, "draw.json"), JSON.stringify({ version: 1, enabled: false }));
+{
+  const report = await diagnose({ dshHome: home });
+  const scope = report.scopes[0];
+  assert.equal(scope.draw.enabled, false, "保存的 false 与「未设置」是两回事");
+  assert.equal(scope.draw.modelId, null, "没存过偏好 → auto");
+  assert.equal(report.symptoms.length, 0);
+}
+
+// ── §13 draw.json 未知版本 → versionKnown:false + unreadable + 症状。 ──
+writeFileSync(join(dir, "draw.json"), JSON.stringify({ version: 99, enabled: true, modelId: "m/Image" }));
+{
+  const report = await diagnose({ dshHome: home });
+  const scope = report.scopes[0];
+  assert.equal(scope.draw.versionKnown, false, "未知版本被单独标记");
+  assert.match(scope.unreadable.find((entry) => /draw\.json/.test(entry)) ?? "", /unknown version/);
+  assert.equal(report.symptoms.length, 1, "usage/provider/draw 同属一个症状 id，不重复计数");
+  assert.equal(report.symptoms[0].id, SYMPTOM.STATE_UNREADABLE);
+}
+
+// ── §14 draw.json 损坏 → 同一症状 id，渲染不漏内部形状。 ──
+writeFileSync(join(dir, "draw.json"), "{not json", "utf8");
+{
+  const report = await diagnose({ dshHome: home });
+  const scope = report.scopes[0];
+  assert.equal(scope.draw, null, "损坏文件没有速览");
+  assert.equal(scope.unreadable.filter((entry) => /draw\.json/.test(entry)).length, 1);
+  assert.equal(report.symptoms.length, 1);
+  const rendered = renderReport(report);
+  assert.ok(rendered.includes("UNREADABLE"), "人读行点出损坏文件");
+  assert.ok(!rendered.includes("undefined"), "渲染层不漏内部形状");
+}
+
+// ── §15 describeDrawPayload 边界：形状不符 → null；非法值归一化为未设置。 ──
+{
+  assert.equal(describeDrawPayload(null), null);
+  assert.equal(describeDrawPayload("nope"), null);
+  assert.equal(describeDrawPayload({ enabled: true }), null, "无 version 键 → 不认识");
+  assert.equal(describeDrawPayload({ version: "1" }), null, "字符串版本 → 不认识");
+  assert.deepEqual(
+    describeDrawPayload({ version: 1, enabled: false, modelId: "  m/Image  " }),
+    { versionKnown: true, enabled: false, modelId: "m/Image" },
+    "模型 id 走同一套归一（trim，空串读作未设置）"
+  );
+  assert.equal(describeDrawPayload({ version: 1, enabled: "yes" }).enabled, null, "非布尔 enabled 归一化为未设置");
+  assert.equal(describeDrawPayload({ version: 1, modelId: "" }).modelId, null, "空串模型偏好归一化为 auto");
+  assert.equal(describeDrawPayload({ version: 2, enabled: true }).versionKnown, false, "能解析但版本未知");
 }
 
 console.log("doctor.test.mjs: all checks passed");

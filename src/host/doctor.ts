@@ -2,11 +2,11 @@
  * `doctor` —— 只读回答「这台机器上，魔搭面板的数据在哪、坏了没有」。
  *
  * 与 sensenova 的 doctor 同形（`--json` 出机器可读报告、其余出人读行），按本
- * 插件的现实缩小：魔搭只有两个状态文件（usage.json 用量计数、provider.json
- * 面板保存的开关与允许清单）和一把静态令牌，没有 draw/catalog 三件套，所以
- * 症状表只有一个 id。它 import 的只有两个 state store 与它们各自的底座
- * （host-config / state-store / util），不碰任何平台对接 peer（llm / publish /
- * inference 一侧），所以在干净 checkout 上即可运行；
+ * 插件的现实缩小：魔搭有三个状态文件（usage.json 用量计数、provider.json
+ * 面板保存的开关与允许清单、draw.json 面板保存的出图开关与模型偏好）和一把静态
+ * 令牌；catalog 没有状态文件（每次现拉），所以症状表只有一个 id。它 import 的只有
+ * 三个 state store 与它们各自的底座（host-config / state-store / util），不碰任何
+ * 平台对接 peer（llm / publish / inference 一侧），所以在干净 checkout 上即可运行；
  * 只读本插件自己的 state 目录，绝不写盘、绝不打印令牌值（env 只报在场性，
  * 凭据服务里的令牌只有运行中的 Host 看得见，报告会明说这一点）。与 sensenova
  * 同款纪律：绝不读 `cordis.patch.yml`。
@@ -19,8 +19,9 @@
  *     · 损坏的文件被静默读作「未设置」，**不会**进 shapeWarnings（与
  *       usage-store 的既有约定一致：坏 JSON 读作空，面板不因此变红），所以
  *       它只有 doctor 能报——这正是「不会报错的状态」要靠 doctor 抓的原因；
- *     · 未知版本的面板是宽容读，所以会进 shapeWarnings（provider.json 那条），
- *       因为不说出口，面板就把「保存的值被忽略」呈现成「从未保存过」。
+ *     · 未知版本的面板是宽容读，所以会进 shapeWarnings（provider.json /
+ *       draw.json 那几条），因为不说出口，面板就把「保存的值被忽略」呈现成
+ *       「从未保存过」。
  *     两种情况操作者都需要一句话的下一步。
  *
  * 干净机器的诚实答案是空数组——「磁盘上没有需要解释的东西」。
@@ -34,6 +35,7 @@ import { name } from "./host-config.ts";
 import { dshHome as defaultDshHome, isProfileSegment } from "./state-store.ts";
 import { describeProviderPayload } from "./provider-store.ts";
 import { describeUsagePayload } from "./usage-store.ts";
+import { describeDrawPayload } from "./draw-store.ts";
 
 /** 症状 id 的单一声明（renderReport 与 --json 都从这里取值）。 */
 export const SYMPTOM = Object.freeze({
@@ -45,10 +47,10 @@ export type SymptomValue = (typeof SYMPTOM)[keyof typeof SYMPTOM];
 /** 每个症状的第一步动作。总函数：缺一条 hint 就过不了编译（见 deriveSymptoms）。 */
 const SYMPTOM_HINT: Record<SymptomValue, string> = {
   [SYMPTOM.STATE_UNREADABLE]:
-    "state/ 下有一个文件（usage.json 或 provider.json）无法按本构建认识的形状解析：要么损坏，" +
+    "state/ 下有一个文件（usage.json / provider.json / draw.json）无法按本构建认识的形状解析：要么损坏，" +
     "要么由更新的构建写入（本构建的写入已被版本只读闸挡住）。面板会显示 shapeWarnings；" +
     "升级插件后再看，或删除该文件重置——usage.json 丢了历史计数，provider.json 丢了面板保存的" +
-    "开关与允许清单。"
+    "开关与允许清单，draw.json 丢了面板保存的出图开关与模型偏好。"
 };
 
 /** 缺一条 hint 就在编译期报错——新症状 id 必须先补 hint。 */
@@ -64,6 +66,8 @@ export interface DoctorScope {
   usage: { versionKnown: boolean; days: number; events: number } | null;
   /** provider.json 的速览；`null` = 文件不在场（面板还没保存过开关/清单，不是故障）。 */
   provider: { versionKnown: boolean; enabled: boolean | null; enabledIds: number | null } | null;
+  /** draw.json 的速览；`null` = 文件不在场（面板还没保存过出图开关/模型，不是故障）。 */
+  draw: { versionKnown: boolean; enabled: boolean | null; modelId: string | null } | null;
   /** 在场但解析不了的文件名清单（含未知版本）。 */
   unreadable: string[];
 }
@@ -135,12 +139,15 @@ async function inspectStateFile<T extends { versionKnown: boolean }>(
 
 /** 读一个作用域目录。调用方保证目录在场（profile 目录来自 readdir；共享布局先过 exists()）。 */
 async function readScope(dir: string, profile: string | null): Promise<DoctorScope> {
-  const scope: DoctorScope = { profile, stateDir: dir, usage: null, provider: null, unreadable: [] };
+  const scope: DoctorScope = { profile, stateDir: dir, usage: null, provider: null, draw: null, unreadable: [] };
   await inspectStateFile(dir, "usage.json", scope, describeUsagePayload, (summary) => {
     scope.usage = summary;
   });
   await inspectStateFile(dir, "provider.json", scope, describeProviderPayload, (summary) => {
     scope.provider = summary;
+  });
+  await inspectStateFile(dir, "draw.json", scope, describeDrawPayload, (summary) => {
+    scope.draw = summary;
   });
   return scope;
 }
@@ -222,13 +229,13 @@ export function deriveSymptoms(scopes: DoctorScope[]): { id: SymptomValue; hint:
 export function renderReport(report: DoctorReport): string {
   const lines = [`dshHome: ${report.dshHome}`];
   const scopes = report.shared !== null ? [report.shared, ...report.scopes] : report.scopes;
-  if (scopes.every((scope) => scope.usage === null && scope.provider === null && scope.unreadable.length === 0)) {
+  if (scopes.every((scope) => scope.usage === null && scope.provider === null && scope.draw === null && scope.unreadable.length === 0)) {
     lines.push(`no state under ${join(report.dshHome, "state")} (a clean machine, or the panel has not saved anything yet)`);
   }
   for (const scope of scopes) {
     const label = scope.profile === null ? "shared" : scope.profile;
-    if (scope.usage === null && scope.provider === null && scope.unreadable.length === 0) {
-      lines.push(`${label}: no usage.json, no provider.json (not recorded yet)`);
+    if (scope.usage === null && scope.provider === null && scope.draw === null && scope.unreadable.length === 0) {
+      lines.push(`${label}: no usage.json, no provider.json, no draw.json (not recorded yet)`);
       continue;
     }
     if (scope.usage !== null) {
@@ -245,6 +252,16 @@ export function renderReport(report: DoctorReport): string {
         `${label}: provider.json — switch ${provider.enabled === null ? "not set" : provider.enabled ? "on" : "off"}` +
         `, allow-list ${provider.enabledIds === null ? "not set" : `${provider.enabledIds} model(s)`}` +
         (provider.versionKnown ? "" : " [UNKNOWN VERSION]")
+      );
+    }
+    if (scope.draw !== null) {
+      const draw = scope.draw;
+      // 同 provider 的三态口径：not set = 面板从没保存过。模型偏好回显保存的 id
+      // （单个值，不是清单——回显才答得上「我钉的是哪个模型」）。
+      lines.push(
+        `${label}: draw.json — switch ${draw.enabled === null ? "not set" : draw.enabled ? "on" : "off"}` +
+        `, model ${draw.modelId === null ? "auto (not set)" : draw.modelId}` +
+        (draw.versionKnown ? "" : " [UNKNOWN VERSION]")
       );
     }
     for (const item of scope.unreadable) lines.push(`${label}: UNREADABLE: ${item}`);

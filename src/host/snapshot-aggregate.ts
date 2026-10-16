@@ -129,6 +129,13 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     // 覆盖，这条警告补的是读侧。
     shapeWarnings.push(providerNote.value);
   }
+  // draw.json 与 provider.json 同一条纪律（store 的 versionNote 注释详述）：
+  // 未知版本宽容读作「没设过」，回退方向是 patch 默认（通常 = 关）——不说出口，
+  // 「保存的出图开关与模型偏好被忽略」就是「从未保存过」。包一层异步 IIFE 是
+  // 为了与下面的 draw 块同样宽容：装配缺桩（测试）时走 soft 的降级路径，
+  // 不让一条注释外的 TypeError 把整条快照打掉。
+  const drawNote = await soft((async () => drawStore.versionNote())());
+  if (drawNote.ok && drawNote.value !== null) shapeWarnings.push(drawNote.value);
 
   // ── provider 块（M4 §11）──
   // 开关（面板值优先，patch 默认兜底）+ 注册状态 + 目录 roster，整块软失败：

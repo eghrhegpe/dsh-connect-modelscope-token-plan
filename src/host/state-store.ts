@@ -1,7 +1,9 @@
 /**
- * 状态文件公共原语。**TL;DR**：本文件只做三件事——`dshHome`/`stateDir`（定位
- * 状态目录）、`profileSegment`（按 profile 分段路径）、以及 {@link createStateReadCache}
- * （统一读缓存）。其余一切遵守下方「行为约定」。
+ * 状态文件公共原语。**TL;DR**：本文件只做四件事——`dshHome`/`stateDir`（定位
+ * 状态目录）、`profileSegment`（按 profile 分段路径）、{@link createStateReadCache}
+ * （统一读缓存）、以及写侧三件套（{@link createStateWriteQueue} 写串行化 /
+ * {@link guardStateWrite} ADR-006 写守卫 / {@link stateVersionNote} 读侧版本说明）。
+ * 其余一切遵守下方「行为约定」。
  *
  * 把本插件各 store（usage-store / provider / draw）各自手写的同一段
  * "版本载荷 + temp 文件 + rename 原子 + 0600 + 损坏即忽略" 收敛到这里。
@@ -26,14 +28,21 @@
  * 2. 第二步收敛的是**读缓存**：provider / draw 早有 1s TTL，而 catalog 完全
  *    没有（进程内永不失效）——同一个「两个进程共享一个 state 目录」的问题修了
  *    两个、漏了第三个。现在统一走 {@link createStateReadCache}，一个 TTL 三个调用方。
+ * 3. 第三步收敛的是**写侧三件套**。这三个 store 曾各自手写：provider 有
+ *    writeChain、usage 有 writeChain、draw **两个都没有**（并发保存丢一次、
+ *    磁盘 version 比本构建新时降级覆写、读侧静默读作「没设过」——2026-10-17
+ *    实测复现，正是 provider-store 注释里记着「咬过三次」的那类漂移的第四条）。
+ *    现在三件套各有一份公共实现：串行化是{@link createStateWriteQueue}、写守卫是
+ *    {@link guardStateWrite}、读侧说明是{@link stateVersionNote}；provider /
+ *    usage / draw 三个 store 都是调用方，不再各写一遍。
  *
  * @module dsh-connect-modelscope-token-plan/state-store
  */
 import { mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { str } from "./util.ts";
+import { basename, join } from "node:path";
+import { degrade, errMsg, redactSecrets, str } from "./util.ts";
 
 /**
  * DSH 主目录：操作者导出了 `DSH_HOME` 就用它，否则回落到 `~/.dsh`。
@@ -449,4 +458,120 @@ export async function readStateVersion(file: string): Promise<number | null> {
  */
 export function isKnownStateVersion(version: number | null, known: readonly number[]): boolean {
   return version === null || known.includes(version);
+}
+
+/**
+ * 写串行化队列——store 的「读-改-写必须排队」的那把链。
+ *
+ * 为什么这不是某个 store 的私事：三个 store（provider / usage / draw）各写过
+ * 一份一模一样的 `let writeChain = Promise.resolve(...)`，而 draw 曾经**两份都
+ * 没有**——并发 `saveEnabled(true)` + `saveModelId(...)` 各自读到同一个 current，
+ * 后写的赢，前一次保存被整个丢掉（2026-10-17 实测：落盘只剩其中一个字段）。
+ * provider-store 的注释记着这类漂移「咬过三次」，draw 是第四条。抽到这里，
+ * 第四个 store 起只需调用，没有「再手写一遍」这个选项。
+ *
+ * 语义（与 provider / usage 此前的私有实现逐字一致）：
+ *   - `task` 在上一个任务落幕后才起动，临界区内重新读盘（基线不来自 TTL 缓存）；
+ *   - **调用方拿到的是 `run` 本身**——拒绝照旧传播（provider 的 `save()` 要抛给
+ *     路由、usage 的 `recordCall()` 也要抛），因为吞掉失败是调用方的语义决定；
+ *   - 链自己吞掉失败继续走：一次只读 Home 上的写失败不该毒化后续所有保存。
+ *
+ * peer-free，与其余原语同纪律。
+ * @returns {{
+ *   enqueue: <T>(task: () => Promise<T>) => Promise<T>
+ * }} 排队执行一次任务。
+ */
+export function createStateWriteQueue() {
+  let chain: Promise<unknown> = Promise.resolve();
+  return {
+    enqueue<T>(task: () => Promise<T>): Promise<T> {
+      const run = chain.then(task);
+      chain = run.then(
+        () => undefined,
+        () => undefined
+      );
+      return run;
+    }
+  };
+}
+
+/**
+ * ADR-006 写侧守卫：本构建读不懂的版本，不许覆盖。
+ *
+ * 磁盘上出现一个**本构建不认识的数字版本**，只可能是更新的构建写的；用一个旧
+ * 载荷盖掉它，销毁的是我们根本看不见的数据（实测过一次 version 2 → 1 的降级
+ * 覆写，110 次历史归零）。所以写入前先问盘，三种答案：
+ *   - `null`（没有文件 / 没有版本 / 损坏）——没有什么可保护，写是恢复手段，放行；
+ *   - 已知版本——放行；
+ *   - 未知数字版本，或文件**在场却读不出来**（EACCES/EBUSY/EIO）——拒写。
+ *     后者由 {@link readStateVersion} 抛出来（它只把 ENOENT 读作「没有文件」），
+ *     这里接住并拒写：「读不到」不等于「没有东西要保护」。
+ *
+ * 拒写返回一句**已 degrade 记录**的原因（调用方决定要不要再抛给用户——provider
+ * 的 save 抛、draw 的 saveEnabled 抛、usage 的 recordCall 静默 no-op），而不是
+ * 静默 no-op： swallow the failure, not the reason。
+ *
+ * @param {string} file - 目标状态文件路径（消息里只取 basename）。
+ * @param {readonly number[]} known - 本构建读得懂的版本集合。
+ * @param {{label: string, logger?: {warn?: (m: string) => void}|undefined}} options -
+ *   `label` 进拒绝消息的前缀（如 `"provider"` / `"draw-state"`）。`logger` 的
+ *   `| undefined` 不是冗余：tsconfig 开了 `exactOptionalPropertyTypes`，而各 store
+ *   解构出来的 `logger` 本身就带着 `undefined`（属性可选），不写这一半编译不过。
+ * @returns {Promise<string|null>} 拒绝原因（已记日志），放行时为 `null`。
+ */
+export async function guardStateWrite(
+  file: string,
+  known: readonly number[],
+  options: { label: string; logger?: { warn?: (message: string) => void } | undefined }
+): Promise<string | null> {
+  const base = basename(file);
+  let existing: number | null;
+  try {
+    existing = await readStateVersion(file);
+  } catch (error) {
+    // 文件在那儿却读不出来（EACCES/EBUSY/EIO）：正是本守卫要拦的那类覆盖。
+    const reason = `${options.label}: refusing to overwrite ${base} (cannot read it: ${redactSecrets(errMsg(error))})`;
+    degrade(reason, null, options.logger, null);
+    return reason;
+  }
+  if (!isKnownStateVersion(existing, known)) {
+    const reason = `${options.label}: refusing to overwrite ${base} holding version ${existing} (this build knows ${known.join("/")})`;
+    degrade(reason, null, options.logger, null);
+    return reason;
+  }
+  return null;
+}
+
+/**
+ * 读侧版本说明：磁盘上那份文件带着本构建读不懂的版本时，给操作者的一句话。
+ *
+ * 为什么读侧宽容还要说话：写侧守卫挡住了覆盖，读侧按设计把未知版本**宽容地**
+ * 读作「没设过」——于是「保存的值被忽略」在面板上呈现成「从未保存过」。对
+ * provider 的允许清单，这两者读出的方向是危险的（空清单 = 不过滤 = 提供全部
+ * 模型）；对 draw 的开关，回退方向是 patch 默认（通常 = 关）。闸与说明是同一条
+ * 承诺的两半，缺了哪半都静默。
+ *
+ * `consequence` 由调用方给：每个 store 知道自己「读作没设过」意味着什么，公共
+ * 原语只负责把文件名、版本号、已知版本集合与下一步动作说全。
+ *
+ * @param {object} options
+ * @param {string} options.label - 消息前缀（如 `"provider-state"`）。
+ * @param {string} options.file - 状态文件路径（消息里只取 basename）。
+ * @param {number} options.version - 盘上的版本号（调用方已判过是未知的）。
+ * @param {readonly number[]} options.known - 本构建读得懂的版本集合。
+ * @param {string} options.consequence - 「读作没设过」对这个 store 意味着什么。
+ * @returns {string} 人读的一句警告。
+ */
+export function stateVersionNote(options: {
+  label: string;
+  file: string;
+  version: number;
+  known: readonly number[];
+  consequence: string;
+}): string {
+  return (
+    `${options.label}: ${basename(options.file)} holds version ${options.version}, which this build cannot read` +
+    ` (this build knows ${options.known.join("/")}); ${options.consequence}` +
+    " Upgrade this build to see the saved values, or delete the file to reset them."
+  );
 }

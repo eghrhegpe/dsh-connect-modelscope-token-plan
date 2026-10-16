@@ -30,6 +30,7 @@ import {
   ensureStateDir,
   isKnownStateVersion,
   createStateReadCache,
+  createStateWriteQueue,
   profileStateDir,
   readStateJson,
   readStateVersion,
@@ -172,8 +173,10 @@ export function createFileUsageStore({ name, profile = null, trendDays = 14, max
   /** 最近一次确认过的内存态；读路径拿它，写路径以它为基线。 */
   let current: UsagePayload = { version: STATE_VERSION, days: {}, models: {}, events: [] };
   let loaded = false;
-  /** 写串行化：读-改-写必须排队，两个并发 recordCall 不能互相覆盖。 */
-  let writeChain: Promise<void> = Promise.resolve();
+  /** 写串行化：读-改-写必须排队，两个并发 recordCall 不能互相覆盖。
+     队列实现在 state-store（{@link createStateWriteQueue}）——provider / draw
+     同款，三份私有副本正是 draw-store 曾经三件全缺的入口。 */
+  const writeQueue = createStateWriteQueue();
 
   /**
    * 磁盘版本闸 —— 读路径与写路径**各自**调用，不共享副作用。
@@ -243,8 +246,8 @@ export function createFileUsageStore({ name, profile = null, trendDays = 14, max
   };
 
   /** 排队执行一次读-改-写；只读闸置位时整个变更是 no-op。 */
-  const enqueue = (mutate: (payload: UsagePayload) => void) => {
-    const run = writeChain.then(async () => {
+  const enqueue = (mutate: (payload: UsagePayload) => void) =>
+    writeQueue.enqueue(async () => {
       // 守卫在这里**自己**读盘，而不是依赖 readThrough 的副作用——见
       // diskVersionBlocksWrites 的注释：这个 await 之后才可能发生写入，所以
       // 判据必须落在同一个 await 链上，中间不能隔任何东西。
@@ -262,10 +265,6 @@ export function createFileUsageStore({ name, profile = null, trendDays = 14, max
       loaded = true;
       await persist(payload);
     });
-    // 链必须吞掉自己的失败继续走，否则一次只读 Home 上的写失败会毒化后续所有计数。
-    writeChain = run.catch(() => {});
-    return run;
-  };
 
   /** 修剪：只留最近 trendDays 个天桶（按 dateKey 排序，今天不删）。 */
   const pruneDays = (payload: UsagePayload, todayKey: string) => {

@@ -735,7 +735,13 @@ export function rosterWithAvailability(entries: unknown, unavailableIds: string[
 export function summarizeCatalog(entries: unknown): { modelCount: number; visionCount: number; visionIds: string[] } {
   const list = (Array.isArray(entries) ? entries : []).filter((entry) => isChatModel(entry as CatalogEntry));
   const ids = list.map((entry) => str((entry as CatalogEntry)?.id, "")).filter((id) => id !== "");
-  const visionIds = ids.filter((id) => isVisionModel({ ...((list.find((e) => str((e as CatalogEntry)?.id, "") === id) as CatalogEntry) ?? {}), id }));
+  // 直白 filter+map：曾经为拿 entry 又对每个 id `find` 一次（O(n²)，且读起来像在
+  // 做某种去重——目录的 id 本就唯一）。判定与 descriptor 走同一个 isVisionModel，
+  // 面板数与注册结果不会就「vision 模型有几个」说两套话。
+  const visionIds = list
+    .map((entry) => ({ entry: entry as CatalogEntry, id: str((entry as CatalogEntry)?.id, "") }))
+    .filter(({ entry, id }) => id !== "" && isVisionModel({ ...entry, id }))
+    .map(({ id }) => id);
   return {
     modelCount: ids.length,
     visionCount: visionIds.length,

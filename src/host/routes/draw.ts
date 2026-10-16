@@ -34,9 +34,11 @@ interface DrawRouteWiring {
   drawStore: {
     enabled: () => Promise<boolean | null>;
     modelId: () => Promise<string | null>;
-    saveEnabled: (value: boolean) => Promise<string | null>;
-    saveModelId: (modelId: string | null) => Promise<string | null>;
-    reset: () => Promise<string | null>;
+    // 写失败（ADR-006 拒写 / 只读 Home）与 provider 路由同一方言：**抛**，
+    // 由下面的 try/catch 转 respondError 呈报，不静默。
+    saveEnabled: (value: boolean) => Promise<void>;
+    saveModelId: (modelId: string | null) => Promise<void>;
+    reset: () => Promise<void>;
   };
   inference: {
     fetchModels: () => Promise<{ entries?: unknown[]; [k: string]: unknown }>;
@@ -139,21 +141,11 @@ export function registerDrawRoute(ctx: any, wiring: DrawRouteWiring) {
         return;
       }
       try {
-        if (hasEnabled) {
-          const refusal = await drawStore.saveEnabled(body.enabled as boolean);
-          if (refusal !== null) {
-            respondError(response, new Error(refusal));
-            return;
-          }
-        }
-        if (body.modelId !== undefined) {
-          const refusal = await drawStore.saveModelId(body.modelId as string | null);
-          if (refusal !== null) {
-            respondError(response, new Error(refusal));
-            return;
-          }
-        }
+        if (hasEnabled) await drawStore.saveEnabled(body.enabled as boolean);
+        if (body.modelId !== undefined) await drawStore.saveModelId(body.modelId as string | null);
       } catch (error) {
+        // 拒写（ADR-006：盘上是更新构建写的版本）与 IO 失败都在这里呈报——
+        // 与 provider 路由同一方言：throw，不返回理由串让调用方各自解释。
         respondError(response, error);
         return;
       }
@@ -175,11 +167,7 @@ export function registerDrawRoute(ctx: any, wiring: DrawRouteWiring) {
       // 一个 400 再继续，没有意义）。与 provider 的 reset 同一条处理。
       await readJsonBody(request, MAX_JSON_BODY_BYTES).catch(() => ({ ok: false, error: "ignored" }));
       try {
-        const refusal = await drawStore.reset();
-        if (refusal !== null) {
-          respondError(response, new Error(refusal));
-          return;
-        }
+        await drawStore.reset();
       } catch (error) {
         respondError(response, error);
         return;
