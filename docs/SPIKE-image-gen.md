@@ -264,7 +264,8 @@ FLUX 提交 → `{"task_status":"SUCCEED","task_id":"8179954"}`；轮询终态 �
 **结论：第一份不可用**（轮询三处字段名皆错且漏必需头）；**第二份机制正确**，但两条
 「必须/必填」的强断言需按实测放宽。
 
-官方 OpenAPI 规格（`docs/modelscope.cn-openapi/modelscope.cn-openapi.json`，64 path，
+官方 OpenAPI 规格（`docs/modelscope.cn-openapi/modelscope.cn-openapi.json.gz`，2026-10-17
+起 gzip 入库，展开见该目录 README；64 path，
 server `https://modelscope.cn/openapi/v1`）**不含** `images/generations`、`tasks` 或任何
 `X-ModelScope-*`——它描述站点 OpenAPI，与 api-inference 是两套体系。**出图协议无规格可依，
 只能靠官方文档页与实测。**
