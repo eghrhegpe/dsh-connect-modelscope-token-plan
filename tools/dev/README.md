@@ -108,6 +108,48 @@ DSH_DOM_TARGET=src node tools/dev/mutate.mjs tools/dev/mutate-composer-pill.json
 「恒为 0 与空」的卡片，就是通过「某个 `recordCall` 生产者从没被执行」这类
 观察抓到的。
 
+## 同族插件的同源度：`cross-repo-drift.mjs`
+
+```
+node tools/dev/cross-repo-drift.mjs                 # 扫全部姊妹仓库
+node tools/dev/cross-repo-drift.mjs --claims        # 只看「自称同源、实测不符」
+node tools/dev/cross-repo-drift.mjs --strict        # 有宣称不符时非零退出
+node tools/dev/cross-repo-drift.mjs --sibling <dir> # 指定姊妹仓库
+node tools/dev/cross-repo-drift.mjs --json          # 机器可读
+```
+
+它回答的是**头注里的自我描述还算不算数**。本仓库与 sensenova / agnes 共享一套文件
+命名，`src/` 里散着「受控复制」「与姊妹插件同源」这类句子——**那些句子没有任何
+门禁**，源码一改它们照旧留着，而读者（包括 AI 协作方）会照着它推理。这个工具把
+宣称变成可复核的数字：逐同名文件算去注释后的代码行重叠率，再把「文件自己说同源、
+实测却不同源」的项单独列出来。
+
+**判据是顺序无关的行集合重叠（Jaccard），不是 diff 行数、不是 LCS。** 两个坑都是
+本仓库实证踩过的，所以写死在 `codeOverlap()`：
+
+- **diff 行数会被注释语言骗**。两侧头注一中一英时，`provider-publish.ts` 报出 464
+  行差异，读起来像「两份完全不同的实现」。所以先剥注释再比。
+- **LCS 会被函数顺序骗**。`util.ts` 两侧函数集合几乎相同、只是次序不同，LCS 只给
+  32%，而真实差异是 **1 个差异块**。所以主判据用顺序无关的重叠率，LCS 只作对照
+  （两者差得远 = 主要是重排），报告里单列一节。
+
+**它也会误报，所以边界被钉在代码里**（两处误报都是第一版真踩到的）：
+
+- `同形` / `同款` **不算**宣称——那是输出形状与纪律的对齐，不承诺代码同源；
+- 裸「同源」**不算**——`client/const.ts` 头注里的「相对、同源」是 web 的
+  **same-origin**；
+- **点名提到某个姊妹 ≠ 对它宣称**——「与 agnes 那份已分家」是划界，不是承诺；
+- **指名只在它点名的仓库上核对**——「与 sensenova 同源」拿去核对 agnes 是误报
+  （`util.ts` 对 sensenova 94%、对 agnes 48%，那句话只承诺前者）。
+
+核查器自己的有效性也做过变异检验（本目录的规矩：新加的断言必须被变异检验一次）：
+往 `draw.ts` 塞一句「与姊妹插件 draw.ts 受控复制」，`--claims --strict` 必须报
+`[不符]` 并非零退出——第一版**没抓到**（整段头注里的一句「不能照抄」把夹在其中的
+宣称一起吞了），改成逐行判宣称之后才抓到。所以别把宣判改回整段判定。
+
+**它不进 `npm test`**：找不到姊妹仓库时正常退出（0）并明说「未发现」——别人的
+checkout 里没有这三个仓库，那不是错误。
+
 ## 不在这里的工具
 
 - `tools/doctor.mjs`：**随包发布的诊断工具**（`npm run doctor`），只读盘点各
