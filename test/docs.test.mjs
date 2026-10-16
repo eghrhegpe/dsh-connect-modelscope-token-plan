@@ -158,17 +158,21 @@ const isVendoredSpec = (rel) => rel.startsWith("docs/modelscope.cn-openapi/");
   const suiteCount = readdirSync(join(root, "test")).filter((f) => f.endsWith(".test.mjs")).length
     + 1; // + build-gate.mjs，它也在 npm test 末尾但名字不以 .test.mjs 结尾
 
-  // ① package.json 的 test 脚本必须真的跑到每一个测试文件（新增文件忘了挂 = 从不执行）。
+  // ① npm test 必须走 glob 门禁 test/run-all.mjs——它把「每个 .test.mjs 都被跑到」
+  //    从自觉登记变成结构事实（旧形态是 && 串全部文件名，新增套件忘了挂 = 从不
+  //    执行；runner 以 readdir 为唯一事实源，登记这一步不存在了，见其文件头）。
   const testScript = JSON.parse(read("package.json")).scripts.test;
-  for (const suite of readdirSync(join(root, "test")).filter((f) => f.endsWith(".test.mjs")).sort()) {
-    assert.ok(
-      testScript.includes(`test/${suite}`),
-      `test/${suite} 存在但没挂进 package.json 的 test 脚本——它永远不会被执行`
-    );
-  }
+  assert.equal(
+    testScript.trim(),
+    "node test/run-all.mjs",
+    "package.json 的 test 脚本必须是 `node test/run-all.mjs`（套件清单的事实源在 glob，不在这条串里）"
+  );
+  // runner 自己也得守规矩：glob 之外必须把 build-gate 钉在末尾——它是唯一的
+  // 产物新鲜度门禁，名字不以 .test.mjs 结尾，glob 捞不到它。
+  const runnerSrc = read("test/run-all.mjs");
   assert.ok(
-    testScript.includes("test/build-gate.mjs"),
-    "build-gate.mjs 必须挂在 npm test 末尾（它是唯一的产物新鲜度门禁）"
+    runnerSrc.includes("build-gate.mjs"),
+    "test/run-all.mjs 必须显式跑 build-gate.mjs（glob 不含它，丢了就没人比产物）"
   );
 
   // ② 文档里凡出现「N 套件」都必须等于当前真实数量。
