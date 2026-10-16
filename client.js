@@ -21,7 +21,25 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const slash = id.indexOf("/");
 		return slash >= 0 ? id.slice(0, slash) : id;
 	}
-	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
+	/**
+	* 徽章用的窗口短标注（tokens → "128K" / "1M"）。
+	*
+	* K=1024、M=1024²，与档位值（131072…1048576）同一把尺。**不美化**：目录声明的
+	* 128000 显示成 "125K" 而不是 "128K"——标签必须能从数值反推出来，四舍五入到
+	* 好看的整数是撒谎。≥1M 用 M（`1.25M` 保留至多一位小数，去掉尾随 .0），
+	* ≥1024 用 K，更小的原样显示。
+	* @param {number} tokens - 窗口大小（tokens）。
+	* @returns {string} 短标注。
+	*/
+	function formatWindow(tokens) {
+		if (tokens >= 1048576) {
+			const m = tokens / 1048576;
+			return `${m >= 10 || Number.isInteger(m) ? Math.round(m) : Math.round(m * 10) / 10}M`;
+		}
+		if (tokens >= 1024) return `${Math.round(tokens / 1024)}K`;
+		return String(tokens);
+	}
+	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
 	var init_const = __esmMin((() => {
 		NS = "dsh-connect-modelscope-token-plan";
 		PANEL_ID = NS;
@@ -32,6 +50,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		PROBE_PATH = `/api/${NS}/probe`;
 		PROVIDER_PATH = `/api/${NS}/provider`;
 		PROVIDER_ROSTER_PATH = `/api/${NS}/provider/roster`;
+		PROVIDER_CONTEXT_PATH = `/api/${NS}/provider/context`;
 		PROVIDER_RESET_PATH = `/api/${NS}/provider/reset`;
 		DRAW_PATH = `/api/${NS}/draw`;
 		DRAW_RESET_PATH = `/api/${NS}/draw/reset`;
@@ -116,6 +135,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.notConfigured": "还没有访问令牌，先到「接入」tab 配置",
 			"provider.source.panel": "面板",
 			"provider.source.config": "配置",
+			"provider.contextWindow": "上下文窗口",
+			"provider.contextDefault": "默认（跟随目录）",
+			"provider.contextHint": "目录没声明窗口的模型按此值生效；保存后立即重新注册",
 			"section.draw": "出图工具",
 			"draw.enable": "给 agent 注册 modelscope_draw_image 工具",
 			"draw.on": "已开启",
@@ -233,6 +255,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.notConfigured": "No token yet — configure it in the Access tab",
 			"provider.source.panel": "panel",
 			"provider.source.config": "config",
+			"provider.contextWindow": "Context window",
+			"provider.contextDefault": "Default (catalog)",
+			"provider.contextHint": "Applies to models whose catalog entry declares no window; re-registers immediately",
 			"section.draw": "Draw tool",
 			"draw.enable": "Register the modelscope_draw_image tool for the agent",
 			"draw.on": "On",
@@ -875,7 +900,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				name: typeof row.name === "string" && row.name !== "" ? row.name : id,
 				vision: row.vision === true,
 				available: row.available !== false,
-				quotaExhausted: row.quotaExhausted === true
+				quotaExhausted: row.quotaExhausted === true,
+				contextWindow: typeof row.contextWindow === "number" && Number.isFinite(row.contextWindow) && row.contextWindow > 0 ? row.contextWindow : void 0
 			};
 		}).filter((entry) => entry.id !== "") : [];
 		return {
@@ -888,6 +914,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			enabledCount: typeof p.enabledCount === "number" && Number.isFinite(p.enabledCount) ? p.enabledCount : 0,
 			allowed: p.allowed === "none" ? "none" : p.allowed === "list" ? "list" : "all",
 			enabledIds: ids,
+			contextWindow: typeof p.contextWindow === "number" && Number.isFinite(p.contextWindow) && p.contextWindow > 0 ? p.contextWindow : null,
 			roster
 		};
 	}
@@ -967,6 +994,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			enabledCount: 0,
 			allowed: "all",
 			enabledIds: [],
+			contextWindow: null,
 			roster: []
 		});
 		DEGRADED_DRAW = Object.freeze({
@@ -1285,7 +1313,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	* 额度耗尽的模型保留在清单里（灰显、勾选框禁用），这是故意的：roster 是目录
 	* 事实，picker 那边由 Host 自己丢掉它们，面板不替它删。
 	*/
-	function ProviderCard({ provider, busy, error, onToggle, onSaveList, onReset, tokenPresent, tt }) {
+	function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSaveContextWindow, onReset, tokenPresent, tt }) {
 		const status = providerOf$1(provider);
 		const enabled = status.enabled === true;
 		const hostIds = status.enabledIds;
@@ -1328,6 +1356,61 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			color: "var(--dsw-alias-state-warn-primary)"
 		} }, tt("provider.notConfigured")) : null;
 		const sourceKey = status.source === "panel" ? "provider.source.panel" : "provider.source.config";
+		const CONTEXT_TIERS = [
+			{
+				value: 131072,
+				label: "128K"
+			},
+			{
+				value: 262144,
+				label: "256K"
+			},
+			{
+				value: 524288,
+				label: "512K"
+			},
+			{
+				value: 1048576,
+				label: "1M"
+			}
+		];
+		const contextNode = onSaveContextWindow === void 0 ? null : h("div", { style: {
+			display: "flex",
+			gap: 8,
+			alignItems: "center",
+			flexWrap: "wrap",
+			margin: "0 0 8px"
+		} }, h("label", {
+			style: {
+				fontSize: 12,
+				color: "var(--dsw-alias-label-secondary)"
+			},
+			htmlFor: "provider-context-window"
+		}, tt("provider.contextWindow")), h("select", {
+			id: "provider-context-window",
+			style: {
+				...S.rosterBulk,
+				width: "auto"
+			},
+			disabled: busy,
+			value: status.contextWindow === null ? "" : String(status.contextWindow),
+			onChange: (event) => {
+				const value = String(event.target?.value ?? "");
+				onSaveContextWindow(value === "" ? null : Number(value));
+			}
+		}, h("option", {
+			value: "",
+			key: "default"
+		}, tt("provider.contextDefault")), CONTEXT_TIERS.map((tier) => h("option", {
+			value: String(tier.value),
+			key: String(tier.value)
+		}, tier.label))), h("span", {
+			style: {
+				...S.muted,
+				fontSize: 11
+			},
+			title: tt("provider.contextHint")
+		}, tt("provider.contextHint")));
 		const switchRow = h("div", { style: {
 			display: "flex",
 			gap: 10,
@@ -1408,7 +1491,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			}), h("span", {
 				style: S.modelName,
 				title: id
-			}, row.name)), row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null, FEATURED_OWNERS.includes(catalogOwner(row.id)) ? h("span", {
+			}, row.name)), row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null, typeof row.contextWindow === "number" ? h("span", {
+				style: S.modelBadge,
+				title: tt("provider.contextWindow")
+			}, formatWindow(row.contextWindow)) : null, FEATURED_OWNERS.includes(catalogOwner(row.id)) ? h("span", {
 				style: S.modelBadgeFeatured,
 				title: tt("models.featuredTitle")
 			}, tt("provider.featured")) : null, row.quotaExhausted === true ? h("span", { style: {
@@ -1431,7 +1517,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			disabled: busy,
 			onClick: onReset
 		}, tt("provider.reset"))));
-		return h("div", null, switchRow, statusNode, tokenHint, h("div", { style: {
+		return h("div", null, switchRow, statusNode, tokenHint, contextNode, h("div", { style: {
 			...S.sectionTitle,
 			margin: "18px 0 8px"
 		} }, tt("provider.models")), rosterBlock, error !== null ? h("div", {
@@ -1870,6 +1956,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds: normalized });
 		}, [runProviderWrite]);
 		const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
+		const saveContextWindow = useCallback((contextWindow) => {
+			runProviderWrite(PROVIDER_CONTEXT_PATH, { contextWindow });
+		}, [runProviderWrite]);
 		const [drawBusy, setDrawBusy] = useState(false);
 		const [drawError, setDrawError] = useState(null);
 		const runDrawWrite = useCallback(async (path, payload) => {
@@ -1995,6 +2084,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			error: providerError,
 			onToggle: toggleProvider,
 			onSaveList: saveRoster,
+			onSaveContextWindow: saveContextWindow,
 			onReset: resetProvider,
 			tokenPresent: data?.token?.present === true,
 			tt

@@ -84,6 +84,9 @@ export const zh = {
   "provider.notConfigured": "还没有访问令牌，先到「接入」tab 配置",
   "provider.source.panel": "面板",
   "provider.source.config": "配置",
+  "provider.contextWindow": "上下文窗口",
+  "provider.contextDefault": "默认（跟随目录）",
+  "provider.contextHint": "目录没声明窗口的模型按此值生效；保存后立即重新注册",
 
   "section.draw": "出图工具",
   "draw.enable": "给 agent 注册 modelscope_draw_image 工具",
@@ -226,6 +229,9 @@ export const en: typeof zh = {
   "provider.notConfigured": "No token yet — configure it in the Access tab",
   "provider.source.panel": "panel",
   "provider.source.config": "config",
+  "provider.contextWindow": "Context window",
+  "provider.contextDefault": "Default (catalog)",
+  "provider.contextHint": "Applies to models whose catalog entry declares no window; re-registers immediately",
 
   "section.draw": "Draw tool",
   "draw.enable": "Register the modelscope_draw_image tool for the agent",

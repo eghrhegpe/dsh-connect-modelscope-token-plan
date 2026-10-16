@@ -29,6 +29,8 @@ export const PROBE_PATH = `/api/${NS}/probe`;
 export const PROVIDER_PATH = `/api/${NS}/provider`;
 /** provider 允许清单（enabledIds）保存路由。 */
 export const PROVIDER_ROSTER_PATH = `/api/${NS}/provider/roster`;
+/** provider 全局上下文窗口覆盖保存路由（null = 跟随目录）。 */
+export const PROVIDER_CONTEXT_PATH = `/api/${NS}/provider/context`;
 /** provider 开关 + 清单回到 patch 默认的路由。 */
 export const PROVIDER_RESET_PATH = `/api/${NS}/provider/reset`;
 /**
@@ -83,4 +85,23 @@ export const FEATURED_OWNERS = Object.freeze(["deepseek-ai", "ZhipuAI", "Qwen"])
 export function catalogOwner(id: string): string {
   const slash = id.indexOf("/");
   return slash >= 0 ? id.slice(0, slash) : id;
+}
+
+/**
+ * 徽章用的窗口短标注（tokens → "128K" / "1M"）。
+ *
+ * K=1024、M=1024²，与档位值（131072…1048576）同一把尺。**不美化**：目录声明的
+ * 128000 显示成 "125K" 而不是 "128K"——标签必须能从数值反推出来，四舍五入到
+ * 好看的整数是撒谎。≥1M 用 M（`1.25M` 保留至多一位小数，去掉尾随 .0），
+ * ≥1024 用 K，更小的原样显示。
+ * @param {number} tokens - 窗口大小（tokens）。
+ * @returns {string} 短标注。
+ */
+export function formatWindow(tokens: number): string {
+  if (tokens >= 1048576) {
+    const m = tokens / 1048576;
+    return `${m >= 10 || Number.isInteger(m) ? Math.round(m) : Math.round(m * 10) / 10}M`;
+  }
+  if (tokens >= 1024) return `${Math.round(tokens / 1024)}K`;
+  return String(tokens);
 }

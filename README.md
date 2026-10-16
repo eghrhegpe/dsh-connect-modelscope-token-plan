@@ -24,6 +24,12 @@
 tools registry 没有 unregister）。实测协议（异步两段式、必需头、提交态不可信、
 计费与耗时口径）见 [docs/SPIKE-image-gen.md](docs/SPIKE-image-gen.md)。
 
+同一 tab 下方另有**「上下文窗口」**选择器（默认/128K/256K/512K/1M）：魔搭目录
+`/v1/models` 不返回窗口字段，Host 侧一律按 128K 兜底声明；这里选一个档位即可对
+**目录没声明窗口的模型**全局生效（目录真声明了窗口的模型不受影响），保存即重注册。
+档位落盘在 `provider.json` 的 `contextWindow` 键（v1 形状的新增可选键，旧构建宽容
+读），roster 每行会标出该模型当前生效的窗口。
+
 ## 对话框胶囊（v0.2 起）
 
 注册 provider 之后，输入框工具栏会多一枚胶囊（用户不需要打开 Plugins 页就能看见额度）：

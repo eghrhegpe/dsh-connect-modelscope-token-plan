@@ -490,7 +490,7 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
       fetchModels: async () => ({ ids: [], entries: [] }),
       fetchBalance: async () => { throw new Error("balance endpoint refused"); }
     },
-    providerStore: { enabled: async () => null, enabledIds: async () => [], versionNote: async () => null },
+    providerStore: { enabled: async () => null, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
     publisher: { state: { enabledIds: [], llmAvailable: false, registered: false, error: null } },
     logger: { warn: () => {} }
   });

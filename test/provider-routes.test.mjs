@@ -129,6 +129,65 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由已注册");
   assert.equal(res.body.allowed, "all", "忘掉清单 → 不过滤");
 }
 
+// ── POST context：全局上下文窗口覆盖 ──
+// 打在两层：快照顶层字段（面板选择器回显）与 roster 行（每行 badge）——目录桩
+// 条目没声明窗口，未设覆盖时两处都是目录兜底 128000，写覆盖后必须一起变。
+{
+  const before = await call(handlers, PROVIDER_PATH, makeReq("GET"));
+  assert.equal(before.body.contextWindow, null, "未设置时快照读 null");
+  assert.ok(
+    before.body.roster.every((r) => r.contextWindow === 128000),
+    "未设置时 roster 行是目录兜底窗口"
+  );
+
+  const saved = await call(handlers, PROVIDER_PATH + "/context", makeReq("POST", { body: { contextWindow: 262144 } }));
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.ok, true);
+  assert.equal(saved.body.contextWindow, 262144, "保存后快照回显覆盖值");
+  assert.ok(
+    saved.body.roster.every((r) => r.contextWindow === 262144),
+    "覆盖值打进每条 roster 行（descriptor 同源）"
+  );
+
+  // 目录声明窗口的条目不受覆盖影响：桩里换一条带 context_length 的模型再存
+  // 另一个档位——目录缓存按覆盖值分键（models:<override>），同键会命中旧桩
+  // 的缓存体，换档位 = 换缓存键 = 强制真拉新桩。
+  currentFetch = async () => new Response(JSON.stringify({
+    object: "list",
+    data: [
+      { id: "Qwen/Qwen3.5-35B-A3B" },
+      { id: "Declared/Big-Window", context_length: 1000000 }
+    ]
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  const mixed = await call(handlers, PROVIDER_PATH + "/context", makeReq("POST", { body: { contextWindow: 524288 } }));
+  assert.equal(mixed.body.contextWindow, 524288);
+  assert.equal(mixed.body.roster.find((r) => r.id === "Declared/Big-Window").contextWindow, 1000000, "目录已声明的窗口不被覆盖");
+  assert.equal(mixed.body.roster.find((r) => r.id === "Qwen/Qwen3.5-35B-A3B").contextWindow, 524288, "未声明的走覆盖");
+
+  // 清除：null 回跟随目录（顶层 null、行回兜底）。
+  currentFetch = NO_NETWORK;
+  currentFetch = async () => new Response(JSON.stringify({
+    object: "list",
+    data: [{ id: "Qwen/Qwen3.5-35B-A3B" }]
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  const cleared = await call(handlers, PROVIDER_PATH + "/context", makeReq("POST", { body: { contextWindow: null } }));
+  assert.equal(cleared.body.contextWindow, null, "null 清除覆盖");
+  assert.ok(cleared.body.roster.every((r) => r.contextWindow === 128000), "清除后 roster 行回目录兜底");
+
+  // reset 连覆盖一起忘（forget 的三键语义）。
+  await call(handlers, PROVIDER_PATH + "/context", makeReq("POST", { body: { contextWindow: 131072 } }));
+  const reset = await call(handlers, PROVIDER_PATH + "/reset", makeReq("POST", { body: {} }));
+  assert.equal(reset.body.contextWindow, null, "reset 忘掉覆盖");
+
+  // 坏 body：400（缺字段 / 非数字 / 非正数）——与 roster 同一口径，不静默当重置。
+  for (const bad of [{}, { contextWindow: "262144" }, { contextWindow: 0 }, { contextWindow: -1 }]) {
+    const res = makeRes();
+    await handlers.get(PROVIDER_PATH + "/context")(makeReq("POST", { body: bad }), res);
+    assert.equal(res.status, 400, `非法 body ${JSON.stringify(bad)} 必须 400，实际 ${res.status}`);
+    assert.equal(res.body.ok, false, "400 响应体标 ok:false");
+  }
+}
+
 // ── 坏 body：400 ──
 // 原先这里写的是 `status === 200 || status === 400`「皆可」——但实现是明确的
 // 400（routes/provider.ts:152-155：typeof body.enabled !== "boolean" 一律拒），

@@ -100,6 +100,11 @@ export interface ProviderStatus {
   allowed: "all" | "none" | "list";
   /** 允许清单；空数组语义是「不过滤」（与哨兵 HIDE_ALL_MODELS 区分）。 */
   enabledIds: string[];
+  /**
+   * 面板保存的全局上下文窗口覆盖（tokens），`null` = 跟随目录。作用于目录
+   * 未声明窗口的模型；descriptor / roster / 签名都在打标后派生。
+   */
+  contextWindow: number | null;
   /** 面板清单：每行带可用性与额度耗尽标记。 */
   roster: {
     id: string;
@@ -107,6 +112,8 @@ export interface ProviderStatus {
     vision: boolean;
     available: boolean;
     quotaExhausted: boolean;
+    /** 该行生效的窗口（覆盖或目录声明后的归一值；总是正数）。 */
+    contextWindow?: number;
   }[];
 }
 

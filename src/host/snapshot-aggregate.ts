@@ -61,6 +61,7 @@ function providerDegraded(error: string): Snapshot["provider"] {
     enabledCount: 0,
     allowed: "all",
     enabledIds: [],
+    contextWindow: null,
     roster: []
   };
 }
@@ -103,9 +104,13 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
   // 目录走缓存键 coalescing，命中时近乎瞬时；真正的问题是**依赖方向反了**：
   // 免认证的目录取数原先排在要鉴权的余额取数之后，而后者最坏是整段 inference
   // 超时。令牌一过期，一条免费的请求就被拖满整个超时窗口。
+  // 目录取数带**当前窗口覆盖**：与轮询/写路由共用同一个带指纹的缓存键，面板
+  // roster 与真实注册看到的是同一份打标条目，不会各说一套。覆盖读不到按目录
+  // 原样取（null），不阻塞快照。
+  const contextOverride = await providerStore.contextWindow().catch(() => null);
   const [balance, models] = await Promise.all([
     soft(inference.fetchBalance()),
-    soft(inference.fetchModels())
+    soft(inference.fetchModels(contextOverride))
   ]);
   const modelIds = models.ok ? models.value.ids : [];
   const modelEntries = models.ok ? models.value.entries : [];
@@ -141,6 +146,10 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     // 轮询侧那套把「空清单」读成「没有答案」，于是面板与 Host 会各说一套。
     const stored = await providerStore.enabledIds().catch(() => null);
     const enabledIds = resolveEnabledIds(stored, publisher.state.enabledIds);
+    // 窗口覆盖同样落盘（同一份 provider.json）；读抛错按「未设置」降级，与开关
+    // 同一纪律——读不到不能把整块 provider 状态打掉。roster 行的 contextWindow
+    // 已由 fetchModels 在归一前打上覆盖标记，这里不再二次加工。
+    const contextWindow = await providerStore.contextWindow().catch(() => null);
     const allowed = resolveAllowedList(enabledIds);
     const allowSet = new Set(enabledIds);
     const enabledCount = allowed === "all"
@@ -158,6 +167,7 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
       enabledCount,
       allowed,
       enabledIds,
+      contextWindow,
       roster
     } satisfies Snapshot["provider"];
   })());

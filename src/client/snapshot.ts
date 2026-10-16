@@ -150,6 +150,7 @@ export const DEGRADED_PROVIDER: ProviderStatus = Object.freeze({
   enabledCount: 0,
   allowed: "all",
   enabledIds: [],
+  contextWindow: null,
   roster: []
 });
 
@@ -172,7 +173,12 @@ export function providerOf(raw: unknown): ProviderStatus {
         name: typeof row.name === "string" && row.name !== "" ? row.name : id,
         vision: row.vision === true,
         available: row.available !== false,
-        quotaExhausted: row.quotaExhausted === true
+        quotaExhausted: row.quotaExhausted === true,
+        // 旧 Host 的 roster 行没有窗口字段：undefined 透传为 undefined（badge
+        // 缺席），而不是伪装成某个默认值。
+        contextWindow: typeof row.contextWindow === "number" && Number.isFinite(row.contextWindow) && row.contextWindow > 0
+          ? row.contextWindow
+          : undefined
       };
     }).filter((entry) => entry.id !== "")
     : [];
@@ -188,6 +194,11 @@ export function providerOf(raw: unknown): ProviderStatus {
     enabledCount: typeof p.enabledCount === "number" && Number.isFinite(p.enabledCount) ? p.enabledCount : 0,
     allowed: p.allowed === "none" ? "none" : p.allowed === "list" ? "list" : "all",
     enabledIds: ids,
+    // 旧 Host 不带覆盖字段 → null（跟随目录）；0 / 负数 / NaN / 字符串都不是
+    // 可用的窗口，同样读作未设置——与 Host 侧 normalizeContextWindow 同判据。
+    contextWindow: typeof p.contextWindow === "number" && Number.isFinite(p.contextWindow) && p.contextWindow > 0
+      ? p.contextWindow
+      : null,
     roster
   };
 }

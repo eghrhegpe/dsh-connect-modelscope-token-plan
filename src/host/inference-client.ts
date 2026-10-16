@@ -175,10 +175,24 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
      * cacheSeconds。返回归一后的目录条目（entries，M4 用来建 descriptor）与
      * 派生的 id 列表（ids，旧消费方继续可用）——两条路线读同一份条目，不会漂移；
      * 形状漂移抛 UPSTREAM_ERROR 并带 detail。
+     *
+     * `contextOverride`（tokens）是面板保存的全局上下文窗口覆盖：非 null 时在
+     * 归一**之前**改写每条原始条目——删掉目录可能携带窗口的四个原始拼写键、写上
+     * `contextWindow`。这是唯一能可靠生效的注入点：`normalizeEntry` 按
+     * `context_length/context_window/contextWindow/max_context_tokens` 顺序读
+     * 首个正数，任何只改归一后字段的窄打标都会被 `...source` 展开里的旧键回读
+     * 污染。删四键再写宽形状键，不依赖键序，目录声明与覆盖不可能同时在场。
+     * descriptor、roster、catalogSignature 都从这份归一条目派生，一处打标全链
+     * 路生效；签名含窗口值，覆盖变化自动触发重新注册。
+     *
+     * 覆盖值**参与缓存键**：coalesced 缓存里存的条目已是打标后的形状，若仍用
+     * 字面量 `"models"` 键，保存覆盖后的一个 TTL 内会读到未打标的旧条目（面板
+     * 显示变了、注册却没变）。带指纹后不同覆盖值各自缓存，互不串味。
+     * @param {number|null} [contextOverride] - 全局窗口覆盖（tokens），null = 跟随目录。
      */
-    async fetchModels(): Promise<{ entries: CatalogEntry[]; ids: string[]; fetchedAt: string }> {
+    async fetchModels(contextOverride?: number | null): Promise<{ entries: CatalogEntry[]; ids: string[]; fetchedAt: string }> {
       const url = settings.apiBase + "/models";
-      const body = await read("models", async () => {
+      const body = await read(`models:${contextOverride ?? "catalog"}`, async () => {
         const response = await fetchWithTimeout(url, { method: "GET" });
         if (!response.ok) {
           const message = await readErrorMessage(response);
@@ -203,7 +217,25 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
           .map((raw) => {
             const id = str((raw as Record<string, unknown>).id, "");
             const tags = tagsById.get(id) ?? [];
-            return normalizeEntry({ ...(raw as Record<string, unknown>), tasks: tags.length > 0 ? tags : undefined });
+            const source = { ...(raw as Record<string, unknown>), tasks: tags.length > 0 ? tags : undefined };
+            if (contextOverride != null) {
+              // 宽形状覆盖，但**目录声明优先**：先按 contextWindowOf 同序找旧拼写
+              // 首个正数——目录声明过窗口的条目不动（覆盖只作用于「没声明」的
+              // 模型，这是面板文案的承诺）；没声明的删掉四个键（可能带 0/负数/
+              // 非数字的残值）再写唯一答案。normalizeEntry 的逐键顺序是
+              // context_length → context_window → contextWindow →
+              // max_context_tokens，保留任何一个旧键都会赢过覆盖值。
+              const CONTEXT_KEYS = ["context_length", "context_window", "contextWindow", "max_context_tokens"];
+              const declared = CONTEXT_KEYS.some((key) => {
+                const value = (source as Record<string, unknown>)[key];
+                return typeof value === "number" && Number.isFinite(value) && value > 0;
+              });
+              if (!declared) {
+                for (const key of CONTEXT_KEYS) delete source[key];
+                source.contextWindow = contextOverride;
+              }
+            }
+            return normalizeEntry(source);
           })
           .filter((entry) => entry.id !== "");
         const ids2 = entries.map((entry) => entry.id);

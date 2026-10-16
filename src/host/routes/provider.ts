@@ -1,11 +1,13 @@
 /**
- * provider 注册路由：开关读/写、允许清单保存、回退默认。
+ * provider 注册路由：开关读/写、允许清单保存、上下文窗口覆盖、回退默认。
  *
- * 三件事（§9）：
- *   - GET  `PROVIDER_PATH`        读当前开关 + 目录 + 允许清单 + 注册状态（无副作用）；
- *   - POST `PROVIDER_PATH`        body `{enabled?: boolean}` → 保存面板开关并重注册；
- *   - POST `PROVIDER_PATH/roster` body `{enabledIds?: string[]}` → 保存允许清单并重注册；
- *   - POST `PROVIDER_PATH/reset`  忘掉面板开关与允许清单，回到 patch 默认。
+ * 四件事（§9）：
+ *   - GET  `PROVIDER_PATH`           读当前开关 + 目录 + 允许清单 + 注册状态（无副作用）；
+ *   - POST `PROVIDER_PATH`           body `{enabled?: boolean}` → 保存面板开关并重注册；
+ *   - POST `PROVIDER_PATH/roster`    body `{enabledIds?: string[]}` → 保存允许清单并重注册；
+ *   - POST `PROVIDER_PATH/context`   body `{contextWindow: number|null}` → 保存全局上下文
+ *     窗口覆盖并重注册（null = 跟随目录）；
+ *   - POST `PROVIDER_PATH/reset`     忘掉面板开关、允许清单与窗口覆盖，回到 patch 默认。
  *
  * `withOrigin` 围栏与 `refuseMethod` 照现有路由；写开关/清单失败**必须传播**
  * （`ok:false` + error），不静默吞——这是用户的显式操作，面板必须看见它没生效。
@@ -37,6 +39,8 @@ interface ProviderRouteWiring {
     forget: () => Promise<void>;
     enabledIds?: () => Promise<string[] | null>;
     saveEnabledIds?: (ids: string[]) => Promise<void>;
+    contextWindow?: () => Promise<number | null>;
+    saveContextWindow?: (value: number | null) => Promise<void>;
   };
   publisher: {
     state: {
@@ -55,9 +59,16 @@ interface ProviderRouteWiring {
 
 /**
  * 读目录条目，读不到按空目录降级（GET 不能因目录失败把整个面板状态打掉）。
+ *
+ * 读目录前先取**当前窗口覆盖**传给 `fetchModels`：条目在归一前打上覆盖标记，
+ * descriptor / roster / catalogSignature 都从这份条目派生。每个写路由（开关、
+ * 清单、窗口、reset）都经这里取条目再 publish，所以任何一次重注册都带着最新
+ * 覆盖——否则先存窗口、再存清单会把未打标的目录重新注册上去，覆盖静默失效到
+ * 下一轮轮询。
  */
-async function readEntries(inference: ProviderRouteWiring["inference"]): Promise<unknown[]> {
-  const catalog = await inference.fetchModels().catch((error) => {
+async function readEntries(inference: ProviderRouteWiring["inference"], providerStore?: ProviderRouteWiring["providerStore"]): Promise<unknown[]> {
+  const contextWindow = await optional(providerStore?.contextWindow?.(), null);
+  const catalog = await inference.fetchModels(contextWindow).catch((error) => {
     return { entries: [], __error: error };
   });
   return Array.isArray(catalog?.entries) ? catalog.entries : [];
@@ -106,7 +117,10 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
   const snapshot = async (extra: Record<string, unknown> = {}) => {
     const panelSwitch = await optional(providerStore.enabled());
     const enabledIds = await readEnabledIds(providerStore, publisher.state.enabledIds);
-    const entries = await readEntries(inference);
+    const contextWindow = await optional(providerStore.contextWindow?.(), null);
+    // 覆盖值要喂进 fetchModels（不只是顶层字段）：否则 GET 的 roster 行显示
+    // 目录原始窗口，而顶层面板显示覆盖值——同一份快照自相矛盾。
+    const entries = await readEntries(inference, providerStore);
     const roster = rosterWithAvailability(entries, []);
     const allowed = allowedOf(enabledIds);
     const modelCount = roster.length;
@@ -128,6 +142,7 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
           : roster.filter((row) => allowSet.has(row.id)).length,
       allowed,
       enabledIds,
+      contextWindow,
       roster,
       ...extra
     };
@@ -160,7 +175,7 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
         // 开关只决定「提不提供模型」，不决定「提供哪些」——所以用当前目录立即重
         // 注册，而不是等下一次轮询。失败在 publish 内部回滚到上一对并落进
         // publisher.state.error。
-        const entries = await readEntries(inference);
+        const entries = await readEntries(inference, providerStore);
         await publisher.publish(entries, await readEnabledIds(providerStore, publisher.state.enabledIds), []);
       } catch (error) {
         respondError(response, error);
@@ -192,8 +207,40 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
         // 持久化允许清单（provider-store 具备时）；没有就先只 publish，清单随下次
         // 重注册生效。
         await providerStore.saveEnabledIds?.(ids);
-        const entries = await readEntries(inference);
+        const entries = await readEntries(inference, providerStore);
         await publisher.publish(entries, ids, []);
+      } catch (error) {
+        respondError(response, error);
+        return;
+      }
+      writeJson(response, 200, await snapshot(), { "cache-control": "no-store" });
+    }, settings.allowedHosts)
+  }));
+
+  // 全局上下文窗口覆盖路由（POST 写 contextWindow；null = 跟随目录）。
+  offs.push(ctx.webServer.register({
+    kind: "exact",
+    path: `${PROVIDER_PATH}/context`,
+    handler: withOrigin(async (request: any, response: any) => {
+      const method = request.method === undefined ? "POST" : request.method;
+      if (method !== "POST") {
+        refuseMethod(response);
+        return;
+      }
+      const body = await readJsonBodyOr400(request, response);
+      if (body === null) return;
+      // 与 roster 同一纪律：缺字段要拒。`undefined` 静默当作「跟随目录」会把
+      // 一个格式坏掉的 body 读成重置——用户以为是保存，实际什么都没存。
+      if (body.contextWindow !== null && (typeof body.contextWindow !== "number" || !Number.isFinite(body.contextWindow) || body.contextWindow <= 0)) {
+        writeJson(response, 400, { ok: false, error: "expected { contextWindow: number | null }" }, { "cache-control": "no-store" });
+        return;
+      }
+      try {
+        // 持久化覆盖（provider-store 具备时）；没有就先只 publish，覆盖随下次
+        // 重注册生效——与 roster 路由对 saveEnabledIds 的降级同一形状。
+        await providerStore.saveContextWindow?.(body.contextWindow);
+        const entries = await readEntries(inference, providerStore);
+        await publisher.publish(entries, await readEnabledIds(providerStore, publisher.state.enabledIds), []);
       } catch (error) {
         respondError(response, error);
         return;
@@ -220,7 +267,7 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
         // = 不过滤全部模型。
         await providerStore.forget();
         await providerStore.saveEnabledIds?.([]);
-        const entries = await readEntries(inference);
+        const entries = await readEntries(inference, providerStore);
         await publisher.publish(entries, [], []);
       } catch (error) {
         respondError(response, error);

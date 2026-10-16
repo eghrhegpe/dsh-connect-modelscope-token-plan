@@ -4,7 +4,7 @@
  * @module dsh-connect-modelscope-token-plan/client/panel-page
  */
 import { SectionCard, BalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm, ProviderCard, DrawCard } from "./cards.ts";
-import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, HIDE_ALL_MODELS } from "./const.ts";
+import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, HIDE_ALL_MODELS } from "./const.ts";
 import { format, errorText, isoTime } from "./format.ts";
 import { getJson, postJson, writeFailure } from "./http.ts";
 import { viewOf, providerOf, drawOf, DEGRADED_PROVIDER, DEGRADED_DRAW } from "./snapshot.ts";
@@ -124,6 +124,12 @@ export function PanelPage({ tt, localeSubscribe }: {
     void runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds: normalized });
   }, [runProviderWrite]);
   const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
+  // 全局上下文窗口覆盖：与开关/清单同一写入口（成功后刷快照回显落盘值）。
+  // null = 跟随目录（清除覆盖）。Host 保存后会立即带覆盖重注册，签名变化自动
+  // 触发重建，无需重启。
+  const saveContextWindow = useCallback((contextWindow: number | null) => {
+    void runProviderWrite(PROVIDER_CONTEXT_PATH, { contextWindow });
+  }, [runProviderWrite]);
 
   // 出图工具的开关 / 模型偏好。**与 provider 走各自的一套 busy/error**：两张卡在
   // 同一个 tab 里，共用一个 busy 会让「保存 provider 开关」把出图那张卡也置灰。
@@ -268,6 +274,7 @@ export function PanelPage({ tt, localeSubscribe }: {
         error: providerError,
         onToggle: toggleProvider,
         onSaveList: saveRoster,
+        onSaveContextWindow: saveContextWindow,
         onReset: resetProvider,
         tokenPresent: data?.token?.present === true,
         tt

@@ -8,7 +8,7 @@ import { count, format, isoTime } from "./format.ts";
 import { h, useEffect, useMemo, useState } from "./runtime.ts";
 import type { DictionaryKey, Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
-import { HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, modelscopeModelUrl, FEATURED_OWNERS, catalogOwner } from "./const.ts";
+import { HIDE_ALL_MODELS, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, modelscopeModelUrl, FEATURED_OWNERS, catalogOwner, formatWindow } from "./const.ts";
 import { providerOf, drawOf } from "./snapshot.ts";
 import { ToggleSwitch } from "./toggle-switch.ts";
 import type { BalanceData, ProviderStatus, DrawStatus, QuotaEvent, Snapshot, TrendBucket, TokenStatus } from "../shared/wire.ts";
@@ -261,13 +261,15 @@ export function TokenForm({ token, busy, error, onSave, onForget, onVerify, veri
  * 额度耗尽的模型保留在清单里（灰显、勾选框禁用），这是故意的：roster 是目录
  * 事实，picker 那边由 Host 自己丢掉它们，面板不替它删。
  */
-export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onReset, tokenPresent, tt }: {
+export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSaveContextWindow, onReset, tokenPresent, tt }: {
   provider: ProviderStatus | null;
   busy: boolean;
-  /** 上一次开关/清单写盘的失败（调用方持有 busy 与错误，ProviderCard 只渲染）。 */
+  /** 上一次开关/清单/窗口写盘的失败（调用方持有 busy 与错误，ProviderCard 只渲染）。 */
   error: string | null;
   onToggle: (enabled: boolean) => void;
   onSaveList: (ids: string[]) => void;
+  /** 保存全局上下文窗口覆盖；`null` = 跟随目录（清除覆盖）。 */
+  onSaveContextWindow?: (contextWindow: number | null) => void;
   onReset: () => void;
   /** 面板是否已有令牌；缺省 = 未知，不渲染「先去配置」提示。 */
   tokenPresent?: boolean | undefined;
@@ -323,6 +325,47 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onRe
 
   // 源标注：面板保存的值 / patch 的默认。
   const sourceKey = status.source === "panel" ? "provider.source.panel" : "provider.source.config";
+
+  // 全局上下文窗口选择器（作用于目录未声明窗口的模型）。
+  //
+  // 档位值用 2 的幂（模型界惯例的 K=1024）：128K=131072 … 1M=1048576。选中态
+  // 直接读 `status.contextWindow`（保存后由调用方刷快照回显落盘值，select 是
+  // 受控的，不需要本地 draft）；落盘值不在档位里（例如手动改过 provider.json）
+  // 时落到 value 与任何 option 都不匹配 → 浏览器显示第一项，但下一发 onChange
+  // 仍发正确的值——可接受的边缘表现，不为它造一个「自定义」档位。
+  const CONTEXT_TIERS: readonly { value: number; label: string }[] = [
+    { value: 131072, label: "128K" },
+    { value: 262144, label: "256K" },
+    { value: 524288, label: "512K" },
+    { value: 1048576, label: "1M" }
+  ];
+  const contextNode = onSaveContextWindow === undefined
+    ? null
+    : h(
+        "div",
+        { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "0 0 8px" } },
+        h("label", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" }, htmlFor: "provider-context-window" }, tt("provider.contextWindow")),
+        h(
+          "select",
+          {
+            id: "provider-context-window",
+            style: { ...S.rosterBulk, width: "auto" },
+            disabled: busy,
+            // 受控 select：选中态写在 select 的 `value` 上（React 对 <option
+            // selected> 发告警），null = 「默认」档（value=""）。保存后调用方刷
+            // 快照回显落盘值；落盘值不在档位里时 value 不匹配任何 option，浏览器
+            // 显示第一项，但下一发 onChange 仍发正确的值——可接受的边缘表现。
+            value: status.contextWindow === null ? "" : String(status.contextWindow),
+            onChange: (event: unknown) => {
+              const value = String((event as { target?: { value?: string | null } }).target?.value ?? "");
+              onSaveContextWindow(value === "" ? null : Number(value));
+            }
+          },
+          h("option", { value: "", key: "default" }, tt("provider.contextDefault")),
+          CONTEXT_TIERS.map((tier) => h("option", { value: String(tier.value), key: String(tier.value) }, tier.label))
+        ),
+        h("span", { style: { ...S.muted, fontSize: 11 }, title: tt("provider.contextHint") }, tt("provider.contextHint"))
+      );
 
   const switchRow = h(
     "div",
@@ -385,6 +428,9 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onRe
                   h("span", { style: S.modelName, title: id }, row.name)
                 ),
                 row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null,
+                typeof row.contextWindow === "number"
+                  ? h("span", { style: S.modelBadge, title: tt("provider.contextWindow") }, formatWindow(row.contextWindow))
+                  : null,
                 (FEATURED_OWNERS as readonly string[]).includes(catalogOwner(row.id))
                   ? h("span", { style: S.modelBadgeFeatured, title: tt("models.featuredTitle") }, tt("provider.featured"))
                   : null,
@@ -405,6 +451,7 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onRe
     switchRow,
     statusNode,
     tokenHint,
+    contextNode,
     h("div", { style: { ...S.sectionTitle, margin: "18px 0 8px" } }, tt("provider.models")),
     rosterBlock,
     error !== null ? h("div", { style: S.formError, role: "alert" }, error) : null

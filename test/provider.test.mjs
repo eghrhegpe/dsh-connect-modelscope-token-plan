@@ -287,6 +287,51 @@ import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_S
       "并发下清单必须落盘，且不被另一次保存整个丢掉"
     );
   }
+
+  // §8c 上下文窗口覆盖：三态对称 + 与另两个键互不覆盖 + 非法值拒绝。
+  //
+  // contextWindow 是 v1 形状上的**新增可选键**（不 bump PROVIDER_VERSION）：
+  // null = 跟随目录，正数 = 全局覆盖。落盘语义与 enabled/enabledIds 一致——
+  // patch 三态（undefined 保留 / null 清除 / 值写入），断言同样打在磁盘上。
+  {
+    const winDir = mkdtempSync(join(tmpdir(), "ms-provider-window-"));
+    const win = createFileProviderStore({ dir: winDir });
+    // 文件可能整份不存在（纯读从不建文件）——缺失按空载荷读。
+    const diskOf = () => {
+      try {
+        return JSON.parse(readFileSync(join(winDir, "provider.json"), "utf8"));
+      } catch {
+        return {};
+      }
+    };
+    // 默认：未设置 = null（跟随目录）
+    assert.equal(await win.contextWindow(), null, "未设置时 contextWindow 读 null");
+    assert.equal(diskOf().contextWindow, undefined, "未写过时磁盘上没有该键");
+    // 写入一个档位
+    await win.saveContextWindow(262144);
+    assert.equal(await win.contextWindow(), 262144, "保存后读到 256K 档位值");
+    assert.equal(diskOf().contextWindow, 262144, "档位值落盘");
+    // 与另两个键互不覆盖（双向）
+    await win.saveEnabledIds(["w/One"]);
+    assert.equal(await win.contextWindow(), 262144, "保存清单不丢窗口覆盖");
+    await win.save(true);
+    assert.equal(await win.contextWindow(), 262144, "保存开关不丢窗口覆盖");
+    assert.equal(diskOf().enabledIds.length, 1, "窗口保存后清单保持（回向）");
+    // 清除：null 回到跟随目录
+    await win.saveContextWindow(null);
+    assert.equal(await win.contextWindow(), null, "null 清除覆盖");
+    assert.equal(diskOf().contextWindow, undefined, "清除后磁盘上没有该键");
+    assert.equal(await win.enabled(), true, "清除覆盖不动开关");
+    // 非法值：TypeError（0、负数、非数字、NaN、Infinity）
+    for (const bad of [0, -1024, "131072", NaN, Infinity, true]) {
+      await assert.rejects(
+        () => win.saveContextWindow(bad),
+        TypeError,
+        `非法窗口值 ${String(bad)} 必须拒绝`
+      );
+    }
+    assert.equal(await win.contextWindow(), null, "拒绝后覆盖保持未设置");
+  }
   // ADR-006 写侧守卫：新版本文件拒绝覆盖
   const futureDir = mkdtempSync(join(tmpdir(), "ms-provider-store-future-"));
   writeFileSync(join(futureDir, "provider.json"), JSON.stringify({ version: 99, enabled: true }));

@@ -63,6 +63,14 @@ interface ProviderPayload {
   enabled: boolean | null;
   enabledIds: string[] | null;
   /**
+   * Panel-saved context-window override (tokens), or `null` = follow the
+   * catalog. A NEW key on the SAME v1 shape: the reader treats an absent key as
+   * `null`, so older builds read these files unchanged (unknown keys are
+   * already ignored) and this build reads older files with no override. It is
+   * deliberately NOT version-gated: no incompatible persisted form changed.
+   */
+  contextWindow: number | null;
+  /**
    * The version number the file declared, or `null` when the file is absent or
    * unreadable. Carried through so the READ side can tell "never saved" apart
    * from "saved by a build this one cannot read" — see {@link versionNote}.
@@ -75,7 +83,7 @@ interface ProviderPayload {
  * collapses here, so the three call sites that produce it stay in step instead
  * of each spelling out the same three `null`s.
  */
-const EMPTY_PAYLOAD: ProviderPayload = { enabled: null, enabledIds: null, version: null };
+const EMPTY_PAYLOAD: ProviderPayload = { enabled: null, enabledIds: null, contextWindow: null, version: null };
 
 /** Shape version, bumped when the persisted form changes incompatibly. */
 export const PROVIDER_VERSION = 1;
@@ -135,6 +143,19 @@ export function providerDir(profile: string | null) {
  */
 export function normalizeEnabled(raw: unknown): boolean | null {
   return typeof raw === "boolean" ? raw : null;
+}
+
+/**
+ * Normalize a context-window value: a positive finite number, or `null`
+ * ("follow the catalog"). Anything else — strings, zero, negative, NaN,
+ * Infinity — reads as no override, mirroring how {@link normalizeEnabled}
+ * answers "nothing usable" instead of inventing a default.
+ * @param {unknown} raw - the persisted or posted value.
+ * @returns {number|null} the window in tokens, or `null` when nothing usable.
+ */
+export function normalizeContextWindow(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return null;
+  return raw;
 }
 
 /**
@@ -270,10 +291,11 @@ export function createFileProviderStore(options: StoreOptions = {}) {
   const parseAt = async (file: string): Promise<ProviderPayload> => {
     const source = obj(await readStateJson(file));
     const version = typeof source.version === "number" ? source.version : null;
-    if (!isKnownProviderVersion(version)) return { enabled: null, enabledIds: null, version };
+    if (!isKnownProviderVersion(version)) return { enabled: null, enabledIds: null, contextWindow: null, version };
     return {
       enabled: normalizeEnabled(source.enabled),
       enabledIds: normalizeEnabledIds(source.enabledIds),
+      contextWindow: normalizeContextWindow(source.contextWindow),
       version
     };
   };
@@ -365,10 +387,10 @@ export function createFileProviderStore(options: StoreOptions = {}) {
    * 结果不会带进过期值。此前的写法是写完再 `readPayload()` 读回另一半——那条回读
    * 走的是 TTL 缓存，拿到的是**写入前**的值，并发时会把一个较新的缓存项顶成旧值。
    *
-   * @param {object} patch - `{ enabled?, enabledIds? }` to persist.
+   * @param {object} patch - `{ enabled?, enabledIds?, contextWindow? }` to persist.
    * @returns {Promise<string|null>} the write refusal reason, or `null`.
    */
-  const patchPayload = (patch: { enabled?: boolean | null; enabledIds?: string[] | null }): Promise<string | null> => {
+  const patchPayload = (patch: { enabled?: boolean | null; enabledIds?: string[] | null; contextWindow?: number | null }): Promise<string | null> => {
     const run = writeChain.then(async () => {
       const current = await parsePayload();
       /** `undefined` keeps the stored key; `null` clears it (key absent). */
@@ -377,9 +399,11 @@ export function createFileProviderStore(options: StoreOptions = {}) {
       if (enabled !== null) body.enabled = enabled;
       const enabledIds = patch.enabledIds === undefined ? current.enabledIds : patch.enabledIds;
       if (enabledIds !== null) body.enabledIds = enabledIds;
+      const contextWindow = patch.contextWindow === undefined ? current.contextWindow : patch.contextWindow;
+      if (contextWindow !== null) body.contextWindow = contextWindow;
       body.updatedAt = new Date().toISOString();
       const refusal = await writePayload(body);
-      if (refusal === null) cache.remember({ enabled, enabledIds, version: PROVIDER_VERSION });
+      if (refusal === null) cache.remember({ enabled, enabledIds, contextWindow, version: PROVIDER_VERSION });
       return refusal;
     });
     writeChain = run.catch(() => null);
@@ -401,6 +425,16 @@ export function createFileProviderStore(options: StoreOptions = {}) {
      */
     async enabledIds() {
       return (await readPayload()).enabledIds ?? [];
+    },
+    /**
+     * The saved context-window override (tokens), or `null` = follow the
+     * catalog. `null` is a real answer here, not absence: the override is
+     * optional by design, and the caller (snapshot / stamping) decides what
+     * "follow the catalog" means.
+     * @returns {Promise<number|null>}
+     */
+    async contextWindow() {
+      return (await readPayload()).contextWindow;
     },
     /**
      * Whether the panel has ever saved a value here.
@@ -471,15 +505,30 @@ export function createFileProviderStore(options: StoreOptions = {}) {
       if (refusal !== null) throw new Error(refusal);
     },
     /**
+     * Persist the context-window override, preserving the saved switch and
+     * allow-list. `null` clears the override back to "follow the catalog".
+     * @param {number|null} value - the window in tokens, or `null` to clear.
+     * @returns {Promise<void>}
+     */
+    async saveContextWindow(value: number | null) {
+      const window = normalizeContextWindow(value);
+      if (value !== null && window === null) throw new TypeError("provider context window expects a positive finite number");
+      const refusal = await patchPayload({ contextWindow: window });
+      if (refusal !== null) throw new Error(refusal);
+    },
+    /**
      * Forget the panel-saved values: the config default and "no filter" rule
-     * again.
+     * again. The context override is forgotten WITH them — the reset button
+     * means "back to the way this plugin ships", and the override is panel
+     * state in exactly the same sense.
      * @returns {Promise<void>}
      */
     async forget() {
-      // No `enabled`/`enabledIds` keys: "not set" is the absence of an answer,
-      // not `false`/an empty list. A refused write (ADR-006) leaves the file
-      // exactly as it was, so the throw below is the only signal.
-      const refusal = await patchPayload({ enabled: null, enabledIds: null });
+      // No `enabled`/`enabledIds`/`contextWindow` keys: "not set" is the
+      // absence of an answer, not `false`/an empty list/`null`. A refused write
+      // (ADR-006) leaves the file exactly as it was, so the throw below is the
+      // only signal.
+      const refusal = await patchPayload({ enabled: null, enabledIds: null, contextWindow: null });
       if (refusal !== null) throw new Error(refusal);
     }
   };

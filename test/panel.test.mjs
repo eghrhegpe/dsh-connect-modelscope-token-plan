@@ -197,6 +197,7 @@ const ALL_SUFFIXES = [
   "/provider",
   "/provider/roster",
   "/provider/reset",
+  "/provider/context",
   "/draw",
   "/draw/reset"
 ];
@@ -204,7 +205,7 @@ const ALL_SUFFIXES = [
 // provider.ts 里用 `${PROVIDER_PATH}/reset` 拼的派生路由——两个家族的写法不同，
 // 清单按各自实际形态归类，不要为了让分类整齐去改生产代码的形状。
 const LITERAL_SUFFIXES = ["/snapshot", "/models", "/token", "/token/forget", "/probe", "/provider", "/draw", "/draw/reset"];
-const DERIVED_SUFFIXES = ["/provider/roster", "/provider/reset"];
+const DERIVED_SUFFIXES = ["/provider/roster", "/provider/reset", "/provider/context"];
 
 for (const suffix of ALL_SUFFIXES) {
   // ① client 产物里必须有这条模板（浏览器实际打的路径）。
