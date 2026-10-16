@@ -19,11 +19,15 @@ M0–M4+ 全部落地，当前版本 0.2.0：
 
 ## Backlog（未做，按优先级）
 
-- **peer 契约的测试覆盖**（当前**完全为零**）：`@deepseek-ai/dsh-llm` 的 `resolveRetryPolicy` 形状、
-  `dsh-llm-pi-ai` 的 `classifyPiAiError` 判定顺序与措辞命中面、以及 `llm-adapter.ts` / `llm-adapter-core.ts`
-  的整条 peer-dependent 装配链，都没有任何测试钉住。验证它们需要运行时 peer，而 peer 未 vendored 进本仓库，
-  所以进不了 `npm test` 离线门禁。后果：peer 若改策略形状或分类顺序，本 provider 会在运行时静默失效，
-  没有门禁会红。这是本仓库最大的覆盖缺口，与下面的 e2e 是同一条路径的两种解法（vendored 假 peer，或真 Host e2e）。
+- **peer 契约的测试覆盖**（2026-10-16 `3ad4b07` 补掉「我方调用形状」一侧）：`test/llm-adapter.test.mjs`
+  经 `test/helpers/peer-stub-loader.mjs`（Node module customization hooks 拦截四个 peer 入口、记录式假
+  peer）钉住了 `llm-adapter.ts` / `llm-adapter-core.ts` 整条装配链——`createProvider` 调用形状与
+  descriptor 契约、`resolveRetryPolicy` 传参形状、`PiAiAdapter` 构造（profiles 行 / auth 惰性 / 图片
+  hook）、观察层「传了才包」且**重分类先于观察**的顺序、允许清单 / maxTokens 条件出现。
+  **仍然钉不住的是 peer 真身**：真 `classifyPiAiError` 的措辞命中面与判定顺序、真 `resolveRetryPolicy`
+  的接受面——假 peer 是我们写的，peer 升级改形状时本侧无门禁会红（`llm-adapter.ts` 头注已写明这条
+  诚实边界，`test/retry.test.mjs` / `test/error-fix.test.mjs` 头注同）。剩余解法就是下面的 e2e：
+  真 Host + 假魔搭平台进 CI，让真 peer 在门禁里跑一遍装配链。
 - **e2e**（真 Host + 假魔搭平台）进 CI 门禁；
 - **client 的 DOM / 事件 / 时序层已补上门禁**（`test/dom-render.test.mjs`：真产物 + jsdom 真 DOM + 一套最小替身 React，2026-10-15）。现在钉得住的：`props.onClick` / `onChange` 真的绑成了真事件、打字经 state 回流进写盘 payload、busy 期间控件真的 `disabled`（真浏览器语义：点不动）、挂载即首轮轮询、切后台 `clearInterval` / 回前台补一发 / 失败退避不低于 60s、在途请求在顶替与卸载时真的 abort、慢响应不覆盖快响应、写失败以 `role=alert` 上屏、契约漂移那句话上屏。变异审计：同一批 16 条变异，旧的结构套件抓住 0 条，这套抓住 16 条（spec 见 [tools/dev/README.md](tools/dev/README.md)）。
 - **client hooks 剩下的覆盖缺口**（2026-10-15 补掉一半）：reconciler 那一侧已由
