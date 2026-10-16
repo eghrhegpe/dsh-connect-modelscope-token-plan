@@ -1,6 +1,14 @@
 # Changelog
 
-## [未发布]
+## [0.3.0] — 2026-10-16
+
+**新增「上下文窗口」全局档位 + 内置策展表（三级真值链）**（魔搭目录 `/v1/models` 不返回任何窗口字段——每个模型此前一律按 128K 兜底声明，Host 的计费/截断行为全部建立在这个默认值上）
+
+- **三级真值链**：目录真声明了窗口就用目录值（不受任何下层影响）→ 用户在面板「上下文窗口」选择器选档（默认/128K/256K/512K/1M，落盘 `provider.json` 的 `contextWindow` 键，v1 形状新增可选键，旧构建宽容读、不 bump 版本）→ 用户没设覆盖时查内置策展表 `src/host/context-catalog.ts`（models.dev 各厂 host 同 id 交叉比对取多数，2026-10-16 核对，当前目录 19 个 id 有数据：DeepSeek-V4 全系 1M、Qwen3.5 系/Step 3.x 256K、GLM-5.2 1M 等）→ 表里也没有才落 128K 兜底。零网络依赖：策展表编译期内置，不运行时拉 api.json。
+- **打标在唯一入口**：`fetchModels` 拉回目录后在 `normalizeEntry` 前宽形状打标（目录声明过窗口的条目原样保留，只对未声明的删原始四键、写覆盖值），descriptor/roster/`catalogSignature` 全链路自动吃到；`catalogSignature` 含窗口值，保存即自动重注册。缓存键带覆盖指纹（`models:<override>`），避免 TTL 内读到未打标条目。
+- **轮询同标**（复核抓出的 HIGH，发版前修掉）：`runPoll` 起初无参调 `fetchModels`，用户保存覆盖后每 `pollSeconds` 轮询都会用未打标条目 publish——`catalogSignature` 含窗口值，签名不同触发摘下重挂，覆盖静默回退、适配器每轮重建。修复后 fetch 前读落盘覆盖传入；fetch 期间覆盖被改则跳过本轮（保存路由已 publish 正确值，防倒退）。回归钉子：`test/deps-wiring.test.mjs` §3（注入 `loadAdapterModule` 假模块驱动真 publish 链，断言工厂收到的条目带覆盖；阴性对照：修复前源码下该断言红）。
+- **roster 行带窗口标注**：每行标当前生效窗口（`formatWindow`，128000 诚实显示 125K 不美化）；策展表来的值带 `*` 号与悬停说明（平台未亲口声明），与目录声明/用户覆盖区分。快照 `provider` 块新增 `contextWindow`（正常块/降级形状/`wire.ts`/client `providerOf` 四处同步）。
+- **类型层**：`ProviderRouteWiring.inference.fetchModels` 签名扩为 `(contextWindow?: number | null)`；publisher 的 `loadAdapterModule` 离线测试缝接进 `HostDeps`（真模块 import 的 peer 只在 Host 进程存在，测试进程必败）。`test/context-catalog.test.mjs` 钉策展表形状与命中语义。
 
 **新增对话框用量胶囊**（输入框工具栏 `conversation.input.right` 座席，只在会话当前选中的 provider 是 `modelscope-token-plan` 时出现）
 
