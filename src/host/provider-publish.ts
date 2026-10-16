@@ -9,9 +9,15 @@
  *   - 单点 `registerPair`（带 factory-await + shape 检查）被 publish 与 rollback
  *     两条路共用；失败时**恢复旧对**，坏 publish 不会把已在服务的模型也拉下来。
  *
- * 与姊妹插件的差异**只有**：工厂导出名 `"createModelScopeAdapter"`、`registerPair`
- * 用的 `LLM_PROVIDER_ID`/`LLM_DISPLAY_NAME`、`warnBuildFailure` 的 label
- * `"ModelScope"`。上面的四条语义原样保留——它们是 `publish-core.ts` 的骨头。
+ * 与 sensenova 版的关系：**结构同源、代码不等价**——去注释后代码行重叠 77%
+ * （2026-10-16 实测；复核：`node tools/dev/cross-repo-drift.mjs`）。所以差异**不止**
+ * 三个标签：除工厂导出名 `"createModelScopeAdapter"`、`registerPair` 用的
+ * `LLM_PROVIDER_ID`/`LLM_DISPLAY_NAME`、`warnBuildFailure` 的 label `"ModelScope"`
+ * 之外，vision 判定这里取自 `llm-models.ts`（sensenova 侧走 `parsers.ts` 的
+ * `identifyVisionModel`），usage 观察层的接线位置也不同。
+ *
+ * 可以跨仓库**对着读**的是三条承重语义（队列 / disposed 闸 / 单点 registerPair，
+ * 它们是 `publish-core.ts` 的骨头，三处 91% 同源）；具体代码不可照搬。
  *
  * peer-free：不 import 任何运行时 peer。适配器工厂由调用方注入
  * （`loadAdapterModule`，默认 `import("./llm-adapter.ts")`），所以离线套件可以换

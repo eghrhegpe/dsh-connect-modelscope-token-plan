@@ -1,5 +1,9 @@
 /**
- * 快照轮询 hook（与姊妹插件 use-snapshot-polling.ts 受控复制）：generation
+ * 快照轮询 hook。**与姊妹插件的同名文件不是同一份实现**：去注释后代码行重叠仅
+ * 12%（2026-10-16 实测，复核 `node tools/dev/cross-repo-drift.mjs`）——命名对齐、
+ * 实现各写各的，别按文件名借代码（本文件确实复用了 91% 同源的
+ * `use-polling-interval.ts`，但轮询状态机这一层是独立写的）。本实现的语义：
+ * generation
  * guard 防乱序覆盖、跟随 Host 声明的 cadence、隐藏页暂停（use-polling-interval）、
  * 失败退避、卸载即停、每轮尝试计一次 `pollRevision`。loadedOnce 门槛把首帧定为
  * 「加载中」而不是误闪的配置表单。

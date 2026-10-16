@@ -1,4 +1,8 @@
-/** Time and number formatters（与姊妹插件 format.ts 受控复制，按需裁剪）。 */
+/**
+ * Time and number formatters（与 sensenova 的 format.ts 同源、按需裁剪——去注释后
+ * 代码行重叠 73%，与 agnes 那份已分家（45%）。2026-10-16 实测，复核
+ * `node tools/dev/cross-repo-drift.mjs`）。
+ */
 
 /**
  * Host 声明的 cadence（秒）转毫秒；无可用数字时回退。Host 在源头已 clamp，

@@ -4,7 +4,14 @@
  * 与 `llm-adapter.ts` 同一个处境——import Host 发行的 peer（`@deepseek-ai/dsh-tools`
  * 的 `defineTool` 由调用方惰性注入），**不能由离线单测套件导入**。纯逻辑全部住在
  * `draw.ts`（已由 `test/draw.test.mjs` 覆盖 39 组），本文件只做「接线 + I/O」：
- * 轮询循环、fetch、工具定义。改错本文件**不会让任何门禁变红**。
+ * 轮询循环、fetch、工具定义。
+ *
+ * **覆盖边界**（2026-10-16 复核）：`runDrawOnce` / `pickDrawModel` / `drawModelIds` /
+ * `splitImageUrls` / `buildGenerationsEndpoint` / `buildTasksEndpoint` /
+ * `DRAW_TOOL_NAME` 由 `test/draw-runtime.test.mjs` 钉住；**没被覆盖的是
+ * `defineDrawTool` 落到 peer registry 的那一段**（真 `defineTool` 形状与注册结果）
+ * ——只改那一段不会让任何门禁变红。本文件此前整段自称「无覆盖」，该陈述在补上
+ * 这个套件之后已经过时。
  *
  * 与姊妹插件的关键差异（形状不兼容，不能照抄）：
  * `sensenova` 的出图是**同步单发**——一次 `fetch` 拿 `data[0].url` 就结束。魔搭是

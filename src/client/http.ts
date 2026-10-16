@@ -1,6 +1,8 @@
 /**
  * Client 半边唯一的 POST seam：同族 fixed request shape + `.json().catch`
- * 兜底（与姊妹插件 http.ts 受控复制）。Host 对一切预期结果回 HTTP 200、
+ * 兜底。与姊妹插件的 `http.ts` 是**命名对齐、结构类比**，不是同一份代码——去注释后
+ * 代码行重叠约 42%（2026-10-16 实测，复核 `node tools/dev/cross-repo-drift.mjs`）。
+ * Host 对一切预期结果回 HTTP 200、
  * 成败看 body 的 ok 字段；4xx 只属于参数校验层。
  * @module dsh-connect-modelscope-token-plan/client/http
  */

@@ -16,9 +16,13 @@
  * registry 拒收——三种都由 `draw-tool-state.ts` 记下原因供面板显示。本文件不吞
  * 错误（那会让「工具为什么不在」无从诊断），只把它们翻译成可展示的原因码。
  *
- * peer-dependent：`@deepseek-ai/dsh-tools` 由 `deps.loadToolsModule` 惰性注入，
- * 因此本文件与 `llm-adapter.ts` 一样**不能被离线测试导入**，也没有测试覆盖
- * （docs/ROADMAP.md Backlog 记着这条缺口）。
+ * peer-dependent：`@deepseek-ai/dsh-tools` 由 `deps.loadToolsModule` 惰性注入。
+ *
+ * **本文件目前没有测试覆盖**——`registerDrawTool` 在 `test/` 里零引用
+ * （docs/ROADMAP.md Backlog 记着这条缺口）。但**这不是「不能」**：同一处境的
+ * `llm-adapter.ts` / `draw-runtime.ts` 已经用 `test/helpers/peer-stub-loader.mjs`
+ * 证明这类模块能在离线套件里原样加载执行。此前的措辞把 `llm-adapter.ts` 当作
+ * 「同样无法导入」的例证拉来作证，那条类比在补上那个 loader 之后已经失效。
  *
  * @module dsh-connect-modelscope-token-plan/draw-register
  */
