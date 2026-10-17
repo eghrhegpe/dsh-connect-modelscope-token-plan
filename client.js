@@ -177,6 +177,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.notMounted": "未注册——打开上方开关即可开启。",
 			"draw.restartHint": "开关立即保存；工具要到下次启动 DSH 才挂载（挂载后无法撤销）。",
 			"draw.currentTitle": "当前使用：",
+			"draw.currentSource": "（{source}）",
 			"draw.currentNone": "当前目录里没有可用的出图模型——出图会失败（先确认访问令牌已配置、目录已拉到）。",
 			"draw.currentSrc.preferred": "按你的指定",
 			"draw.currentSrc.declaredTextToImage": "自动：平台声明为文生图",
@@ -185,9 +186,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.models": "出图模型（单选；保持「自动选择」则由插件挑）",
 			"draw.badge": "出图",
 			"draw.badge.textToImage": "文生图",
-			"draw.badge.imageToImage": "图生图·改图",
-			"draw.needsImage": "需要输入图",
-			"draw.needsImageTitle": "该模型不能纯文生图：必须通过 imageUrl 传一张图（图生图/改图）。",
+			"draw.badge.imageToImage": "图生图",
+			"draw.imageOnlyTitle": "该模型只能图生图/改图：必须通过 imageUrl 传一张输入图，不能纯文生图。",
 			"draw.auto": "自动选择",
 			"draw.noCandidates": "当前目录里没有可出图的模型，这个工具暂时用不了。",
 			"draw.needsKey": "还没有访问令牌，先到「接入」tab 配置。",
@@ -317,6 +317,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.notMounted": "Not registered — turn the switch above on.",
 			"draw.restartHint": "The switch saves at once; the tool mounts the next time DSH starts (a mount cannot be undone).",
 			"draw.currentTitle": "In use:",
+			"draw.currentSource": "({source})",
 			"draw.currentNone": "No usable image model in the catalogue right now — drawing will fail (check the access token and that the catalogue has loaded).",
 			"draw.currentSrc.preferred": "your choice",
 			"draw.currentSrc.declaredTextToImage": "auto: platform-declared text-to-image",
@@ -325,9 +326,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.models": "Image model (pick one; keep Auto and the plugin chooses)",
 			"draw.badge": "image",
 			"draw.badge.textToImage": "text-to-image",
-			"draw.badge.imageToImage": "image-to-image / edit",
-			"draw.needsImage": "needs an input image",
-			"draw.needsImageTitle": "This model cannot do pure text-to-image: pass an input image via imageUrl (image-to-image / edit).",
+			"draw.badge.imageToImage": "image-to-image",
+			"draw.imageOnlyTitle": "Image-to-image only: an input image must be passed via imageUrl; pure text-to-image is not supported.",
 			"draw.auto": "Auto",
 			"draw.noCandidates": "No image model in the catalogue right now, so this tool cannot work yet.",
 			"draw.needsKey": "No token yet — configure it in the Access tab.",
@@ -2045,9 +2045,41 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, h("span", null, tt("draw.currentTitle")), h("code", {
 			style: S.modelName,
 			title: effectiveModel
-		}, effectiveModel), currentSourceKey === null ? null : h("span", { style: { color: "var(--dsw-alias-label-secondary)" } }, tt(currentSourceKey)));
+		}, effectiveModel), currentSourceKey === null ? null : h("span", { style: { color: "var(--dsw-alias-label-secondary)" } }, format(tt("draw.currentSource"), { source: tt(currentSourceKey) })));
 		const RADIO_NAME = "modelscope-draw-model";
-		const badgeKeyOf = (capability) => capability === "text-to-image" ? "draw.badge.textToImage" : capability === "image-to-image" ? "draw.badge.imageToImage" : "draw.badge";
+		/**
+		* 一个候选的能力徽章（**正向各给一枚**，不是「能力减项 + 警告」）。
+		*
+		* 之前写成「平台能力档一枚 + 不能纯文生图时再加警告」是不对称的：能吃纯文生图
+		* 是**加项优势**，却在 UI 上完全不可见，于是两个 Qwen-Image-Edit 看起来一样，
+		* 其中一个还莫名带着警告。现在两个事实各画一枚：
+		*   - `图生图`——平台声明的 image-to-image（改图/图生图）；
+		*   - `文生图`——能吃纯文生图（平台声明的 text-to-image，或实测已知的那个 id）。
+		* 只给「图生图」的模型，徽章上挂 title 说明它必须给输入图（把警告从第二枚
+		* 徽章降级成悬停说明，列表不再被警告噪声占满）。
+		* 旧 Host 没有候选明细时退化为通用「出图」徽章——不猜能力。
+		*/
+		const capabilityBadges = (row) => {
+			if (row.capability === null) return [h("span", {
+				key: "badge",
+				style: S.modelBadge
+			}, tt("draw.badge"))];
+			const badges = [];
+			if (row.capability === "image-to-image") badges.push(h("span", {
+				key: "badge-i2i",
+				style: S.modelBadge,
+				title: row.textToImage === true ? void 0 : tt("draw.imageOnlyTitle")
+			}, tt("draw.badge.imageToImage")));
+			if (row.textToImage === true) badges.push(h("span", {
+				key: "badge-t2i",
+				style: S.modelBadge
+			}, tt("draw.badge.textToImage")));
+			if (badges.length === 0) badges.push(h("span", {
+				key: "badge",
+				style: S.modelBadge
+			}, tt("draw.badge")));
+			return badges;
+		};
 		const candidateRows = Array.isArray(candidateDetails) ? candidateDetails.map((row) => ({
 			id: row.id,
 			capability: row.capability,
@@ -2088,33 +2120,19 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			style: S.modelList,
 			role: "radiogroup",
 			"aria-label": tt("draw.models")
-		}, radioRow("__auto__", status.preferredModel === null, tt("draw.auto"), tt("draw.auto"), busy, () => onAutoModel(), []), ...candidateRows.map((row) => radioRow(row.id, status.preferredModel === row.id, row.id, row.id, busy, () => onSelectModel(row.id), [
-			h("span", {
-				key: "badge",
-				style: S.modelBadge
-			}, tt(badgeKeyOf(row.capability))),
-			row.textToImage === false ? h("span", {
-				key: "need",
-				style: {
-					...S.modelBadge,
-					color: "var(--dsw-alias-state-warn-primary)"
-				},
-				title: tt("draw.needsImageTitle")
-			}, tt("draw.needsImage")) : null,
-			h("a", {
-				key: "link",
-				style: {
-					...S.formNote,
-					margin: 0,
-					marginLeft: "auto",
-					whiteSpace: "nowrap"
-				},
-				href: modelscopeModelUrl(row.id),
-				target: "_blank",
-				rel: "noreferrer",
-				title: tt("models.viewOnSiteTitle")
-			}, tt("models.viewOnSite"))
-		]))));
+		}, radioRow("__auto__", status.preferredModel === null, tt("draw.auto"), tt("draw.auto"), busy, () => onAutoModel(), []), ...candidateRows.map((row) => radioRow(row.id, status.preferredModel === row.id, row.id, row.id, busy, () => onSelectModel(row.id), [...capabilityBadges(row), h("a", {
+			key: "link",
+			style: {
+				...S.formNote,
+				margin: 0,
+				marginLeft: "auto",
+				whiteSpace: "nowrap"
+			},
+			href: modelscopeModelUrl(row.id),
+			target: "_blank",
+			rel: "noreferrer",
+			title: tt("models.viewOnSiteTitle")
+		}, tt("models.viewOnSite"))]))));
 		return h("div", null, switchRow, statusNode, restartHint, tokenHint, currentBlock, h("div", { style: {
 			...S.sectionTitle,
 			margin: "18px 0 8px"

@@ -780,21 +780,46 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, 
         { style: { ...S.formNote, marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "baseline" }, role: "status" },
         h("span", null, tt("draw.currentTitle")),
         h("code", { style: S.modelName, title: effectiveModel }, effectiveModel),
+        // 理由用括号括起来贴在 id 后面：它是同一句话的后半截，不该被 flex 换行
+        // 拆成另一块（拆开读起来像两个独立字段）。
         currentSourceKey === null
           ? null
-          : h("span", { style: { color: "var(--dsw-alias-label-secondary)" } }, tt(currentSourceKey))
+          : h("span", { style: { color: "var(--dsw-alias-label-secondary)" } }, format(tt("draw.currentSource"), { source: tt(currentSourceKey) }))
       );
 
   // 单选框的名字：一个表单里只能有一组生效模型，`name` 让浏览器管住「单选」这
   // 件事（不用自己记哪个被点过）。aria-label 用模型 id，与 roster 的复选框同款
   // 约定（真 DOM 里的可辨认性由此而来）。
   const RADIO_NAME = "modelscope-draw-model";
-  // 能力档与 textToImage 都来自 Host 的候选明细；旧 Host 没有明细时退化为只显示
-  // id 与通用「出图」徽章——不猜能力。
-  const badgeKeyOf = (capability: "text-to-image" | "image-to-image" | "other" | null): DictionaryKey =>
-    capability === "text-to-image" ? "draw.badge.textToImage"
-      : capability === "image-to-image" ? "draw.badge.imageToImage"
-        : "draw.badge";
+  /**
+   * 一个候选的能力徽章（**正向各给一枚**，不是「能力减项 + 警告」）。
+   *
+   * 之前写成「平台能力档一枚 + 不能纯文生图时再加警告」是不对称的：能吃纯文生图
+   * 是**加项优势**，却在 UI 上完全不可见，于是两个 Qwen-Image-Edit 看起来一样，
+   * 其中一个还莫名带着警告。现在两个事实各画一枚：
+   *   - `图生图`——平台声明的 image-to-image（改图/图生图）；
+   *   - `文生图`——能吃纯文生图（平台声明的 text-to-image，或实测已知的那个 id）。
+   * 只给「图生图」的模型，徽章上挂 title 说明它必须给输入图（把警告从第二枚
+   * 徽章降级成悬停说明，列表不再被警告噪声占满）。
+   * 旧 Host 没有候选明细时退化为通用「出图」徽章——不猜能力。
+   */
+  const capabilityBadges = (row: { id: string; capability: "text-to-image" | "image-to-image" | "other" | null; textToImage: boolean | null }): unknown[] => {
+    if (row.capability === null) return [h("span", { key: "badge", style: S.modelBadge }, tt("draw.badge"))];
+    const badges: unknown[] = [];
+    if (row.capability === "image-to-image") {
+      badges.push(h("span", {
+        key: "badge-i2i",
+        style: S.modelBadge,
+        // 能吃纯文生图时无需解释；不能时把这枚徽章变成那句说明。
+        title: row.textToImage === true ? undefined : tt("draw.imageOnlyTitle")
+      }, tt("draw.badge.imageToImage")));
+    }
+    if (row.textToImage === true) {
+      badges.push(h("span", { key: "badge-t2i", style: S.modelBadge }, tt("draw.badge.textToImage")));
+    }
+    if (badges.length === 0) badges.push(h("span", { key: "badge", style: S.modelBadge }, tt("draw.badge")));
+    return badges;
+  };
 
   const candidateRows: { id: string; capability: "text-to-image" | "image-to-image" | "other" | null; textToImage: boolean | null }[] =
     Array.isArray(candidateDetails)
@@ -855,12 +880,7 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, 
             busy,
             () => onSelectModel(row.id),
             [
-              h("span", { key: "badge", style: S.modelBadge }, tt(badgeKeyOf(row.capability))),
-              // 图生图条目里，只有实测能吃纯文生图的那个不必给输入图——这个差别
-              // 正是「Qwen-Image-Edit 到底是文生图还是改图」的答案。
-              row.textToImage === false
-                ? h("span", { key: "need", style: { ...S.modelBadge, color: "var(--dsw-alias-state-warn-primary)" }, title: tt("draw.needsImageTitle") }, tt("draw.needsImage"))
-                : null,
+              ...capabilityBadges(row),
               h("a", { key: "link", style: { ...S.formNote, margin: 0, marginLeft: "auto", whiteSpace: "nowrap" }, href: modelscopeModelUrl(row.id), target: "_blank", rel: "noreferrer", title: tt("models.viewOnSiteTitle") }, tt("models.viewOnSite"))
             ]
           )
