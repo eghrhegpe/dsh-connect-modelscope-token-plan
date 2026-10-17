@@ -176,7 +176,16 @@ const isVendoredSpec = (rel) => rel.startsWith("docs/modelscope.cn-openapi/");
   );
 
   // ② 文档里凡出现「N 套件」都必须等于当前真实数量。
-  for (const file of ["RELEASING.md", ".github/workflows/gate.yml", ...docFiles()]) {
+  //
+  // **归档豁免**（与 §2 同款，依据见文件头那条政策）：归档是冻结的历史记录，
+  // 「当时 37/37 通过」在写下的那一刻是真的。把那个数字改成今天的值 = 篡改记录，
+  // 把数字删掉 = 丢信息，两条都比「门禁少看一个归档文件」更坏。
+  //
+  // 这条过滤此前漏了（§2 有、§6② 没有），后果是**每加一个测试套件都会逼着人去
+  // 改一份不该再动的历史文档**：2026-10-17 新增 `draw-register.test.mjs` 时实测
+  // 踩到，门禁报「docs/archive/…-0.4.0-process.md:182 写死「37 套件」，而当前实际
+  // 是 38 套件」。冻结记录本来就不该跟着今天的套件数漂。
+  for (const file of ["RELEASING.md", ".github/workflows/gate.yml", ...docFiles().filter((f) => !inArchive(f))]) {
     if (!existsSync(join(root, file))) continue;
     for (const [i, line] of read(file).split(/\r?\n/).entries()) {
       const m = line.match(/(\d+)\s*套件/);
@@ -390,7 +399,10 @@ const FACTS = [
 {
   const DRAW_IMPLEMENTED = existsSync(join(root, "src", "host", "draw.ts"));
   if (DRAW_IMPLEMENTED) {
-    const files = ["README.md", ...docFiles()]; // archive 已由 docFiles() 内部豁免
+    // 归档过滤是**显式**加的，不是 `docFiles()` 给的——那句话说反了（`docFiles()`
+    // 只排掉 vendored spec，不排归档）。同 §2 / §6②：冻结历史里那句「尚未实现」
+    // 在写下时是真的，不该被今天的实现状态判红。
+    const files = ["README.md", ...docFiles().filter((f) => !inArchive(f))];
     for (const file of files) {
       const lines = read(file).split(/\r?\n/);
       lines.forEach((line, i) => {
