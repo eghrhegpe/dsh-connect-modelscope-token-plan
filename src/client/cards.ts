@@ -169,6 +169,15 @@ export function TrendBars({ buckets, tt }: { buckets: TrendBucket[]; tt: Tt }): 
   return h(
     "div",
     null,
+    // 逐柱读数行：柱高只表达相对量，这一行把每次调用的**绝对值**补回来。与柱群
+    // 同一套 flex，一列数字正对一根柱。排在柱群**上方**——标准柱状图的数值标签在
+    // 顶、类别轴（日期）在底。`aria-hidden`：柱自己已带同一条 aria-label，不标就
+    // 等于让读屏把每个数读两遍。
+    h(
+      "div",
+      { style: S.trendChartValues },
+      rows.map((row) => h("span", { key: row.dateKey, style: S.trendChartValue, "aria-hidden": "true" }, count(row.calls)))
+    ),
     h(
       "div",
       { style: S.trendChartBars },
@@ -188,14 +197,6 @@ export function TrendBars({ buckets, tt }: { buckets: TrendBucket[]; tt: Tt }): 
           })
         );
       })
-    ),
-    // 逐柱读数行：柱高只表达相对量，这一行把每次调用的**绝对值**补回来。与柱群
-    // 同一套 flex，一列数字正对一根柱。`aria-hidden`：柱自己已带同一条 aria-label，
-    // 不标就等于让读屏把每个数读两遍。
-    h(
-      "div",
-      { style: S.trendChartValues },
-      rows.map((row) => h("span", { key: row.dateKey, style: S.trendChartValue, "aria-hidden": "true" }, count(row.calls)))
     ),
     h("div", { style: S.trendChartAxis }, h("span", null, shortDateKey(first)), h("span", null, shortDateKey(last))),
     h("div", { style: S.trendLegend }, tt("trend.legend"))

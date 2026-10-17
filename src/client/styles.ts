@@ -85,9 +85,10 @@ export const S = {
   trendChartBars: { display: "flex", alignItems: "flex-end", gap: 2, height: 96, padding: "0 1px" },
   trendChartBar: { flex: 1, minWidth: 2, height: "100%", display: "flex", alignItems: "flex-end" },
   trendChartFill: { width: "100%", minHeight: 2, borderRadius: 2, background: BRAND },
-  // 逐柱读数：与柱群同一套 flex（gap/内边距一致），一列数字正对一根柱，排在柱基线
-  // 正下方——柱高只表达相对量，这一行才是每次调用次数本身。
-  trendChartValues: { display: "flex", gap: 2, padding: "0 1px", marginTop: 4 },
+  // 逐柱读数行：排在柱群**上方**（标准柱状图约定——数值标签在顶、类别轴在底）。
+  // 柱高只表达相对量，这一行把每次调用的**绝对值**补回来。与柱群同一套 flex，
+  // 一列数字正对一根柱。
+  trendChartValues: { display: "flex", gap: 2, padding: "0 1px", marginBottom: 6 },
   trendChartValue: { flex: 1, minWidth: 0, textAlign: "center", fontSize: 10, lineHeight: "14px", color: "var(--dsw-alias-label-secondary)", fontVariantNumeric: "tabular-nums" },
   trendChartAxis: { display: "flex", justifyContent: "space-between", gap: 12, marginTop: 6, fontSize: 11, color: "var(--dsw-alias-label-secondary)" },
   muted: { color: "var(--dsw-alias-label-secondary)" },

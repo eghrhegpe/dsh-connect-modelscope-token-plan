@@ -660,7 +660,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				display: "flex",
 				gap: 2,
 				padding: "0 1px",
-				marginTop: 4
+				marginBottom: 6
 			},
 			trendChartValue: {
 				flex: 1,
@@ -1381,7 +1381,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const max = Math.max(0, ...rows.map((row) => row.calls));
 		const first = rows[0]?.dateKey ?? "";
 		const last = rows[rows.length - 1]?.dateKey ?? "";
-		return h("div", null, h("div", { style: S.trendChartBars }, rows.map((row) => {
+		return h("div", null, h("div", { style: S.trendChartValues }, rows.map((row) => h("span", {
+			key: row.dateKey,
+			style: S.trendChartValue,
+			"aria-hidden": "true"
+		}, count(row.calls)))), h("div", { style: S.trendChartBars }, rows.map((row) => {
 			const pct = max > 0 ? row.calls / max * 100 : 0;
 			return h("div", {
 				key: row.dateKey,
@@ -1398,11 +1402,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				"aria-valuemin": 0,
 				"aria-valuemax": 100
 			}));
-		})), h("div", { style: S.trendChartValues }, rows.map((row) => h("span", {
-			key: row.dateKey,
-			style: S.trendChartValue,
-			"aria-hidden": "true"
-		}, count(row.calls)))), h("div", { style: S.trendChartAxis }, h("span", null, shortDateKey(first)), h("span", null, shortDateKey(last))), h("div", { style: S.trendLegend }, tt("trend.legend")));
+		})), h("div", { style: S.trendChartAxis }, h("span", null, shortDateKey(first)), h("span", null, shortDateKey(last))), h("div", { style: S.trendLegend }, tt("trend.legend")));
 	}
 	/** 事件流（429/错误），Newest-first。 */
 	function EventsList({ events, tt }) {
