@@ -14,6 +14,7 @@
 import { PLUGIN_VERSION, name } from "./host-config.ts";
 import { CODE } from "./codes.ts";
 import { resolveEnabledIds } from "./provider-store.ts";
+import { resolveWindowDays } from "./usage-prefs-store.ts";
 import { rosterWithAvailability, imageGenModelIds } from "./llm-models.ts";
 import { parseAllowedList, enabledCountOf } from "../shared/allow-list.ts";
 import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "./switch-precedence.ts";
@@ -49,14 +50,24 @@ async function soft<T>(promise: Promise<T>): Promise<{ ok: true; value: T } | { 
 }
 
 /** 聚合快照 body。wiring 子集见 routes/snapshot.ts 的 Pick。 */
-export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "tokenStore" | "usageStore" | "inference" | "providerStore" | "drawStore" | "publisher" | "logger">): Promise<Snapshot> {
-  const { settings, tokenStore, usageStore, inference, providerStore, drawStore, publisher } = wiring;
+export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "tokenStore" | "usageStore" | "inference" | "providerStore" | "drawStore" | "usagePrefsStore" | "publisher" | "logger">): Promise<Snapshot> {
+  const { settings, tokenStore, usageStore, inference, providerStore, drawStore, usagePrefsStore, publisher } = wiring;
+
+  // 趋势的显示窗口**先**裁决出来：面板覆盖 > 配置默认，再夹进保留窗口
+  // （resolveWindowDays 一处算完）。这一步必须排在拉 `trend` 之前——它是 trend()
+  // 的**入参**，不是拿到桶之后再切：Host 只发生效窗口那些桶，面板不替它重算。
+  //
+  // 覆盖读失败按「未保存」降级（与 provider / draw 块里的偏好读同一条纪律）：
+  // 回退方向是配置默认，不是丢数据；真正需要说出口的是版本漂移，那条由下面的
+  // versionNote 负责。
+  const panelWindow = await usagePrefsStore.windowDays().catch(() => null);
+  const windowDays = resolveWindowDays(panelWindow, settings.trendDays, settings.retentionDays);
 
   const [tokenState, daily, perModel, trend, events, providerNote] = await Promise.all([
     soft(tokenStore.state()),
     soft(usageStore.daily()),
     soft(usageStore.perModelToday()),
-    soft(usageStore.trend(settings.trendDays)),
+    soft(usageStore.trend(windowDays)),
     soft(usageStore.events()),
     soft(providerStore.versionNote())
   ]);
@@ -118,6 +129,10 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
   // 不让一条注释外的 TypeError 把整条快照打掉。
   const drawNote = await soft((async () => drawStore.versionNote())());
   if (drawNote.ok && drawNote.value !== null) shapeWarnings.push(drawNote.value);
+  // usage-prefs.json 与上面两份同一条纪律：未知版本宽容读作「没设过」，回退方向是
+  // 配置默认——不说出口，「保存的显示窗口被忽略」就是「从未保存过」。
+  const windowNote = await soft((async () => usagePrefsStore.versionNote())());
+  if (windowNote.ok && windowNote.value !== null) shapeWarnings.push(windowNote.value);
 
   // 策展上下文窗口表是静态知识（context-catalog.ts），目录会上下架而表不会自己
   // 更新。过期不是错误——表里的值往往仍然正确——但「不再有核对背书」这件事该
@@ -225,7 +240,15 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
       countingNote: "local-counting"
     },
     events: events.ok ? events.value : [],
-    trend: { days: settings.trendDays, buckets: trend.ok ? trend.value : [] },
+    trend: {
+      // 生效天数（已裁决 + 夹取）；面板标题与图上柱数都用它。
+      days: windowDays,
+      // 面板保存的覆盖值（`null` = 跟随配置默认），面板据此回显选择器。
+      windowDays: panelWindow,
+      // 可选窗口的上界 = 保留窗口。画得比它多会把已剪的日子画成 0。
+      maxDays: settings.retentionDays,
+      buckets: trend.ok ? trend.value : []
+    },
     models: {
       available: models.ok,
       count: modelIds.length,

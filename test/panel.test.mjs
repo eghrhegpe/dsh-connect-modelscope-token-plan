@@ -199,12 +199,13 @@ const ALL_SUFFIXES = [
   "/provider/reset",
   "/provider/context",
   "/draw",
-  "/draw/reset"
+  "/draw/reset",
+  "/trend/window"
 ];
 // `/draw/reset` 是**字面量**（paths.ts 里显式导出），而 `/provider/reset` 是
 // provider.ts 里用 `${PROVIDER_PATH}/reset` 拼的派生路由——两个家族的写法不同，
 // 清单按各自实际形态归类，不要为了让分类整齐去改生产代码的形状。
-const LITERAL_SUFFIXES = ["/snapshot", "/models", "/token", "/token/forget", "/probe", "/provider", "/draw", "/draw/reset"];
+const LITERAL_SUFFIXES = ["/snapshot", "/models", "/token", "/token/forget", "/probe", "/provider", "/draw", "/draw/reset", "/trend/window"];
 const DERIVED_SUFFIXES = ["/provider/roster", "/provider/reset", "/provider/context"];
 
 for (const suffix of ALL_SUFFIXES) {

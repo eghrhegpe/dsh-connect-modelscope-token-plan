@@ -111,13 +111,14 @@ npm run doctor                  # 只读盘点状态文件
 |---|---|---|
 | `index.ts` | **装配入口**：wiring 全部模块、注册路由、挂载/卸载副作用 | `apply()` |
 | `host-config.ts` | 配置解析 + 插件名 + 信任围栏 | `resolveSettings()`, `name` |
-| `routes.ts` | 路由注册门面（6 条路由） | `registerRoutes()` |
+| `routes.ts` | 路由注册门面（7 条路由） | `registerRoutes()` |
 | **── 数据层 ──** | | |
 | `ms-auth.ts` | 凭据存取（唯一出口，静态令牌） | `createTokenStore()` |
 | `inference-client.ts` | HTTP 出口：模型目录 + 魔粒余额 + 探针 | `createInferenceClient()` |
 | `usage-store.ts` | 本地计数持久化（天桶/单模型/事件流） | `createFileUsageStore()` |
 | `provider-store.ts` | 开关 + 允许清单 + 窗口覆盖的持久化 | `createFileProviderStore()` |
-| `state-store.ts` | 文件状态原语（原子写/版本守卫/读缓存/写队列） | 被上面三个 store 共用 |
+| `state-store.ts` | 文件状态原语（原子写/版本守卫/读缓存/写队列） | 被上面四个 store 共用 |
+| `usage-prefs-store.ts` | 用量面板显示偏好（趋势显示窗口）的持久化 | `createFileUsagePrefsStore()`, `resolveWindowDays()` |
 | `context-catalog.ts` | 内置上下文窗口策展表（models.dev 交叉真值） | `curatedWindowOf()` |
 | **── Provider 注册 ──** | | |
 | `llm-models.ts` | 目录→descriptor 映射（peer-free） | `buildDescriptors()`, `rosterWithAvailability()` |
@@ -126,7 +127,7 @@ npm run doctor                  # 只读盘点状态文件
 | `provider-publish.ts` | **发布状态机**：队列/disposed 闸/回滚 | `createProviderPublisher()` |
 | `provider-reconcile.ts` | desired-state 收敛器（轮询+路由统一触发） | `createProviderReconciler()` |
 | `publish-core.ts` | 三族插件共享的发布原语 | `createPublishQueue()`, `swapRegistration()` |
-| `switch-precedence.ts` | 开关优先级：面板值 > patch 默认 | `resolveSwitchEnabled()` |
+| `switch-precedence.ts` | 开关优先级：面板值 > patch 默认 | `resolveSwitchEnabled()`, `resolveSwitchNumber()` |
 | **── 观测与纠正 ──** | | |
 | `usage-observer.ts` | **流出口观测**：真实对话→本地计数/事件 | `withUsageObserver()`, `observeStream()` |
 | `llm-error-fix.ts` | 429 误判纠正（QUOTA→RATE_LIMIT） | `reclassifyStream()`, `shouldReclassifyQuotaToRate()` |
@@ -145,6 +146,7 @@ npm run doctor                  # 只读盘点状态文件
 | `routes/probe.ts` | 零额度鉴权探针路由 | `registerProbeRoute()` |
 | `routes/provider.ts` | provider 开关/清单/窗口/重置路由 | `registerProviderRoute()` |
 | `routes/draw.ts` | 出图开关/模型/重置路由 | `registerDrawRoute()` |
+| `routes/usage-prefs.ts` | 趋势显示窗口路由 | `registerUsagePrefsRoute()` |
 | `routes/paths.ts` | 路由路径常量 | `SNAPSHOT_PATH`, `PROVIDER_PATH`, ... |
 | `routes/http.ts` | HTTP 辅助（CORS/JSON/错误脱敏） | `withOrigin()`, `writeJson()` |
 | **── 聚合与工具 ──** | | |

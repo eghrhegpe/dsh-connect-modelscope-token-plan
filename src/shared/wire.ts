@@ -223,7 +223,15 @@ export interface Snapshot {
     countingNote: "local-counting";
   };
   events: QuotaEvent[];
-  trend: { days: number; buckets: TrendBucket[] };
+  trend: {
+    /** 画多少天——**生效值**（面板覆盖优先，否则配置默认，恒 ≤ `maxDays`）。 */
+    days: number;
+    /** 面板保存的显示窗口；`null` = 跟随配置默认（选择器据此回显）。 */
+    windowDays: number | null;
+    /** 可选窗口的上界 = 保留窗口（画得比它多会把已剪的日子画成 0）。 */
+    maxDays: number;
+    buckets: TrendBucket[];
+  };
   models: { available: boolean; count: number; sample: string[]; error: string | null };
   /**
    * Provider 注册状态（M4）：开关 + 注册 + 允许清单 + 面板 roster。

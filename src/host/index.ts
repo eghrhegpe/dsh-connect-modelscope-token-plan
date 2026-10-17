@@ -26,6 +26,7 @@ import { createFileUsageStore } from "./usage-store.ts";
 import { createInferenceClient } from "./inference-client.ts";
 import { createFileProviderStore } from "./provider-store.ts";
 import { createFileDrawStore } from "./draw-store.ts";
+import { createFileUsagePrefsStore } from "./usage-prefs-store.ts";
 import { registerDrawTool } from "./draw-register.ts";
 import { resetDrawToolNote } from "./draw-tool-state.ts";
 import { createProviderPublisher } from "./provider-publish.ts";
@@ -92,6 +93,8 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
 
   // 出图开关的持久层。（与 provider 开关同一个 profile 分段纪律；两个开关独立。）
   const drawStore = createFileDrawStore({ profile, logger: ctx.logger });
+  // 用量面板的显示偏好（趋势图画多少天）。与 usageStore 分开：那是数据，这是偏好。
+  const usagePrefsStore = createFileUsagePrefsStore({ profile, logger: ctx.logger });
   const publisher = createProviderPublisher({
     settings,
     panelSwitch: () => providerStore.enabled(),
@@ -139,6 +142,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     inference,
     providerStore,
     drawStore,
+    usagePrefsStore,
     publisher,
     reconcile,
     logger: ctx.logger

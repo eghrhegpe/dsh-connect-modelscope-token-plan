@@ -35,12 +35,27 @@ export function resolveSwitchValue(panel: string | null, config: string | undefi
 }
 
 /**
+ * Resolve the effective numeric preference (e.g. how many days the trend chart
+ * shows): the same `panel ?? config` dialect as the other two shapes.
+ *
+ * Range clamping is deliberately NOT done here — the bound (a retention
+ * window) belongs to the caller that knows it (`host-config` / the snapshot
+ * aggregate), not to the precedence rule.
+ * @param {number|null} panel - the panel-saved value (`null` = never saved).
+ * @param {number} config - the patch-declared default.
+ * @returns {number} the effective preference.
+ */
+export function resolveSwitchNumber(panel: number | null, config: number): number {
+  return panel ?? config;
+}
+
+/**
  * Where the effective value came from — the panel when it saved one, the
  * config otherwise. Rides with every resolved answer so the panel can name
  * the side in charge.
- * @param {boolean|string|null} panel - the panel-saved value.
+ * @param {boolean|string|number|null} panel - the panel-saved value.
  * @returns {"panel"|"config"}
  */
-export function switchSource(panel: boolean | string | null): "panel" | "config" {
+export function switchSource(panel: boolean | string | number | null): "panel" | "config" {
   return panel === null ? "config" : "panel";
 }

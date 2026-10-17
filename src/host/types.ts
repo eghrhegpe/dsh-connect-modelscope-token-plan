@@ -84,6 +84,14 @@ export interface Wiring {
    * 「给 agent 一个出图工具」。分开是有意的（见 draw-store.ts 头注）。
    */
   drawStore: ReturnType<typeof import("./draw-store.ts").createFileDrawStore>;
+  /**
+   * 用量面板的显示偏好持久层（目前只有趋势图的显示窗口）。
+   *
+   * **不与 usageStore 合并**：那是**数据**（天桶/计数/事件），写路径是观测热路径；
+   * 偏好混进去会让「偏好读不到」与「计数文件损坏」共用一条降级语义，且版本漂移时
+   * 旧构建重写会静默丢掉这个键。详见 usage-prefs-store.ts 头注。
+   */
+  usagePrefsStore: ReturnType<typeof import("./usage-prefs-store.ts").createFileUsagePrefsStore>;
   /** provider 注册状态机（M4 §7）：publish/dispose/release 与 state。 */
   publisher: ReturnType<typeof import("./provider-publish.ts").createProviderPublisher>;
   /**

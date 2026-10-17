@@ -3,8 +3,8 @@
  * 全部布局。渲染在 Plugins 页内、始终展开；轮询只在本卡挂载期间进行。
  * @module dsh-connect-modelscope-token-plan/client/panel-page
  */
-import { SectionCard, BalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm, ProviderCard, DrawCard } from "./cards.ts";
-import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH } from "./const.ts";
+import { SectionCard, BalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm, ProviderCard, DrawCard, TrendWindowPicker } from "./cards.ts";
+import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH } from "./const.ts";
 import { format, errorText, isoTime } from "./format.ts";
 import { getJson, postJson, writeFailure } from "./http.ts";
 import { viewOf, providerOf, drawOf, DEGRADED_PROVIDER, DEGRADED_DRAW } from "./snapshot.ts";
@@ -149,6 +149,23 @@ export function PanelPage({ tt, localeSubscribe }: {
   const toggleDraw = useCallback((enabled: boolean) => void runDrawWrite(DRAW_PATH, { enabled }), [runDrawWrite]);
   const resetDraw = useCallback(() => void runDrawWrite(DRAW_RESET_PATH, {}), [runDrawWrite]);
 
+  // 趋势显示窗口（画多少天）。与 provider/draw 各自一套 busy/error：三处写路径都
+  // 落在同一个面板里，共用一个 busy 会让保存一处把别处也置灰。`null` = 跟随配置默认。
+  const [trendBusy, setTrendBusy] = useState(false);
+  const [trendError, setTrendError] = useState<string | null>(null);
+  const saveTrendWindow = useCallback(async (windowDays: number | null) => {
+    setTrendBusy(true);
+    setTrendError(null);
+    try {
+      await postWrite(TREND_WINDOW_PATH, { windowDays });
+      void load();
+    } catch (reason) {
+      setTrendError(writeErrorText(reason, tt));
+    } finally {
+      setTrendBusy(false);
+    }
+  }, [load, postWrite, tt]);
+
   // 令牌保存 / 忘掉。
   const [tokenBusy, setTokenBusy] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
@@ -239,6 +256,7 @@ export function PanelPage({ tt, localeSubscribe }: {
       h(
         SectionCard,
         { title: format(tt("section.trend"), { days: snap.trend?.days ?? 0 }), open: openSections.trend, onToggle: () => toggleSection("trend"), tt },
+        h(TrendWindowPicker, { trend: snap.trend, busy: trendBusy, error: trendError, onChange: (windowDays: number | null) => void saveTrendWindow(windowDays), tt }),
         h(TrendBars, { buckets: snap.trend?.buckets ?? [], tt })
       ),
       h(

@@ -231,6 +231,56 @@ export function TrendBars({ buckets, tt }: { buckets: TrendBucket[]; tt: Tt }): 
   );
 }
 
+/** 档位：只列这些（都被 host-config 的保留窗口过滤一次）。 */
+const TREND_WINDOW_TIERS: readonly number[] = [7, 14, 30, 90];
+
+/**
+ * 趋势显示窗口选择器：默认（跟随 `trendDays` 配置）/ 7 / 14 / 30 / 90 天。
+ *
+ * 它改的是**画多少天**，不是**留多少天**（保留窗口是 host-config 的
+ * `retentionDays`）——所以档位只列到 `trend.maxDays` 为止：画得比留得多会把已剪的
+ * 日子画成 0，那个组合在 Host 侧已被夹掉，这里也不给它入口。
+ *
+ * 保存成功后由调用方 `load()` 回显 Host 落盘的值（不做乐观更新，与 provider /
+ * draw 的写路径同一纪律）。当前值不在档位里（例如手动改过 usage-prefs.json）时
+ * value 与任何 option 都不匹配 → 浏览器显示第一项，但下一发 onChange 仍发正确的
+ * 值——与上下文窗口选择器同一处可接受的边缘表现，不为它造「自定义」档位。
+ */
+export function TrendWindowPicker({ trend, busy, error, onChange, tt }: {
+  trend: { windowDays: number | null; days: number; maxDays: number } | undefined;
+  busy: boolean;
+  error: string | null;
+  onChange: (windowDays: number | null) => void;
+  tt: Tt;
+}): unknown {
+  if (trend === undefined) return null;
+  const maxDays = typeof trend.maxDays === "number" && Number.isFinite(trend.maxDays) && trend.maxDays > 0 ? Math.floor(trend.maxDays) : 0;
+  const tiers = TREND_WINDOW_TIERS.filter((tier) => maxDays === 0 || tier <= maxDays);
+  const current = trend.windowDays;
+  return h(
+    "div",
+    { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 } },
+    h("label", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" }, htmlFor: "trend-window" }, tt("trend.window")),
+    h(
+      "select",
+      {
+        id: "trend-window",
+        style: { ...S.rosterBulk, height: 28, width: "auto" },
+        disabled: busy,
+        value: current === null || current === undefined ? "" : String(current),
+        onChange: (event: unknown) => {
+          const value = String((event as { target?: { value?: string | null } }).target?.value ?? "");
+          onChange(value === "" ? null : Number(value));
+        }
+      },
+      h("option", { value: "", key: "default" }, tt("trend.windowDefault")),
+      tiers.map((tier) => h("option", { value: String(tier), key: String(tier) }, format(tt("trend.windowDays"), { days: tier })))
+    ),
+    h("span", { style: { ...S.muted, fontSize: 11 } }, tt("trend.windowHint")),
+    error !== null ? h("span", { style: S.formError, role: "alert" }, error) : null
+  );
+}
+
 // kind → 字典键。`Record<string, DictionaryKey>` 而非 string：这样 tt() 的参数
 // 在编译期就是 DictionaryKey，不需要 as cast（原实现用 Record<string,string>，
 // 逼着调用点写 `as Parameters<Tt>[0]`，把类型系统的最后一道防线让掉了）。

@@ -63,7 +63,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		if (tokens >= 1024) return `${Math.round(tokens / 1024)}K`;
 		return String(tokens);
 	}
-	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
+	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
 	var init_const = __esmMin((() => {
 		init_wire();
 		NS = "dsh-connect-modelscope-token-plan";
@@ -79,6 +79,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		PROVIDER_RESET_PATH = `/api/${NS}/provider/reset`;
 		DRAW_PATH = `/api/${NS}/draw`;
 		DRAW_RESET_PATH = `/api/${NS}/draw/reset`;
+		TREND_WINDOW_PATH = `/api/${NS}/trend/window`;
 		MODELSCOPE_TOKEN_URL = "https://modelscope.cn/my/myaccesstoken";
 		MODELSCOPE_USAGE_URL = "https://modelscope.cn/magicube/usage?tab=consume";
 		MODELSCOPE_MODEL_URL_BASE = "https://www.modelscope.cn/models";
@@ -185,6 +186,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.absent.unknown": "开关已开，但出图工具未挂载，原因未知。",
 			"trend.none": "还没有本地调用记录。",
 			"trend.legend": "柱长相对区间内最大值，仅本地口径。",
+			"trend.window": "显示天数",
+			"trend.windowDefault": "默认（跟随配置）",
+			"trend.windowDays": "{days} 天",
+			"trend.windowHint": "只决定画多少天；能回看多久另有一个保留窗口（留得比画得多才画得出更远）。",
 			"events.none": "暂无事件。",
 			"events.quota": "额度",
 			"events.rate_limit": "限频",
@@ -306,6 +311,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.absent.unknown": "The switch is on, but the draw tool is not mounted; the reason is unknown.",
 			"trend.none": "No local call records yet.",
 			"trend.legend": "Bar lengths are relative to the maximum in the range (local scope only).",
+			"trend.window": "Days shown",
+			"trend.windowDefault": "Default (follow config)",
+			"trend.windowDays": "{days} days",
+			"trend.windowHint": "Only sets how many days are drawn; how far back history is kept is a separate retention window.",
 			"events.none": "No events.",
 			"events.quota": "Quota",
 			"events.rate_limit": "Rate limit",
@@ -1430,6 +1439,62 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			}, shortDateKey(key));
 		})), h("div", { style: S.trendLegend }, tt("trend.legend")));
 	}
+	/**
+	* 趋势显示窗口选择器：默认（跟随 `trendDays` 配置）/ 7 / 14 / 30 / 90 天。
+	*
+	* 它改的是**画多少天**，不是**留多少天**（保留窗口是 host-config 的
+	* `retentionDays`）——所以档位只列到 `trend.maxDays` 为止：画得比留得多会把已剪的
+	* 日子画成 0，那个组合在 Host 侧已被夹掉，这里也不给它入口。
+	*
+	* 保存成功后由调用方 `load()` 回显 Host 落盘的值（不做乐观更新，与 provider /
+	* draw 的写路径同一纪律）。当前值不在档位里（例如手动改过 usage-prefs.json）时
+	* value 与任何 option 都不匹配 → 浏览器显示第一项，但下一发 onChange 仍发正确的
+	* 值——与上下文窗口选择器同一处可接受的边缘表现，不为它造「自定义」档位。
+	*/
+	function TrendWindowPicker({ trend, busy, error, onChange, tt }) {
+		if (trend === void 0) return null;
+		const maxDays = typeof trend.maxDays === "number" && Number.isFinite(trend.maxDays) && trend.maxDays > 0 ? Math.floor(trend.maxDays) : 0;
+		const tiers = TREND_WINDOW_TIERS.filter((tier) => maxDays === 0 || tier <= maxDays);
+		const current = trend.windowDays;
+		return h("div", { style: {
+			display: "flex",
+			gap: 8,
+			alignItems: "center",
+			flexWrap: "wrap",
+			marginBottom: 10
+		} }, h("label", {
+			style: {
+				fontSize: 12,
+				color: "var(--dsw-alias-label-secondary)"
+			},
+			htmlFor: "trend-window"
+		}, tt("trend.window")), h("select", {
+			id: "trend-window",
+			style: {
+				...S.rosterBulk,
+				height: 28,
+				width: "auto"
+			},
+			disabled: busy,
+			value: current === null || current === void 0 ? "" : String(current),
+			onChange: (event) => {
+				const value = String(event.target?.value ?? "");
+				onChange(value === "" ? null : Number(value));
+			}
+		}, h("option", {
+			value: "",
+			key: "default"
+		}, tt("trend.windowDefault")), tiers.map((tier) => h("option", {
+			value: String(tier),
+			key: String(tier)
+		}, format(tt("trend.windowDays"), { days: tier })))), h("span", { style: {
+			...S.muted,
+			fontSize: 11
+		} }, tt("trend.windowHint")), error !== null ? h("span", {
+			style: S.formError,
+			role: "alert"
+		}, error) : null);
+	}
 	/** 事件流（429/错误），Newest-first。 */
 	function EventsList({ events, tt }) {
 		if (!Array.isArray(events) || events.length === 0) return h("div", { style: S.trendLegend }, tt("events.none"));
@@ -1845,7 +1910,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			role: "alert"
 		}, error) : null);
 	}
-	var MAX_TICKS, EVENT_KIND_KEY, DRAW_ABSENT_KEY;
+	var MAX_TICKS, TREND_WINDOW_TIERS, EVENT_KIND_KEY, DRAW_ABSENT_KEY;
 	var init_cards = __esmMin((() => {
 		init_format();
 		init_runtime();
@@ -1855,6 +1920,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		init_toggle_switch();
 		init_allow_list();
 		MAX_TICKS = 7;
+		TREND_WINDOW_TIERS = [
+			7,
+			14,
+			30,
+			90
+		];
 		EVENT_KIND_KEY = {
 			quota: "events.quota",
 			rate_limit: "events.rate_limit",
@@ -2193,6 +2264,24 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		]);
 		const toggleDraw = useCallback((enabled) => void runDrawWrite(DRAW_PATH, { enabled }), [runDrawWrite]);
 		const resetDraw = useCallback(() => void runDrawWrite(DRAW_RESET_PATH, {}), [runDrawWrite]);
+		const [trendBusy, setTrendBusy] = useState(false);
+		const [trendError, setTrendError] = useState(null);
+		const saveTrendWindow = useCallback(async (windowDays) => {
+			setTrendBusy(true);
+			setTrendError(null);
+			try {
+				await postWrite(TREND_WINDOW_PATH, { windowDays });
+				load();
+			} catch (reason) {
+				setTrendError(writeErrorText(reason, tt));
+			} finally {
+				setTrendBusy(false);
+			}
+		}, [
+			load,
+			postWrite,
+			tt
+		]);
 		const [tokenBusy, setTokenBusy] = useState(false);
 		const [tokenError, setTokenError] = useState(null);
 		const saveToken = useCallback(async (value) => {
@@ -2274,7 +2363,13 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				open: openSections.trend,
 				onToggle: () => toggleSection("trend"),
 				tt
-			}, h(TrendBars, {
+			}, h(TrendWindowPicker, {
+				trend: snap.trend,
+				busy: trendBusy,
+				error: trendError,
+				onChange: (windowDays) => void saveTrendWindow(windowDays),
+				tt
+			}), h(TrendBars, {
 				buckets: snap.trend?.buckets ?? [],
 				tt
 			})), h(SectionCard, {

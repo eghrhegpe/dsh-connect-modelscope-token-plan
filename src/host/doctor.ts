@@ -2,10 +2,11 @@
  * `doctor` —— 只读回答「这台机器上，魔搭面板的数据在哪、坏了没有」。
  *
  * 与 sensenova 的 doctor 同形（`--json` 出机器可读报告、其余出人读行），按本
- * 插件的现实缩小：魔搭有三个状态文件（usage.json 用量计数、provider.json
- * 面板保存的开关与允许清单、draw.json 面板保存的出图开关与模型偏好）和一把静态
- * 令牌；catalog 没有状态文件（每次现拉），所以症状表只有一个 id。它 import 的只有
- * 三个 state store 与它们各自的底座（host-config / state-store / util），不碰任何
+ * 插件的现实缩小：魔搭有四个状态文件（usage.json 用量计数、provider.json
+ * 面板保存的开关与允许清单、draw.json 面板保存的出图开关与模型偏好、
+ * usage-prefs.json 面板保存的趋势显示窗口）和一把静态令牌；catalog 没有状态文件
+ * （每次现拉），所以症状表只有一个 id。它 import 的只有
+ * 四个 state store 与它们各自的底座（host-config / state-store / util），不碰任何
  * 平台对接 peer（llm / publish / inference 一侧），所以在干净 checkout 上即可运行；
  * 只读本插件自己的 state 目录，绝不写盘、绝不打印令牌值（env 只报在场性，
  * 凭据服务里的令牌只有运行中的 Host 看得见，报告会明说这一点）。与 sensenova
@@ -36,6 +37,7 @@ import { dshHome as defaultDshHome, isProfileSegment } from "./state-store.ts";
 import { describeProviderPayload } from "./provider-store.ts";
 import { describeUsagePayload } from "./usage-store.ts";
 import { describeDrawPayload } from "./draw-store.ts";
+import { describeUsagePrefsPayload } from "./usage-prefs-store.ts";
 
 /** 症状 id 的单一声明（renderReport 与 --json 都从这里取值）。 */
 export const SYMPTOM = Object.freeze({
@@ -47,10 +49,10 @@ export type SymptomValue = (typeof SYMPTOM)[keyof typeof SYMPTOM];
 /** 每个症状的第一步动作。总函数：缺一条 hint 就过不了编译（见 deriveSymptoms）。 */
 const SYMPTOM_HINT: Record<SymptomValue, string> = {
   [SYMPTOM.STATE_UNREADABLE]:
-    "state/ 下有一个文件（usage.json / provider.json / draw.json）无法按本构建认识的形状解析：要么损坏，" +
+    "state/ 下有一个文件（usage.json / provider.json / draw.json / usage-prefs.json）无法按本构建认识的形状解析：要么损坏，" +
     "要么由更新的构建写入（本构建的写入已被版本只读闸挡住）。面板会显示 shapeWarnings；" +
     "升级插件后再看，或删除该文件重置——usage.json 丢了历史计数，provider.json 丢了面板保存的" +
-    "开关与允许清单，draw.json 丢了面板保存的出图开关与模型偏好。"
+    "开关与允许清单，draw.json 丢了面板保存的出图开关与模型偏好，usage-prefs.json 丢了趋势图的显示窗口。"
 };
 
 /** 缺一条 hint 就在编译期报错——新症状 id 必须先补 hint。 */
@@ -68,6 +70,8 @@ export interface DoctorScope {
   provider: { versionKnown: boolean; enabled: boolean | null; enabledIds: number | null } | null;
   /** draw.json 的速览；`null` = 文件不在场（面板还没保存过出图开关/模型，不是故障）。 */
   draw: { versionKnown: boolean; enabled: boolean | null; modelId: string | null } | null;
+  /** usage-prefs.json 的速览；`null` = 文件不在场（还没改过趋势显示窗口，不是故障）。 */
+  usagePrefs: { versionKnown: boolean; windowDays: number | null } | null;
   /** 在场但解析不了的文件名清单（含未知版本）。 */
   unreadable: string[];
 }
@@ -139,7 +143,7 @@ async function inspectStateFile<T extends { versionKnown: boolean }>(
 
 /** 读一个作用域目录。调用方保证目录在场（profile 目录来自 readdir；共享布局先过 exists()）。 */
 async function readScope(dir: string, profile: string | null): Promise<DoctorScope> {
-  const scope: DoctorScope = { profile, stateDir: dir, usage: null, provider: null, draw: null, unreadable: [] };
+  const scope: DoctorScope = { profile, stateDir: dir, usage: null, provider: null, draw: null, usagePrefs: null, unreadable: [] };
   await inspectStateFile(dir, "usage.json", scope, describeUsagePayload, (summary) => {
     scope.usage = summary;
   });
@@ -148,6 +152,9 @@ async function readScope(dir: string, profile: string | null): Promise<DoctorSco
   });
   await inspectStateFile(dir, "draw.json", scope, describeDrawPayload, (summary) => {
     scope.draw = summary;
+  });
+  await inspectStateFile(dir, "usage-prefs.json", scope, describeUsagePrefsPayload, (summary) => {
+    scope.usagePrefs = summary;
   });
   return scope;
 }
@@ -229,13 +236,13 @@ export function deriveSymptoms(scopes: DoctorScope[]): { id: SymptomValue; hint:
 export function renderReport(report: DoctorReport): string {
   const lines = [`dshHome: ${report.dshHome}`];
   const scopes = report.shared !== null ? [report.shared, ...report.scopes] : report.scopes;
-  if (scopes.every((scope) => scope.usage === null && scope.provider === null && scope.draw === null && scope.unreadable.length === 0)) {
+  if (scopes.every((scope) => scope.usage === null && scope.provider === null && scope.draw === null && scope.usagePrefs === null && scope.unreadable.length === 0)) {
     lines.push(`no state under ${join(report.dshHome, "state")} (a clean machine, or the panel has not saved anything yet)`);
   }
   for (const scope of scopes) {
     const label = scope.profile === null ? "shared" : scope.profile;
-    if (scope.usage === null && scope.provider === null && scope.draw === null && scope.unreadable.length === 0) {
-      lines.push(`${label}: no usage.json, no provider.json, no draw.json (not recorded yet)`);
+    if (scope.usage === null && scope.provider === null && scope.draw === null && scope.usagePrefs === null && scope.unreadable.length === 0) {
+      lines.push(`${label}: no usage.json, no provider.json, no draw.json, no usage-prefs.json (not recorded yet)`);
       continue;
     }
     if (scope.usage !== null) {
@@ -262,6 +269,14 @@ export function renderReport(report: DoctorReport): string {
         `${label}: draw.json — switch ${draw.enabled === null ? "not set" : draw.enabled ? "on" : "off"}` +
         `, model ${draw.modelId === null ? "auto (not set)" : draw.modelId}` +
         (draw.versionKnown ? "" : " [UNKNOWN VERSION]")
+      );
+    }
+    if (scope.usagePrefs !== null) {
+      const prefs = scope.usagePrefs;
+      // 三态口径：not set = 面板从没改过（跟随 trendDays 配置默认）。
+      lines.push(
+        `${label}: usage-prefs.json — trend window ${prefs.windowDays === null ? "not set (follows config)" : `${prefs.windowDays} day(s)`}` +
+        (prefs.versionKnown ? "" : " [UNKNOWN VERSION]")
       );
     }
     for (const item of scope.unreadable) lines.push(`${label}: UNREADABLE: ${item}`);

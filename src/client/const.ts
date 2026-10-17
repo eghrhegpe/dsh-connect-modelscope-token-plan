@@ -42,6 +42,8 @@ export const PROVIDER_RESET_PATH = `/api/${NS}/provider/reset`;
 export const DRAW_PATH = `/api/${NS}/draw`;
 /** 出图开关与模型偏好回到 patch 默认的路由。 */
 export const DRAW_RESET_PATH = `/api/${NS}/draw/reset`;
+/** 趋势图显示窗口（画多少天）的保存/读取路由。 */
+export const TREND_WINDOW_PATH = `/api/${NS}/trend/window`;
 /**
  * 「什么都不提供」的哨兵 id。字面量住在 `shared/wire.ts`（`enabledIds` 线编码的
  * 一部分，Host 的 `llm-models.ts` 同源再导出），这里再导出——Client 侧 import

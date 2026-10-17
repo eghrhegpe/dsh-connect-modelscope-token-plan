@@ -10,7 +10,7 @@ import { buildSnapshotBody } from "../src/host/snapshot-aggregate.ts";
 import { name, resolveSettings } from "../src/host/host-config.ts";
 import { registerProbeRoute } from "../src/host/routes/probe.ts";
 import { CODE } from "../src/host/codes.ts";
-import { SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, DRAW_PATH, DRAW_RESET_PATH } from "../src/host/routes/paths.ts";
+import { SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH } from "../src/host/routes/paths.ts";
 
 process.env.DSH_HOME = mkdtempSync(join(tmpdir(), "ms-routes-"));
 
@@ -87,7 +87,7 @@ assert.ok([SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, PROBE_PATH].every((p) => hand
   const expected = [
     SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH,
     PROVIDER_PATH, `${PROVIDER_PATH}/roster`, `${PROVIDER_PATH}/reset`, `${PROVIDER_PATH}/context`,
-    DRAW_PATH, DRAW_RESET_PATH
+    DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH
   ].sort();
   assert.deepEqual(
     registered,
@@ -547,6 +547,11 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
       modelId: async () => null,
       versionNote: async () => "draw-state: draw.json holds version 99, which this build cannot read"
     },
+    // usage-prefs.json 的 versionNote 同理（同一半纪律的第三个消费者）。
+    usagePrefsStore: {
+      windowDays: async () => null,
+      versionNote: async () => "usage-prefs-state: usage-prefs.json holds version 99, which this build cannot read"
+    },
     publisher: { state: { enabledIds: [], llmAvailable: false, registered: false, error: null } },
     logger: { warn: () => {} }
   });
@@ -560,6 +565,10 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   assert.ok(
     body.shapeWarnings.some((w) => w.startsWith("draw-state:")),
     "draw.json 的版本说明必须进 shapeWarnings（provider 的那半同一条纪律）"
+  );
+  assert.ok(
+    body.shapeWarnings.some((w) => w.startsWith("usage-prefs-state:")),
+    "usage-prefs.json 的版本说明必须进 shapeWarnings（与 provider / draw 同一条纪律）"
   );
 }
 
@@ -589,6 +598,7 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
     },
     providerStore: { enabled: async () => null, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
     drawStore: { enabled: async () => null, modelId: async () => null, versionNote: async () => null },
+    usagePrefsStore: { windowDays: async () => null, versionNote: async () => null },
     // provider 块里唯一会真抛的一路：publisher 状态读不到。
     publisher: { get state() { throw new Error("publisher state unavailable"); } },
     logger: { warn: () => {} }
@@ -666,6 +676,50 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   const after = await fetch.read("k", async () => { produced += 1; return "FRESH"; }, 60_000);
   assert.equal(after, "FRESH", "clear 之后的读必须重取：pre-clear 的答案不得复活");
   assert.equal(produced, 1, "确实重新拉了一次");
+}
+
+// ── 趋势显示窗口路由：GET 读 / POST 写 + 形状与范围两条判据 ──────────────────
+//
+// 越界**夹取**（与 host-config 对配置值的处理同一口径——同一个越界值不该因来源
+// 不同得到两个下场），形状错**拒绝 400**（给错了 ≠ 给多了：把一次误发的 body 静默
+// 读成「清除覆盖」，等于替用户做了一次他没要的重置）。
+{
+  const defaults = resolveSettings({}).settings;
+  const get = async () => {
+    const res = makeRes();
+    await handlers.get(TREND_WINDOW_PATH)(makeReq("GET"), res);
+    assert.equal(res.status, 200);
+    return res.body;
+  };
+  const post = async (body) => {
+    const res = makeRes();
+    await handlers.get(TREND_WINDOW_PATH)(makeReq("POST", { body }), res);
+    return res;
+  };
+
+  const fresh = await get();
+  assert.equal(fresh.windowDays, null, "从未保存 → 覆盖为 null");
+  assert.equal(fresh.days, defaults.trendDays, "生效天数 = 配置默认");
+  assert.equal(fresh.maxDays, defaults.retentionDays, "上界 = 保留窗口");
+  assert.equal(fresh.source, "config", "未保存时来源是 config");
+
+  const saved = await post({ windowDays: 30 });
+  assert.equal(saved.status, 200, "合法保存回 200");
+  assert.equal(saved.body.windowDays, 30);
+  assert.equal(saved.body.days, 30);
+  assert.equal(saved.body.source, "panel", "保存后来源是 panel");
+  assert.equal((await get()).days, 30, "GET 与 POST 说的是同一份状态");
+
+  assert.equal((await post({ windowDays: 999 })).body.windowDays, defaults.retentionDays, "超过保留 → 夹到上界");
+
+  for (const bad of [{}, { windowDays: "30" }, { windowDays: true }]) {
+    assert.equal((await post(bad)).status, 400, `形状错必须 400：${JSON.stringify(bad)}`);
+  }
+  assert.equal((await get()).days, defaults.retentionDays, "被拒的写不改动已有状态");
+
+  const cleared = await post({ windowDays: null });
+  assert.equal(cleared.body.windowDays, null, "null = 清除覆盖");
+  assert.equal(cleared.body.days, defaults.trendDays, "清除后回到配置默认");
 }
 
 console.log("routes.test.mjs: all checks passed");

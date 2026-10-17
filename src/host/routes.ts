@@ -10,6 +10,7 @@ import { registerTokenRoute } from "./routes/token.ts";
 import { registerProbeRoute } from "./routes/probe.ts";
 import { registerProviderRoute } from "./routes/provider.ts";
 import { registerDrawRoute } from "./routes/draw.ts";
+import { registerUsagePrefsRoute } from "./routes/usage-prefs.ts";
 import type { Wiring } from "./types.ts";
 
 /** 注册全部路由，返回 off() 注销回调（注册序）。M4 起含 provider 路由。 */
@@ -20,6 +21,7 @@ export function registerRoutes(ctx: any, wiring: Wiring): Array<() => void> {
     ...registerTokenRoute(ctx, wiring),
     registerProbeRoute(ctx, wiring),
     registerProviderRoute(ctx, wiring),
-    registerDrawRoute(ctx, wiring)
+    registerDrawRoute(ctx, wiring),
+    registerUsagePrefsRoute(ctx, wiring)
   ];
 }

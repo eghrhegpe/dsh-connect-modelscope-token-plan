@@ -4,7 +4,7 @@
 // 覆盖边界（不是覆盖）：peer 侧的开关裁决契约**没有测试覆盖**——它需要运行时
 // peer，peer 未 vendored 进本仓库（docs/ROADMAP.md Backlog）。
 import { strict as assert } from "node:assert";
-import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "../src/host/switch-precedence.ts";
+import { resolveSwitchEnabled, resolveSwitchValue, resolveSwitchNumber, switchSource } from "../src/host/switch-precedence.ts";
 
 // 布尔开关：面板保存值永远赢，否则落配置默认（§9 / §11 的 panel??config）。
 {
@@ -23,11 +23,21 @@ import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "../src/h
   assert.equal(resolveSwitchValue(null, undefined), undefined, "无默认 → 仍 undefined");
 }
 
+// 数值偏好：同一套 panel??config 方言（本插件用于趋势图的显示窗口）。
+// 夹取**不在这里**——边界（保留窗口）属于知道它的调用方，见 usage-prefs-store 的
+// resolveWindowDays。
+{
+  assert.equal(resolveSwitchNumber(null, 14), 14, "未保存 → 配置默认");
+  assert.equal(resolveSwitchNumber(30, 14), 30, "面板值优先");
+  assert.equal(resolveSwitchNumber(0, 14), 0, "0 不是「未设置」——这里不做 falsy 短路");
+}
+
 // source 标签始终随答案一起回传，让面板说出哪一侧在掌权。
 {
   assert.equal(switchSource(null), "config", "未保存（null）→ config 来源");
   assert.equal(switchSource(true), "panel", "面板值 → panel 来源");
   assert.equal(switchSource("x"), "panel", "面板字符串值 → panel 来源");
+  assert.equal(switchSource(30), "panel", "面板数值 → panel 来源");
   // 仅 `null` 视为未保存；`undefined` 按实现归为 panel（保留既有口径，本模块不在本次修）。
   assert.equal(switchSource(undefined), "panel", "undefined 按既有口径归 panel");
 }

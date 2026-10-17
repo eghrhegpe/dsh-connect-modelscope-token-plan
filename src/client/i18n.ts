@@ -112,6 +112,10 @@ export const zh = {
 
   "trend.none": "还没有本地调用记录。",
   "trend.legend": "柱长相对区间内最大值，仅本地口径。",
+  "trend.window": "显示天数",
+  "trend.windowDefault": "默认（跟随配置）",
+  "trend.windowDays": "{days} 天",
+  "trend.windowHint": "只决定画多少天；能回看多久另有一个保留窗口（留得比画得多才画得出更远）。",
 
   "events.none": "暂无事件。",
   "events.quota": "额度",
@@ -258,6 +262,10 @@ export const en: typeof zh = {
 
   "trend.none": "No local call records yet.",
   "trend.legend": "Bar lengths are relative to the maximum in the range (local scope only).",
+  "trend.window": "Days shown",
+  "trend.windowDefault": "Default (follow config)",
+  "trend.windowDays": "{days} days",
+  "trend.windowHint": "Only sets how many days are drawn; how far back history is kept is a separate retention window.",
 
   "events.none": "No events.",
   "events.quota": "Quota",
