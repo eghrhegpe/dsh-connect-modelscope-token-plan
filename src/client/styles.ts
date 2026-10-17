@@ -79,6 +79,17 @@ export const S = {
   // The legend under the bars: quiet secondary text, lifted a little off
   // the last row's divider so it reads as a caption, not another data row.
   trendLegend: { marginTop: 10, fontSize: 11, lineHeight: "16px", color: "var(--dsw-alias-label-secondary)" },
+  // 天桶趋势的**竖向柱状图**（与姊妹插件 Agnes 的用量图同形）：柱子等比铺满宽度，
+  // 高按区间内最大值相对显示；只有首末日期做轴，逐日读数走每根柱的 title/aria。
+  // 柱色与横向条同一枚品牌色，沿用趋势卡同一套 token，不新开一套配色。
+  trendChartBars: { display: "flex", alignItems: "flex-end", gap: 2, height: 96, padding: "0 1px" },
+  trendChartBar: { flex: 1, minWidth: 2, height: "100%", display: "flex", alignItems: "flex-end" },
+  trendChartFill: { width: "100%", minHeight: 2, borderRadius: 2, background: BRAND },
+  // 逐柱读数：与柱群同一套 flex（gap/内边距一致），一列数字正对一根柱，排在柱基线
+  // 正下方——柱高只表达相对量，这一行才是每次调用次数本身。
+  trendChartValues: { display: "flex", gap: 2, padding: "0 1px", marginTop: 4 },
+  trendChartValue: { flex: 1, minWidth: 0, textAlign: "center", fontSize: 10, lineHeight: "14px", color: "var(--dsw-alias-label-secondary)", fontVariantNumeric: "tabular-nums" },
+  trendChartAxis: { display: "flex", justifyContent: "space-between", gap: 12, marginTop: 6, fontSize: 11, color: "var(--dsw-alias-label-secondary)" },
   muted: { color: "var(--dsw-alias-label-secondary)" },
   error: { color: "var(--dsw-alias-state-error-primary)" },
   empty: { color: "var(--dsw-alias-label-secondary)", padding: "18px 0" },

@@ -136,7 +136,21 @@ export function ModelUsageTable({ rows, tt }: { rows: Array<{ modelId: string; c
   );
 }
 
-/** 近 N 天本地调用趋势（天桶；缺桶 = 该日 0 次，真实零）。 */
+/**
+ * 轴上的日期短标注：砍掉年份（`2026-10-04` → `10-04`）。
+ *
+ * 轴的跨度最多 trendDays（默认 14，多在同年内），年份在两端重复出现，占掉的
+ * 宽度全是从柱子上匀来的。不是 `YYYY-MM-DD` 形状时原样返回——宁可显示一个陌生
+ * 字符串，也不按位置硬切出一个可能错的日期。
+ * @param {string} key - 天桶 dateKey（本地日期 YYYY-MM-DD）。
+ * @returns {string} 短标注。
+ */
+function shortDateKey(key: string): string {
+  const value = typeof key === "string" ? key : "";
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value.slice(5) : value;
+}
+
+/** 近 N 天本地调用趋势（天桶；缺桶 = 该日 0 次，真实零）——**竖向柱状图**。 */
 export function TrendBars({ buckets, tt }: { buckets: TrendBucket[]; tt: Tt }): unknown {
   if (!Array.isArray(buckets) || buckets.length === 0) return h("div", { style: S.trendLegend }, tt("trend.none"));
   // 脏数据归一，与 ModelUsageTable 同口径：这里曾经直接 `Math.max(0, b.calls)` 与
@@ -148,16 +162,42 @@ export function TrendBars({ buckets, tt }: { buckets: TrendBucket[]; tt: Tt }): 
     calls: Number.isFinite(bucket.calls) ? Math.max(0, bucket.calls) : 0
   }));
   const max = Math.max(0, ...rows.map((row) => row.calls));
+  // 只有首末日期做轴（且砍掉年份）：14~30 根柱各自带一个完整日期会挤成一团，
+  // 逐日读数改走柱群正下方的数字行 + 每根柱的 title/aria。
+  const first = rows[0]?.dateKey ?? "";
+  const last = rows[rows.length - 1]?.dateKey ?? "";
   return h(
     "div",
     null,
-    rows.map((row) => h(
+    h(
       "div",
-      { key: row.dateKey, style: S.trendRowHead },
-      h("span", { style: S.trendModel }, row.dateKey),
-      h("div", { style: { ...S.trendBar, flex: "1", marginLeft: 10 }, "aria-hidden": "true" }, max > 0 && row.calls > 0 ? h("div", { style: { ...S.barFill, width: `${(row.calls / max) * 100}%` } }) : null),
-      h("span", { style: S.quotaUsed }, String(row.calls))
-    )),
+      { style: S.trendChartBars },
+      rows.map((row) => {
+        const pct = max > 0 ? (row.calls / max) * 100 : 0;
+        return h(
+          "div",
+          { key: row.dateKey, style: S.trendChartBar, title: `${row.dateKey}: ${count(row.calls)}` },
+          h("div", {
+            // 0 次 = 0% 高 + minHeight 的 2px 底座：天桶确实存在，不是空心缺柱。
+            style: { ...S.trendChartFill, height: `${pct}%` },
+            role: "progressbar",
+            "aria-label": `${row.dateKey} ${count(row.calls)}`,
+            "aria-valuenow": Math.round(pct),
+            "aria-valuemin": 0,
+            "aria-valuemax": 100
+          })
+        );
+      })
+    ),
+    // 逐柱读数行：柱高只表达相对量，这一行把每次调用的**绝对值**补回来。与柱群
+    // 同一套 flex，一列数字正对一根柱。`aria-hidden`：柱自己已带同一条 aria-label，
+    // 不标就等于让读屏把每个数读两遍。
+    h(
+      "div",
+      { style: S.trendChartValues },
+      rows.map((row) => h("span", { key: row.dateKey, style: S.trendChartValue, "aria-hidden": "true" }, count(row.calls)))
+    ),
+    h("div", { style: S.trendChartAxis }, h("span", null, shortDateKey(first)), h("span", null, shortDateKey(last))),
     h("div", { style: S.trendLegend }, tt("trend.legend"))
   );
 }
