@@ -176,14 +176,13 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.mounted": "已注册：{tool}",
 			"draw.notMounted": "未注册——打开上方开关即可开启。",
 			"draw.restartHint": "开关立即保存；工具要到下次启动 DSH 才挂载（挂载后无法撤销）。",
-			"draw.currentTitle": "当前使用：",
-			"draw.currentSource": "（{source}）",
-			"draw.currentNone": "当前目录里没有可用的出图模型——出图会失败（先确认访问令牌已配置、目录已拉到）。",
-			"draw.currentSrc.preferred": "按你的指定",
-			"draw.currentSrc.declaredTextToImage": "自动：平台声明为文生图",
-			"draw.currentSrc.knownTextToImage": "自动：已知可纯文生图",
-			"draw.currentSrc.catalogFirst": "自动：目录里的第一个出图模型",
-			"draw.models": "出图模型（单选；保持「自动选择」则由插件挑）",
+			"draw.currentNone": "当前目录里没有可出图的模型——出图会失败（先确认访问令牌已配置、目录已拉到）。",
+			"draw.currentSrc.declaredTextToImage": "平台声明为文生图",
+			"draw.currentSrc.knownTextToImage": "已知可纯文生图",
+			"draw.currentSrc.catalogFirst": "目录里的第一个出图模型",
+			"draw.autoHint": "由插件按能力挑；当前会选 {model}",
+			"draw.autoHintReason": "由插件按能力挑；当前会选 {model}（{reason}）",
+			"draw.models": "出图模型",
 			"draw.badge": "出图",
 			"draw.badge.textToImage": "文生图",
 			"draw.badge.imageToImage": "图生图",
@@ -316,14 +315,13 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.mounted": "Registered: {tool}",
 			"draw.notMounted": "Not registered — turn the switch above on.",
 			"draw.restartHint": "The switch saves at once; the tool mounts the next time DSH starts (a mount cannot be undone).",
-			"draw.currentTitle": "In use:",
-			"draw.currentSource": "({source})",
-			"draw.currentNone": "No usable image model in the catalogue right now — drawing will fail (check the access token and that the catalogue has loaded).",
-			"draw.currentSrc.preferred": "your choice",
-			"draw.currentSrc.declaredTextToImage": "auto: platform-declared text-to-image",
-			"draw.currentSrc.knownTextToImage": "auto: known to accept text-to-image",
-			"draw.currentSrc.catalogFirst": "auto: first image model in the catalogue",
-			"draw.models": "Image model (pick one; keep Auto and the plugin chooses)",
+			"draw.currentNone": "No image model in the catalogue right now — drawing will fail (check the access token and that the catalogue has loaded).",
+			"draw.currentSrc.declaredTextToImage": "platform-declared text-to-image",
+			"draw.currentSrc.knownTextToImage": "known to accept text-to-image",
+			"draw.currentSrc.catalogFirst": "first image model in the catalogue",
+			"draw.autoHint": "Chosen by the plugin for capability; it would pick {model}",
+			"draw.autoHintReason": "Chosen by the plugin for capability; it would pick {model} ({reason})",
+			"draw.models": "Image model",
 			"draw.badge": "image",
 			"draw.badge.textToImage": "text-to-image",
 			"draw.badge.imageToImage": "image-to-image",
@@ -1974,7 +1972,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const effectiveModel = status.effectiveModel;
 		const hasEffectiveKey = effectiveModel !== void 0;
 		const candidateDetails = status.candidates;
-		const currentSourceKey = status.effectiveSource === "preferred" ? "draw.currentSrc.preferred" : status.effectiveSource === "declared-text-to-image" ? "draw.currentSrc.declaredTextToImage" : status.effectiveSource === "known-text-to-image" ? "draw.currentSrc.knownTextToImage" : status.effectiveSource === "catalog-first" ? "draw.currentSrc.catalogFirst" : null;
+		const autoReasonKey = status.effectiveSource === "declared-text-to-image" ? "draw.currentSrc.declaredTextToImage" : status.effectiveSource === "known-text-to-image" ? "draw.currentSrc.knownTextToImage" : status.effectiveSource === "catalog-first" ? "draw.currentSrc.catalogFirst" : null;
 		const switchRow = h("div", { style: {
 			display: "flex",
 			gap: 10,
@@ -2025,27 +2023,20 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			...S.formNote,
 			color: "var(--dsw-alias-state-warn-primary)"
 		} }, tt("draw.needsKey")) : null;
-		const currentBlock = !hasEffectiveKey ? null : effectiveModel === null || effectiveModel === "" ? h("div", {
-			style: {
-				...S.muted,
-				fontSize: 12,
-				marginTop: 8
-			},
-			role: "status"
-		}, tt("draw.currentNone")) : h("div", {
-			style: {
-				...S.formNote,
-				marginTop: 8,
-				display: "flex",
-				gap: 6,
-				flexWrap: "wrap",
-				alignItems: "baseline"
-			},
-			role: "status"
-		}, h("span", null, tt("draw.currentTitle")), h("code", {
-			style: S.modelName,
-			title: effectiveModel
-		}, effectiveModel), currentSourceKey === null ? null : h("span", { style: { color: "var(--dsw-alias-label-secondary)" } }, format(tt("draw.currentSource"), { source: tt(currentSourceKey) })));
+		const autoDescription = !hasEffectiveKey || status.preferredModel !== null ? null : effectiveModel === null || effectiveModel === "" ? h("div", { style: {
+			...S.muted,
+			fontSize: 11,
+			lineHeight: "16px",
+			paddingLeft: 25
+		} }, tt("draw.currentNone")) : h("div", { style: {
+			...S.muted,
+			fontSize: 11,
+			lineHeight: "16px",
+			paddingLeft: 25
+		} }, autoReasonKey === null ? format(tt("draw.autoHint"), { model: effectiveModel }) : format(tt("draw.autoHintReason"), {
+			model: effectiveModel,
+			reason: tt(autoReasonKey)
+		}));
 		const RADIO_NAME = "modelscope-draw-model";
 		/**
 		* 一个候选的能力徽章（**正向各给一枚**，不是「能力减项 + 警告」）。
@@ -2089,8 +2080,13 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			capability: null,
 			textToImage: null
 		}));
-		/** 一行广播的骨架：单选框 + 名字（+ 其余徽章由调用方给）。 */
-		const radioRow = (key, checked, label, labelText, disabled, onChange, extra) => h("li", {
+		/**
+		* 一行广播的骨架：单选框 + 名字（+ 其余徽章由调用方给），可选第二行说明。
+		*
+		* `description` 是「这一项是什么」的地方（只有「自动选择」需要），缩进对齐到
+		* 文字起点（复选框 15px + gap 10px = 25px），读起来是该项的注脚而不是新一行。
+		*/
+		const radioRow = (key, checked, label, labelText, disabled, onChange, extra, description) => h("li", {
 			key,
 			style: S.modelRow
 		}, h("div", { style: S.modelRowHead }, h("label", { style: {
@@ -2111,7 +2107,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}), h("span", {
 			style: S.modelName,
 			title: label
-		}, labelText)), ...extra));
+		}, labelText)), ...extra), ...description === void 0 ? [] : [description]);
 		const candidateBlock = candidateRows.length === 0 ? h("div", { style: {
 			...S.muted,
 			fontSize: 12,
@@ -2120,7 +2116,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			style: S.modelList,
 			role: "radiogroup",
 			"aria-label": tt("draw.models")
-		}, radioRow("__auto__", status.preferredModel === null, tt("draw.auto"), tt("draw.auto"), busy, () => onAutoModel(), []), ...candidateRows.map((row) => radioRow(row.id, status.preferredModel === row.id, row.id, row.id, busy, () => onSelectModel(row.id), [...capabilityBadges(row), h("a", {
+		}, radioRow("__auto__", status.preferredModel === null, tt("draw.auto"), tt("draw.auto"), busy, () => onAutoModel(), [], autoDescription === null ? void 0 : autoDescription), ...candidateRows.map((row) => radioRow(row.id, status.preferredModel === row.id, row.id, row.id, busy, () => onSelectModel(row.id), [...capabilityBadges(row), h("a", {
 			key: "link",
 			style: {
 				...S.formNote,
@@ -2133,7 +2129,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			rel: "noreferrer",
 			title: tt("models.viewOnSiteTitle")
 		}, tt("models.viewOnSite"))]))));
-		return h("div", null, switchRow, statusNode, restartHint, tokenHint, currentBlock, h("div", { style: {
+		return h("div", null, switchRow, statusNode, h("div", { style: {
 			...S.sectionTitle,
 			margin: "18px 0 8px"
 		} }, tt("draw.models")), candidateBlock, h("div", { style: S.rosterFoot }, h("button", {
@@ -2144,7 +2140,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, tt("draw.reset"))), error !== null ? h("div", {
 			style: S.formError,
 			role: "alert"
-		}, error) : null);
+		}, error) : null, restartHint, tokenHint);
 	}
 	var MAX_TICKS, TREND_WINDOW_TIERS, EVENT_KIND_KEY, DRAW_ABSENT_KEY;
 	var init_cards = __esmMin((() => {

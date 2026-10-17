@@ -717,12 +717,12 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, 
   const effectiveModel = status.effectiveModel;
   const hasEffectiveKey = effectiveModel !== undefined;
   const candidateDetails = status.candidates;
-  const currentSourceKey: DictionaryKey | null =
-    status.effectiveSource === "preferred" ? "draw.currentSrc.preferred"
-      : status.effectiveSource === "declared-text-to-image" ? "draw.currentSrc.declaredTextToImage"
-        : status.effectiveSource === "known-text-to-image" ? "draw.currentSrc.knownTextToImage"
-          : status.effectiveSource === "catalog-first" ? "draw.currentSrc.catalogFirst"
-            : null;
+  // 自动选择的理由只描述**自动**这一档（用户指定时不需要解释为什么是指定的）。
+  const autoReasonKey: DictionaryKey | null =
+    status.effectiveSource === "declared-text-to-image" ? "draw.currentSrc.declaredTextToImage"
+      : status.effectiveSource === "known-text-to-image" ? "draw.currentSrc.knownTextToImage"
+        : status.effectiveSource === "catalog-first" ? "draw.currentSrc.catalogFirst"
+          : null;
 
   const switchRow = h(
     "div",
@@ -768,23 +768,22 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, 
     ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("draw.needsKey"))
     : null;
 
-  // ── 当前使用：谁在生效、为什么是它 ──
-  // 这一行是这张卡此前最缺的东西：候选列表只说明「有哪些」，不说明「用哪个」，
-  // 用户看到两个 Qwen-Image-Edit 无从判断。
-  const currentBlock = !hasEffectiveKey
+  // ── 「自动选择」这一项自己的说明 ──
+  // 之前这段信息被拆到三处（顶部「当前使用」行 + 小标题括号 + 单选项本身），
+  // 单词「自动」出现三次、而单选项又什么解释都没有。现在只在这里说一次：
+  // 选中它会发生什么、当前会选谁、为什么是它。
+  // 仅在**自动确实生效**（preferredModel === null）时给这句——指定了模型时
+  // 「自动会挑谁」不是当前事实，说出来只会与勾选状态打架。
+  const autoDescription = !hasEffectiveKey || status.preferredModel !== null
     ? null
     : effectiveModel === null || effectiveModel === ""
-      ? h("div", { style: { ...S.muted, fontSize: 12, marginTop: 8 }, role: "status" }, tt("draw.currentNone"))
+      ? h("div", { style: { ...S.muted, fontSize: 11, lineHeight: "16px", paddingLeft: 25 } }, tt("draw.currentNone"))
       : h(
         "div",
-        { style: { ...S.formNote, marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "baseline" }, role: "status" },
-        h("span", null, tt("draw.currentTitle")),
-        h("code", { style: S.modelName, title: effectiveModel }, effectiveModel),
-        // 理由用括号括起来贴在 id 后面：它是同一句话的后半截，不该被 flex 换行
-        // 拆成另一块（拆开读起来像两个独立字段）。
-        currentSourceKey === null
-          ? null
-          : h("span", { style: { color: "var(--dsw-alias-label-secondary)" } }, format(tt("draw.currentSource"), { source: tt(currentSourceKey) }))
+        { style: { ...S.muted, fontSize: 11, lineHeight: "16px", paddingLeft: 25 } },
+        autoReasonKey === null
+          ? format(tt("draw.autoHint"), { model: effectiveModel })
+          : format(tt("draw.autoHintReason"), { model: effectiveModel, reason: tt(autoReasonKey) })
       );
 
   // 单选框的名字：一个表单里只能有一组生效模型，`name` 让浏览器管住「单选」这
@@ -826,8 +825,13 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, 
       ? candidateDetails.map((row) => ({ id: row.id, capability: row.capability, textToImage: row.textToImage }))
       : candidates.map((id) => ({ id, capability: null, textToImage: null }));
 
-  /** 一行广播的骨架：单选框 + 名字（+ 其余徽章由调用方给）。 */
-  const radioRow = (key: string, checked: boolean, label: string, labelText: string, disabled: boolean, onChange: () => void, extra: unknown[]) =>
+  /**
+   * 一行广播的骨架：单选框 + 名字（+ 其余徽章由调用方给），可选第二行说明。
+   *
+   * `description` 是「这一项是什么」的地方（只有「自动选择」需要），缩进对齐到
+   * 文字起点（复选框 15px + gap 10px = 25px），读起来是该项的注脚而不是新一行。
+   */
+  const radioRow = (key: string, checked: boolean, label: string, labelText: string, disabled: boolean, onChange: () => void, extra: unknown[], description?: unknown) =>
     h(
       "li",
       { key, style: S.modelRow },
@@ -849,7 +853,8 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, 
           h("span", { style: S.modelName, title: label }, labelText)
         ),
         ...extra
-      )
+      ),
+      ...(description === undefined ? [] : [description])
     );
 
   const candidateBlock = candidateRows.length === 0
@@ -869,7 +874,8 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, 
           tt("draw.auto"),
           busy,
           () => onAutoModel(),
-          []
+          [],
+          autoDescription === null ? undefined : autoDescription
         ),
         ...candidateRows.map((row) =>
           radioRow(
@@ -888,14 +894,14 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, 
       )
     );
 
+  // 信息层级：**状态 → 选择 → 操作 → 说明**。说明性文字（重启提示、缺令牌提示）
+  // 一律沉到卡片底部，不夹在标题与列表之间——它们解释的是「为什么现在还没生效」，
+  // 而用户先是来看「当前用什么、能改成什么」。
   return h(
     "div",
     null,
     switchRow,
     statusNode,
-    restartHint,
-    tokenHint,
-    currentBlock,
     h("div", { style: { ...S.sectionTitle, margin: "18px 0 8px" } }, tt("draw.models")),
     candidateBlock,
     // 只剩「回到默认」一个按钮：「自动选择」已是单选项（在上面的单选组里），
@@ -905,7 +911,9 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, 
       { style: S.rosterFoot },
       h("button", { type: "button", style: S.button, disabled: busy, onClick: onReset }, tt("draw.reset"))
     ),
-    error !== null ? h("div", { style: S.formError, role: "alert" }, error) : null
+    error !== null ? h("div", { style: S.formError, role: "alert" }, error) : null,
+    restartHint,
+    tokenHint
   );
 }
 
