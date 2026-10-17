@@ -10,9 +10,17 @@
 > **手动** `gh release create` 出来的：它对安装、测试、打 tag **都没有任何影响**，漏掉时只有
 > Release 页会缺一条，没有任何东西会报错。
 >
-> **每次发版在根目录新开一份 `RELEASE-X.Y.Z.md`**（以最新一份为模板，命令按当时的 shell
-> 写——0.2.0 是 PowerShell）；**上一版手册随之移入 `releases/archive/`**，根目录只保留最新
-> 一份 + 本文件。已执行的手册是历史记录，不是现行手册。
+> **本文件是唯一的发版知识源，不产生每版手册。** Release 正文写在**临时文件**里喂给
+> `gh release create --notes-file`（姊妹插件同款做法），草稿留在 `CHANGELOG.md` 该版节里。
+>
+> 这条是 2026-10-17 的裁定，推翻了本仓 2026-10-05 自造的「每次发版新开一份
+> `RELEASE-X.Y.Z.md`，上一版移入 `releases/archive/`」惯例。推翻依据（实测）：
+> 姊妹插件（agnes / sensenova / qoder / trae / workbuddy）**都没有**这套，它们只有
+> `CHANGELOG.md` + 本文件，那句 `RELEASE-X.Y.Z.md` 是 `/tmp` 下的**临时**正文；
+> 而本仓那套的实测形态是——`RELEASE-0.5.0.md` 的 130 个非空行里 **48% 与上一版逐行相同**、
+> 另 23% 只是把版本号代进去，同时**把流程知识困在某一版里**（`EOTP` 怎么办、`E401`、
+> 版本号烧在**两处**、`release.test` 的截图白名单——这些当时在本文件里一个字都没有）。
+> 独占文件一多，知识就长在文件上，而文件会随版本轮换。
 
 ## 前置条件
 
@@ -112,9 +120,18 @@ git commit -m "chore: 版本升级至 X.Y.Z"
    不重试」与「rpm 限频 429 退避重试」——确认 peer 的新分类顺序没把两类 429 颠倒；
 4. 把「升级 peer」单独提交（不要混进发版提交），peer 漂移导致回退时可单点 revert。
 
-### 2. 更新版本号
+### 2. 更新版本号（**两处**，只改一处会红）
 
-手动改 `package.json` 的 `version`（语义化版本 `X.Y.Z`）。
+```bash
+# 1) package.json 的 "version"
+# 2) src/host/host-config.ts 的 PLUGIN_VERSION
+```
+
+`test/config.test.mjs` 钉着这两处相等——`PLUGIN_VERSION` 会进快照与日志，只改 `package.json`
+会让面板报的版本与包的实际版本对不上。
+
+改完 `src/` 必须 `npm run build` 再提交：`lib/` + `client.js` 是**入库产物**，`github:` 源
+安装不跑 `prepack`，不重建则用户装到旧代码。`test/build-gate.mjs` 会红——**红得对**。
 
 ### 3. 更新 CHANGELOG.md
 
@@ -126,13 +143,25 @@ git commit -m "chore: 版本升级至 X.Y.Z"
   0.1.0 那一节就是这么处理的：8 节压成 1 节，过程 24KB 搬进 docs。
 - 一节的体量控制在 20–30 行内。超过就该问：这节是不是混进了实施过程？
 
-### 4. 提交并打 git tag
+### 4. 提交 → 推 main → **等 CI 绿** → 打 tag
 
 ```bash
-git add package.json CHANGELOG.md
-git commit -m "chore: 版本升级至 X.Y.Z"
+git add package.json src/host/host-config.ts CHANGELOG.md
+git commit -m "chore(release): X.Y.Z"
+npm test                                  # 提交后复跑一次，产物门禁必须仍绿
+git push origin main                      # 当前分支不是 main 时：git push origin <分支>:main
+```
+
+**tag 之前必须有 CI 的独立结论**——本地 `npm test` 与 CI 同源，不是独立证据：
+
+```bash
+git log --oneline origin/main..HEAD | wc -l        # 非零 = 这些提交是第一次被独立复核
+gh run list --repo <owner>/<repo> --limit 3
+gh run watch --repo <owner>/<repo> --exit-status   # 红了就**不要**往下走
+```
+
+```bash
 git tag -a vX.Y.Z -m "vX.Y.Z: <一句话说明>"
-git push origin main        # 当前分支不是 main 时：git push origin <分支>:main
 git push origin vX.Y.Z
 ```
 
@@ -161,6 +190,16 @@ npm publish --registry=https://registry.npmjs.org
 # 验证（必须带同样的 --registry，否则读到的是镜像缓存的旧版）
 npm view dsh-connect-modelscope-token-plan version --registry=https://registry.npmjs.org
 ```
+
+**`--access public` 不是必需的**（无 `@scope` 前缀；0.2.0 / 0.3.0 / 0.4.0 都没带它）。
+
+报错与对策（**这三条最容易误判**）：
+
+- `EOTP`：账号开了两步验证，**不是**登录失败。打开它打印的 auth 链接走完 2FA，把 6 位码
+  追加成 `--otp 123456`（30 秒刷一次，过期就重新取一个）。
+- `E401`：未登录或 token 失效 → `npm login --registry=https://registry.npmjs.org` 后按原版本号重发。
+- `DEPTH_ZERO_SELF_SIGNED_CERT`：TLS 被拦，与登录无关（见 §0.3）。只在**这一条**命令上加
+  `--strict-ssl=false`，**不要**改全局——`npm login` 修不了它。
 
 - **已发布版本不可覆盖**：发新版前必须先升 `version`。
 - **`files` 已限定发布内容**，测试与 `node_modules/` 不会进包。`assets/` 与
@@ -218,6 +257,20 @@ gh release create vX.Y.Z \
 
 ## 常见问题
 
+- **`npm publish` 打印了 `+ <pkg>@X.Y.Z`，但 `npm view` 查不到**：那是 npm 的扫描/暂存窗口
+  （它会自己打印 *being processed and may take a few minutes*）。**等 2–3 分钟再核**，别急着
+  重发——重发会撞 `EPUBLISHCONFLICT`。要绕过客户端缓存就直接问 registry：
+  `curl -sH "Accept: application/vnd.npm.install-v1+json" https://registry.npmjs.org/<pkg>`
+  看里面的 `dist-tags`（`modified` 时间戳没动 = registry 真的还没收到）。
+- **`config.test` 红「版本不一致」**：版本号烧在 `package.json` 与 `src/host/host-config.ts`
+  两处（见第 2 步），只改了一处。
+- **`build-gate` 红「产物过期」**：改了 `src/` 没 `npm run build`。先 build 再提交，
+  **不要**改门禁让它变绿。
+- **`release.test` 红「截图不在 files 里」**：`assets/` 被移出 `package.json` 的 `files`
+  白名单。恢复白名单，不要改门禁。
+- **`gh release create` 报 `tag not found`**：tag 没推 → 回第 4 步。**别**去掉 `--verify-tag`
+  （去掉它会在 tag 不存在时悄悄新建一个指向当前 HEAD 的 tag）。
+- **`gh run list` 空**：第 4 步的 push 没成功 → `git rev-parse --short origin/main` 核对。
 - **改了 README 但用户看不到**：`files` 白名单里有 README，随包发布。但仓库里的 README
   **不代表**用户读到的是新版——验证：`npm view <pkg> readme --registry=https://registry.npmjs.org | grep -c '<关键词>'`，
   返回 0 就说明还停在上一版，需要发新版。

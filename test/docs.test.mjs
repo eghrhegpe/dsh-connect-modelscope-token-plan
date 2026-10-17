@@ -416,4 +416,37 @@ const FACTS = [
   }
 }
 
+// ── §13 每版手册禁令：根目录不得再有 RELEASE-X.Y.Z.md，也不得有 releases/ ──────
+//
+// 事故（2026-10-17 裁定）：本仓 2026-10-05 自造了「每次发版新开一份 RELEASE-X.Y.Z.md，
+// 上一版移入 releases/archive/」的惯例，随后自己把这条写进 RELEASING.md 当纪律，再被
+// 逐版复制。实测它站不住：姊妹插件（agnes / sensenova / qoder / trae / workbuddy）都没
+// 这套；而 `RELEASE-0.5.0.md` 的 130 个非空行里 48% 与上一版**逐行相同**、另 23% 只是
+// 把版本号代进去，同时把 `EOTP` / `E401` / 版本号烧在**两处**这类流程知识困在单一版里
+// （当时 RELEASING.md 一个字都没有）。
+//
+// 为什么要有这条门禁：惯例的载体是**文件名**，而文件名不进任何判据——删掉规则文档后，
+// 下一轮（人或 agent）从 git 历史里看到那五个文件，照样会照抄一遍。判据机械：根目录出现
+// `RELEASE-*.md`，或 `releases/` 目录被重新创建，即报红。
+//
+// 历史记录不丢：那五个文件的内容仍在 git 历史里（例：`git show 616e58b:RELEASE-0.5.0.md`），
+// 流程知识已上收进 RELEASING.md。Release 正文现在写在临时文件里喂 `--notes-file`。
+{
+  const rootMd = readdirSync(join(root), { withFileTypes: true })
+    .filter((e) => e.isFile() && /^RELEASE-.*\.md$/.test(e.name))
+    .map((e) => e.name);
+  assert.deepEqual(
+    rootMd,
+    [],
+    `根目录出现了每版手册：${rootMd.join(", ")}\n` +
+      `2026-10-17 起不产生这个文件（理由见 RELEASING.md 头注与 docs.test.mjs §13）：\n` +
+      `Release 正文写临时文件喂 \`gh release create --notes-file\`，草稿留在 CHANGELOG 该版节。`
+  );
+  assert.equal(
+    existsSync(join(root, "releases")),
+    false,
+    "releases/ 目录被重新创建了——它只服务已被推翻的「手册归档」惯例；历史版本在 git 历史里"
+  );
+}
+
 console.log("docs.test.mjs: all checks passed");
