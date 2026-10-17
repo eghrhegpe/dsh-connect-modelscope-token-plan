@@ -21,6 +21,42 @@
  * 4. 生图/语音模型（Qwen-Image-Edit、ACE-Step 等）无对话上下文，不收。
  */
 
+/**
+ * 本表最后一次与 models.dev / 真机目录核对的日期（ISO 日期，UTC）。
+ *
+ * 存在的理由：策展表是**静态知识**，而目录会上下架。维护纪律要求「目录下架的条目
+ * 应随手删除」，但没有任何机制会自动知道下架发生了——没有这个日期，表会悄悄腐烂，
+ * 而使用者无从判断一个值是三个月前还是三年前核的。快照侧据此在表过期时给一条
+ * shapeWarning（见 {@link curatedCatalogStale}）。
+ */
+export const CURATED_AS_OF = "2026-10-16";
+
+/**
+ * 策展表距上次核对已经过去多少天；日期解析不了返回 `null`。
+ * @param {Date} [now] - 时钟源（测试注入）。
+ * @returns {number|null} 天数（向下取整），或 null。
+ */
+export function curatedCatalogAgeDays(now: Date = new Date()): number | null {
+  const asOf = Date.parse(CURATED_AS_OF + "T00:00:00Z");
+  if (Number.isNaN(asOf)) return null;
+  const delta = now.getTime() - asOf;
+  return delta < 0 ? 0 : Math.floor(delta / 86_400_000);
+}
+
+/**
+ * 策展表是否该被复核了：距 {@link CURATED_AS_OF} 超过 `maxAgeDays` 天。
+ *
+ * 只回答「该提醒了吗」，不回答「表里的值错了」——过期的表往往仍然正确，只是
+ * 不再有核对背书。快照把它转成一条 shapeWarning，而不是拒绝使用表里的值。
+ * @param {Date} [now] - 时钟源（测试注入）。
+ * @param {number} [maxAgeDays] - 容忍的天数，默认 180。
+ * @returns {boolean}
+ */
+export function curatedCatalogStale(now: Date = new Date(), maxAgeDays = 180): boolean {
+  const age = curatedCatalogAgeDays(now);
+  return age !== null && age > maxAgeDays;
+}
+
 /** id → 标称上下文窗口（tokens）。键必须与魔搭目录 id 逐字一致。 */
 export const CURATED_CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
   // deepseek-ai：models.dev 多数 host（deepseek 官方、openrouter、novita 等）

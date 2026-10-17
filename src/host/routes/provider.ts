@@ -67,19 +67,22 @@ interface ProviderRouteWiring {
 }
 
 /**
- * 读目录条目，读不到按空目录降级（GET 不能因目录失败把整个面板状态打掉）。
+ * 读目录条目，读不到**抛错**（让 snapshot() 走 respondError 返回 ok:false）。
  *
  * 读目录前先取**当前窗口覆盖**传给 `fetchModels`：条目在归一前打上覆盖标记，
  * descriptor / roster / catalogSignature 都从这份条目派生。每个写路由（开关、
  * 清单、窗口、reset）都经这里取条目再 publish，所以任何一次重注册都带着最新
  * 覆盖——否则先存窗口、再存清单会把未打标的目录重新注册上去，覆盖静默失效到
  * 下一轮轮询。
+ *
+ * **为什么抛错而不是降级成空目录**：空 roster 与「真的没有模型」在面板上长得
+ * 一模一样（modelCount=0），而真相是「目录拉不到」——这与 snapshot-aggregate
+ * 的 `models.available=false` 语义矛盾（后者明确区分「0 个模型」与「读不到」）。
+ * 抛错让 GET 返回 ok:false + error，面板能显示「目录拉不到」而不是「0 个模型」。
  */
 async function readEntries(inference: ProviderRouteWiring["inference"], providerStore?: ProviderRouteWiring["providerStore"]): Promise<unknown[]> {
   const contextWindow = await optional(providerStore?.contextWindow?.(), null);
-  const catalog = await inference.fetchModels(contextWindow).catch((error) => {
-    return { entries: [], __error: error };
-  });
+  const catalog = await inference.fetchModels(contextWindow);
   return Array.isArray(catalog?.entries) ? catalog.entries : [];
 }
 
@@ -114,16 +117,30 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
   /**
    * 组装一份 §9 响应形状。GET 与成功后的 POST 共用，所以两个方向不可能对「当前
    * 状态是什么」说两套话。
+   *
+   * **目录读不到怎么办**：GET 是权威读路径，读不到就让它失败（handler 转
+   * `respondError`，面板看见「目录拉不到」而不是「0 个模型」）。POST 的响应只是
+   * 保存后的回读，而此时**保存已经成功**——不能把一次成功的写报成失败，所以
+   * `tolerateCatalogFailure` 让它降级为空 roster 并带上 `catalogError` 说明原因。
    * @param {object} [extra] - 调用方要追加/覆盖的字段。
+   * @param {object} [options] - `{ tolerateCatalogFailure }`：写成功后的回读宽容模式。
    * @returns {Promise<object>} 响应体。
    */
-  const snapshot = async (extra: Record<string, unknown> = {}) => {
+  const snapshot = async (extra: Record<string, unknown> = {}, options: { tolerateCatalogFailure?: boolean } = {}) => {
     const panelSwitch = await optional(providerStore.enabled());
     const enabledIds = await readEnabledIds(providerStore, publisher.state.enabledIds);
     const contextWindow = await optional(providerStore.contextWindow?.(), null);
     // 覆盖值要喂进 fetchModels（不只是顶层字段）：否则 GET 的 roster 行显示
     // 目录原始窗口，而顶层面板显示覆盖值——同一份快照自相矛盾。
-    const entries = await readEntries(inference, providerStore);
+    let entries: unknown[] = [];
+    let catalogError: string | null = null;
+    try {
+      entries = await readEntries(inference, providerStore);
+    } catch (error) {
+      if (options.tolerateCatalogFailure !== true) throw error;
+      // 写已成功；回读降级但把原因说出来（空 roster 本身不解释任何事）。
+      catalogError = redactedError(error);
+    }
     const roster = rosterWithAvailability(entries, []);
     // 联合只解析一次：`allowed` 是它的 mode 投影，`enabledCount` 走它的计数
     // （all = roster 全部；none = 0；list = roster 中真正命中的条数，过期的 id
@@ -143,6 +160,7 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
       enabledIds,
       contextWindow,
       roster,
+      ...(catalogError !== null ? { catalogError } : {}),
       ...extra
     };
   };
@@ -156,7 +174,13 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
     handler: withOrigin(async (request: any, response: any) => {
       const method = request.method === undefined ? "GET" : request.method;
       if (method === "GET") {
-        writeJson(response, 200, await snapshot(), { "cache-control": "no-store" });
+        // 目录读不到时**不许**回一个「0 个模型」的 ok:true（那让「拉不到」与
+        // 「真的没有模型」长得一样）。GET 是权威读路径，失败就如实报。
+        try {
+          writeJson(response, 200, await snapshot(), { "cache-control": "no-store" });
+        } catch (error) {
+          respondError(response, error);
+        }
         return;
       }
       if (method !== "POST") {
@@ -180,7 +204,7 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
         respondError(response, error);
         return;
       }
-      writeJson(response, 200, await snapshot(), { "cache-control": "no-store" });
+      writeJson(response, 200, await snapshot({}, { tolerateCatalogFailure: true }), { "cache-control": "no-store" });
     }, settings.allowedHosts)
   }));
 
@@ -212,7 +236,7 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
         respondError(response, error);
         return;
       }
-      writeJson(response, 200, await snapshot(), { "cache-control": "no-store" });
+      writeJson(response, 200, await snapshot({}, { tolerateCatalogFailure: true }), { "cache-control": "no-store" });
     }, settings.allowedHosts)
   }));
 
@@ -244,7 +268,7 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
         respondError(response, error);
         return;
       }
-      writeJson(response, 200, await snapshot(), { "cache-control": "no-store" });
+      writeJson(response, 200, await snapshot({}, { tolerateCatalogFailure: true }), { "cache-control": "no-store" });
     }, settings.allowedHosts)
   }));
 
@@ -272,7 +296,7 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
         respondError(response, error);
         return;
       }
-      writeJson(response, 200, await snapshot(), { "cache-control": "no-store" });
+      writeJson(response, 200, await snapshot({}, { tolerateCatalogFailure: true }), { "cache-control": "no-store" });
     }, settings.allowedHosts)
   }));
 

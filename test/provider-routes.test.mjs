@@ -254,4 +254,26 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由已注册");
   assert.equal(adapters.has("modelscope-token-plan"), false, "假 Host 的注册表必须摘干净");
 }
 
+// ── 目录读不到 ≠ 0 个模型（GET 如实报，POST 回读宽容但说明原因）──
+//
+// 旧实现把 fetchModels 失败降级成 `{entries: []}`，于是 GET 回 `ok:true,
+// modelCount:0`——「目录拉不到」与「真的没有模型」在面板上长得一模一样。
+// 这与 snapshot-aggregate 的 `models.available=false` 语义矛盾。
+{
+  const handlers3 = new Map();
+  apply(makeCtx(handlers3), {}, { env: {} });
+  currentFetch = () => Promise.reject(new Error("network down"));
+  const res = await call(handlers3, PROVIDER_PATH, makeReq("GET"));
+  assert.equal(res.status, 200, "HTTP 恒 200（成败看 body，与快照路由同一语义）");
+  assert.equal(res.body.ok, false, "目录拉不到 → GET 必须 ok:false，不许冒充 modelCount=0 的成功");
+  assert.match(String(res.body.error), /network/i, "错误原因要上屏（脱敏后的原文）");
+
+  // 写路径：保存已经成功，不能因为目录抖动把它报成失败；回读降级但要说明。
+  const saved = await call(handlers3, PROVIDER_PATH, makeReq("POST", { body: { enabled: true } }));
+  assert.equal(saved.body.ok, true, "保存成功：目录抖动不得把成功的写报成失败");
+  assert.equal(typeof saved.body.catalogError, "string", "降级回读必须带上原因");
+  assert.equal(saved.body.modelCount, 0, "降级回读的空 roster");
+  await call(handlers3, PROVIDER_PATH, makeReq("POST", { body: { enabled: false } }));
+}
+
 console.log("provider-routes.test.mjs: all checks passed");

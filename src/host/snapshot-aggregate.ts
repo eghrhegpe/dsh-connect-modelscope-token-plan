@@ -18,6 +18,7 @@ import { rosterWithAvailability, imageGenModelIds } from "./llm-models.ts";
 import { parseAllowedList, enabledCountOf } from "../shared/allow-list.ts";
 import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "./switch-precedence.ts";
 import { drawToolNote } from "./draw-tool-state.ts";
+import { CURATED_AS_OF, curatedCatalogAgeDays, curatedCatalogStale } from "./context-catalog.ts";
 import { errMsg, redactSecrets } from "./util.ts";
 import type { Snapshot } from "../shared/wire.ts";
 import type { Wiring } from "./types.ts";
@@ -117,6 +118,18 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
   // 不让一条注释外的 TypeError 把整条快照打掉。
   const drawNote = await soft((async () => drawStore.versionNote())());
   if (drawNote.ok && drawNote.value !== null) shapeWarnings.push(drawNote.value);
+
+  // 策展上下文窗口表是静态知识（context-catalog.ts），目录会上下架而表不会自己
+  // 更新。过期不是错误——表里的值往往仍然正确——但「不再有核对背书」这件事该
+  // 说出来，否则用户无从判断一个窗口值是三个月前还是三年前核的。
+  if (curatedCatalogStale()) {
+    const age = curatedCatalogAgeDays();
+    shapeWarnings.push(
+      `context-catalog: curated windows were last verified on ${CURATED_AS_OF}` +
+      (age === null ? "" : ` (${age} days ago)`) +
+      " — re-check them against the current catalogue"
+    );
+  }
 
   // ── provider 块（M4 §11）──
   // 开关（面板值优先，patch 默认兜底）+ 注册状态 + 目录 roster，整块软失败：

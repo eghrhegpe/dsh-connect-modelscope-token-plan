@@ -276,6 +276,27 @@ function makePublisher({ llm, panel = true, gate } = {}) {
   // 同一个 id 的签名跨调用稳定（空转守卫依赖这条：不稳就每轮都churn）。
   assert.equal(catalogSignature(ENTRIES, []), catalogSignature([...ENTRIES], []), "同 id 跨调用稳定");
 
+  // 展示名**不参与**签名：改名不改变注册的 offer（descriptor 里的 name 只是显示
+  // 用的），让它参与只会触发一次无谓的重注册——期间在途请求可能被打断。
+  const renamed = { id: "some-org/some-text-model", name: "Renamed" };
+  const original = { id: "some-org/some-text-model", name: "Original" };
+  assert.equal(
+    catalogSignature([original], []),
+    catalogSignature([renamed], []),
+    "展示名变化（id/能力/窗口不变）不触发重注册"
+  );
+  // 但能力/窗口仍必须参与——否则改了这些却不重建，picker 与面板会说两套话。
+  assert.notEqual(
+    catalogSignature([{ id: "m", contextWindow: 1000 }], []),
+    catalogSignature([{ id: "m", contextWindow: 2000 }], []),
+    "上下文窗口参与签名"
+  );
+  assert.notEqual(
+    catalogSignature([{ id: "m", maxOutputLength: 100 }], []),
+    catalogSignature([{ id: "m", maxOutputLength: 200 }], []),
+    "输出上限参与签名"
+  );
+
   const st = { entries: ENTRIES, enabledIds: [], unavailableIds: ["b", "a"], signature: "", quotaSignature: "" };
   syncSignaturesAfterPublish(st);
   assert.equal(st.signature, catalogSignature(ENTRIES, []));

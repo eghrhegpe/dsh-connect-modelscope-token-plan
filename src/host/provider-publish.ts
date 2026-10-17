@@ -324,7 +324,9 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
         unavailableModelIds: state.unavailableIds,
         // 观察层缺席即不套（`exactOptionalPropertyTypes` 下条件展开，不能传
         // undefined 让它与「显式无观察层」变成两件事）。
-        ...(usage !== undefined ? { usage } : {})
+        ...(usage !== undefined ? { usage } : {}),
+        // 观测层写入失败时留痕：观测失败不是对话失败，但也不是沉默失败。
+        ...(usage !== undefined ? { onError: (error: unknown) => effectiveLogger?.warn?.(`usage record failed: ${typeof error === "object" && error !== null && "message" in error ? String((error as { message?: unknown }).message) : String(error)}`) } : {})
       }) as { providerIds: string[]; adapter: unknown };
       // 同一个理由，换个说法：适配器是 Host 级注册的，所以 factory 返回别的形状
       // 必须在这里失败，而不是发布一个无法服务请求的 provider。
@@ -490,23 +492,26 @@ export function seedPublisherFromCatalog(publisher: Pick<ReturnType<typeof creat
  * 它只回答「重建会不会改变什么」：目录顺序里的模型 id，每个带上 descriptor 用的
  * 同一个 vision 判定（id 没变但模态翻了也必须重建），加上允许清单。目录条目里其他
  * 东西变了不影响注册的 offer。
+ *
+ * **不含展示名 `name`**：模型展示名变化不影响注册的 offer（descriptor 里的 `name`
+ * 只是显示用的），重新注册是浪费——期间在途请求可能被打断。展示名变化不改变
+ * 模型的能力、窗口或输出上限，所以不参与签名。
  * @param {object[]} entries - 归一目录条目。
  * @param {string[]} enabledIds - 允许清单（空 = 全部）。
  * @returns {string}
  */
 export function catalogSignature(entries: unknown, enabledIds: unknown): string {
   // 覆盖「重建会不会改变 offer」的每一个维度：id（模型在不在）+ vision 位（是否吃图，
-  // 用与 roster/descriptor 完全相同的判定）+ 展示名 + 上下文窗口 + 单次输出上限
+  // 用与 roster/descriptor 完全相同的判定）+ 上下文窗口 + 单次输出上限
   // （三者任一变了，descriptor 形状就变了）。id 没变但任一属性翻了也必须重建。
   const models = (Array.isArray(entries) ? entries : [])
     .map((entry) => {
       const e = entry as CatalogEntry;
       const id = str(e?.id, "");
       const vision = isVisionModel(e) ? 1 : 0;
-      const name = str(e?.name, id);
       const ctx = typeof e?.contextWindow === "number" ? e.contextWindow : "";
       const out = typeof e?.maxOutputLength === "number" ? e.maxOutputLength : "";
-      return `${id}:v${vision}:n${name}:c${ctx}:o${out}`;
+      return `${id}:v${vision}:c${ctx}:o${out}`;
     })
     .join(",");
   return `${models}|${(Array.isArray(enabledIds) ? enabledIds : []).join(",")}`;

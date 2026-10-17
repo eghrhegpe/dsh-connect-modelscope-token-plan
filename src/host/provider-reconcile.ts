@@ -164,7 +164,9 @@ export function createProviderReconciler(deps: ProviderReconcilerDeps) {
         await runOnce();
         // 收敛理论上应终止；guard 是「desired 每秒都在变」的极端情况下的
         // 保险丝——让位给下一轮触发，而不是把链堵死。
-        if (++guard > 100) break;
+        // 上限 20 次足够覆盖「fetch 期间被改」的正常场景；100 次会在极端情况
+        // 下跑 100 次网络请求才停下来。
+        if (++guard > 20) break;
       }
     });
     return result;

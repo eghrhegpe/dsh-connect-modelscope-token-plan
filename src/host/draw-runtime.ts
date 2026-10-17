@@ -44,26 +44,16 @@ import {
   readTaskId,
   readTaskStatus
 } from "./draw.ts";
-import { isImageGenModel, imageGenModelIds, textToImageModelIds } from "./llm-models.ts";
+import { isImageGenModel, imageGenModelIds, textToImageModelIds, KNOWN_T2I_MODEL_ID } from "./llm-models.ts";
 import { createDrawJobs, type DrawJob, type DrawJobs } from "./draw-jobs.ts";
 import { str } from "./util.ts";
 
 /** agent 工具名。带插件前缀，避免与 `dsh-draw-router` 的 `draw_image` 撞名。 */
 export const DRAW_TOOL_NAME = "modelscope_draw_image";
 
-/**
- * 已知能**纯文生图**的目录内模型 id（2026-10-16 真机复核）。
- *
- * 为什么需要手工策展：api-inference 目录里至今**没有**平台声明的 `text-to-image`
- * 条目，只有 2 条 `image-to-image`——而两者行为**不同**：
- * `Qwen/Qwen-Image-Edit` 不带 `image_url` 纯文生图可用（本轮实测：提交成功、两次
- * 15min 排队超时后于 9.7min 出图）；`MusePublic/Qwen-Image-Edit` 纯文生图被上游
- * 直接拒绝（提交阶段 HTTP 4xx：`image_url is required for model: …`）。
- * 能力枚举把两者都归为 `image-to-image`，区分不了这个差异，所以这里用实测知识兜底：
- * 目录里没有 `text-to-image` 可挑时，默认偏向这个已知能用的 id，而不是「目录第一个」
- * （真实目录顺序 `MusePublic/…` 在前，照旧逻辑纯文生图必挂）。
- */
-export const KNOWN_T2I_MODEL_ID = "Qwen/Qwen-Image-Edit";
+// KNOWN_T2I_MODEL_ID 已移至 llm-models.ts，与 KNOWN_VISION_IDS 放在一起——所有
+// 「哪些模型能做什么」的策展知识集中一处，不会漂。这里再导出保持 import 路径不变。
+export { KNOWN_T2I_MODEL_ID };
 
 /** 一次失败的冷却窗：出图慢，失败后立刻重试既易撞限流又白等。 */
 const DRAW_FAILURE_COOLDOWN_MS = 60_000;
@@ -245,7 +235,8 @@ export async function awaitDrawTask({
   apiKey,
   taskId,
   waitMs = DRAW_WAIT_BUDGET_MS,
-  pollIntervalMs = DRAW_POLL_INTERVAL_MS
+  pollIntervalMs = DRAW_POLL_INTERVAL_MS,
+  signal
 }: {
   fetchImpl: DrawFetch;
   apiBase: string;
@@ -253,6 +244,7 @@ export async function awaitDrawTask({
   taskId: string;
   waitMs?: number;
   pollIntervalMs?: number;
+  signal?: AbortSignal;
 }): Promise<DrawAwait> {
   const headers = {
     Authorization: `Bearer ${apiKey}`,
@@ -264,7 +256,12 @@ export async function awaitDrawTask({
   let lastStatus: string | undefined;
   for (;;) {
     if (Date.now() >= deadline) return { kind: "pending", polls };
-    await sleep(interval);
+    try {
+      await sleep(interval, signal);
+    } catch {
+      // abort 信号触发：立即返回 pending，让调用方决定下一步。
+      return { kind: "pending", polls };
+    }
     polls++;
     let polled: DrawFetchResponse;
     try {
@@ -544,6 +541,14 @@ export function defineDrawTool({
   );
   const apiBase = str(settings?.apiBase, "https://api-inference.modelscope.cn/v1");
 
+  // AbortController：插件 dispose 时立即中断轮询中的 sleep，而不是等它自然结束。
+  // 默认 15s 的间隔意味着用户点「停止」后最多要等 15s 才真正停——abort 让停止
+  // 信号立即生效。每次进入等待前检查一次；等待循环本身在 abort 时返回 pending。
+  const abortController = new AbortController();
+  const abortIfDisposed = () => {
+    if (isDisposed()) abortController.abort();
+  };
+
   /**
    * 等一个作业，把 {@link awaitDrawTask} 的三种结局翻译成工具结果或错误。
    *
@@ -556,13 +561,15 @@ export function defineDrawTool({
    * @throws {Error} 真失败（上游 FAILED / 轮询 HTTP 失败）或越过总放弃线。
    */
   const waitAndReport = async (apiKey: string, job: DrawJob, available: string[]): Promise<DrawToolResult> => {
+    abortIfDisposed();
     const awaited = await awaitDrawTask({
       fetchImpl,
       apiBase,
       apiKey,
       taskId: job.taskId,
       waitMs,
-      pollIntervalMs
+      pollIntervalMs,
+      signal: abortController.signal
     });
     if (awaited.kind === "failed") {
       // 终态失败：这张图不会再出，作业出表（留着只占容量）。
@@ -662,7 +669,7 @@ export function defineDrawTool({
     // 「实现里出现了意外的等待」，正常情况下等待循环自己会在 waitMs 处返回。
     timeoutMs: waitMs + 10_000,
     async execute(params: Record<string, unknown> | undefined): Promise<DrawToolResult> {
-      if (isDisposed()) throw new Error("modelscope draw tool is no longer mounted");
+      if (abortController.signal.aborted || isDisposed()) throw new Error("modelscope draw tool is no longer mounted");
       // 令牌两条路径都要（续查也要带 Authorization），所以提到分支之前。
       const apiKey = await resolveApiKey();
       if (typeof apiKey !== "string" || apiKey.trim() === "") {
@@ -819,7 +826,27 @@ async function safeJson(response: DrawFetchResponse, text: string): Promise<unkn
   }
 }
 
-/** 可注入的 sleep（测试可覆写；这里只提供默认实现）。 */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * 可注入的 sleep（测试可覆写；这里只提供默认实现）。
+ *
+ * 支持 `AbortSignal`：插件 dispose 时可以立即中断等待，而不是等 sleep 自然结束。
+ * 默认 15s 的轮询间隔意味着用户点「停止」后最多要等 15s 才真正停——abort 让
+ * 停止信号立即生效。
+ */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("sleep aborted"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error("sleep aborted"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }

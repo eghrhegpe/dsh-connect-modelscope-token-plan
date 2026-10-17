@@ -282,7 +282,16 @@ export function summarizeCatalog(entries: unknown): { modelCount: number; vision
   | POST | `PROVIDER_PATH/reset` | 忘掉面板开关与允许清单，回到 patch 默认 |
 
   统一把 `HIDE_ALL_MODELS` 当作「什么都不提供」的哨兵（不是 `[]`——空清单的
-  语义是「不过滤」）。响应形状（client 与 snapshot 同读）：
+  语义是「不过滤」）。
+
+  **目录读不到 ≠ 0 个模型**（M4+ 修正）：GET 是权威读路径，`fetchModels` 失败时
+  必须返回 `ok:false + error`（HTTP 恒 200，成败看 body），不许回
+  `ok:true, modelCount:0`——那让「目录拉不到」与「真的没有模型」在面板上长得
+  一样，且与 `snapshot-aggregate` 的 `models.available=false` 语义矛盾。四条
+  **写路由**的响应是「保存后的回读」：保存已经成功时目录抖动不得把成功的写报成
+  失败，回读降级为空 roster 并带上 `catalogError` 说明原因。
+
+  响应形状（client 与 snapshot 同读）：
   ```ts
   { ok: true, enabled: boolean, source: "panel"|"config",
     llmAvailable: boolean, registered: boolean, error: string|null,

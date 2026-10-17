@@ -50,9 +50,12 @@ import { withUsageObserver, type UsageSinks } from "./usage-observer.ts";
  *   方法）。**这是面板「今日次数 / 模型分布 / 趋势 / 429 事件流」唯一的生产
  *   者**——probe 那条写入路径已随目录表删除，缺了它四块面板恒为 0 与空。
  *   缺省不套观察层（零开销，见 `usage-observer.ts`）。
+ * @param {(error: unknown) => void} [options.onError] - 写入失败时的回调（如
+ *   logger.warn）。观测层不能成为对话失败的原因，但「观测层在丢数据」这件事
+ *   应该可见——否则用户发现计数不对时没有任何线索。
  * @returns {{adapter: object, providerIds: string[]}} 适配器与它拥有的 ids。
  */
-export function createModelScopeAdapter({ entries, enabledIds = [], baseUrl, resolveApiKey, get, unavailableModelIds = [], usage }: {
+export function createModelScopeAdapter({ entries, enabledIds = [], baseUrl, resolveApiKey, get, unavailableModelIds = [], usage, onError }: {
   entries: unknown;
   enabledIds?: string[];
   baseUrl: string;
@@ -60,6 +63,7 @@ export function createModelScopeAdapter({ entries, enabledIds = [], baseUrl, res
   get?: (service: string) => unknown;
   unavailableModelIds?: string[];
   usage?: UsageSinks;
+  onError?: (error: unknown) => void;
 }) {
   const models = buildDescriptors(entries, { providerId: LLM_PROVIDER_ID, baseUrl, enabledIds, unavailableModelIds });
 
@@ -77,7 +81,7 @@ export function createModelScopeAdapter({ entries, enabledIds = [], baseUrl, res
   // 观察层套在装配结果**之外**：重分类层在内（改写 429 的 code），观察层在外
   // （读改写后的 code 记事件），顺序不能反——反了事件流会把限频记成额度耗尽。
   return {
-    adapter: usage === undefined ? built.adapter : withUsageObserver(built.adapter, usage),
+    adapter: usage === undefined ? built.adapter : withUsageObserver(built.adapter, usage, onError),
     providerIds: built.providerIds
   };
 }

@@ -148,6 +148,23 @@ const KNOWN_VISION_IDS = Object.freeze(new Set([
 ]));
 
 /**
+ * 已知能**纯文生图**的目录内模型 id（2026-10-16 真机复核）。
+ *
+ * 为什么需要手工策展：api-inference 目录里至今**没有**平台声明的 `text-to-image`
+ * 条目，只有 2 条 `image-to-image`——而两者行为**不同**：
+ * `Qwen/Qwen-Image-Edit` 不带 `image_url` 纯文生图可用（本轮实测：提交成功、两次
+ * 15min 排队超时后于 9.7min 出图）；`MusePublic/Qwen-Image-Edit` 纯文生图被上游
+ * 直接拒绝（提交阶段 HTTP 4xx：`image_url is required for model: …`）。
+ * 能力枚举把两者都归为 `image-to-image`，区分不了这个差异，所以这里用实测知识兜底：
+ * 目录里没有 `text-to-image` 可挑时，默认偏向这个已知能用的 id，而不是「目录第一个」
+ * （真实目录顺序 `MusePublic/…` 在前，照旧逻辑纯文生图必挂）。
+ *
+ * 与 `KNOWN_VISION_IDS` 放在一起：所有「哪些模型能做什么」的策展知识集中一处，
+ * 不会漂。
+ */
+export const KNOWN_T2I_MODEL_ID = "Qwen/Qwen-Image-Edit";
+
+/**
  * 把原始 `/v1/models` data 条目变成归一目录条目。
  *
  * 只做投影与回退，不做判断：`id` 必取，`name` 回退 id，`vision`/`contextWindow`/

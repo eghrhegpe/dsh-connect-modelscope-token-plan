@@ -178,6 +178,32 @@ async function* of(chunks) {
   ]), "m", hostile)) chunks.push(chunk.type);
   assert.deepEqual(chunks, ["finish"], "sinks 炸了也要把 chunk 透传出去");
 }
+{
+  // sinks 失败必须有痕迹（onError）：吞掉失败是对的，**沉默地**吞掉不是——
+  // 否则计数静默丢失，用户发现面板数字不对时没有任何线索。
+  const errors = [];
+  const hostile = {
+    recordCall: () => Promise.reject(new Error("disk full")),
+    recordEvent: () => { throw new Error("disk full (sync)"); },
+  };
+  const chunks = [];
+  for await (const chunk of observeStream(of([
+    { type: "finish", reason: { kind: "error", failure: { code: CODE.QUOTA, message: "exhausted" } } },
+  ]), "m", hostile, (error) => errors.push(String(error?.message ?? error)))) chunks.push(chunk.type);
+  assert.deepEqual(chunks, ["finish"], "onError 是回调，不改透传行为");
+  assert.ok(errors.some((message) => message === "disk full (sync)"), "同步抛错也要进 onError");
+  assert.ok(errors.some((message) => message === "disk full"), "异步拒绝也要进 onError");
+}
+{
+  // onError 自己抛错同样不能打断对话（回调是调用方的代码，不是对话的一部分）。
+  const chunks = [];
+  for await (const chunk of observeStream(of([
+    { type: "finish", reason: { kind: "stop" } },
+  ]), "m", { recordCall: () => { throw new Error("boom"); }, recordEvent: () => {} }, () => { throw new Error("logger exploded"); })) {
+    chunks.push(chunk.type);
+  }
+  assert.deepEqual(chunks, ["finish"], "onError 抛错也不许把流打断");
+}
 
 // ── modelIdOfOptions：缺失读成空串，绝不猜 ────────────────────────────────
 {

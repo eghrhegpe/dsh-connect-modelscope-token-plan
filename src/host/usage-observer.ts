@@ -155,17 +155,19 @@ export function eventOfChunk(chunk: unknown): { kind: QuotaEvent["kind"]; messag
  * 2. **失败也记账，但 token 为 null**。429/错误没有 usage chunk，计数照记、
  *    事件另记；「没有 token 数」与「token 是 0」在 wire 里是两件事。
  * 3. **写 sinks 永不抛**。`safe()` 把同步抛与异步拒一并吞掉：观测层不能成为
- *    对话失败的原因。
+ *    对话失败的原因。但失败会通过 `onError` 回调留痕（如果提供了）。
  *
  * @param {AsyncIterableIterator<unknown>} source - 内层流。
  * @param {string} modelId - 本次调用的模型 id（由出口处的 options 捕获）。
  * @param {UsageSinks} sinks - 写入口。
+ * @param {(error: unknown) => void} [onError] - 写入失败时的回调（如 logger.warn）。
  * @returns {AsyncGenerator<unknown>} 透传后的流。
  */
 export async function* observeStream(
   source: AsyncIterableIterator<unknown>,
   modelId: string,
-  sinks: UsageSinks
+  sinks: UsageSinks,
+  onError?: (error: unknown) => void
 ): AsyncGenerator<unknown> {
   let tokens: number | null = null;
   try {
@@ -173,24 +175,42 @@ export async function* observeStream(
       const seen = tokensOfChunk(chunk);
       if (seen !== null) tokens = seen;
       const event = eventOfChunk(chunk);
-      if (event !== null) safe(() => sinks.recordEvent({ modelId, kind: event.kind, message: event.message }));
+      if (event !== null) safe(() => sinks.recordEvent({ modelId, kind: event.kind, message: event.message }), onError);
       yield chunk;
     }
   } finally {
     // 用户中断/内层抛错时 token 多半读不到；null 是诚实值。
-    safe(() => sinks.recordCall({ modelId, tokens }));
+    safe(() => sinks.recordCall({ modelId, tokens }), onError);
   }
 }
 
-/** 调一个 sink 并吞掉它的任何失败（同步抛与异步拒都吞）。 */
-function safe(run: () => void | Promise<void>): void {
+/**
+ * 调一个 sink 并吞掉它的任何失败（同步抛与异步拒都吞）。
+ *
+ * `onError` 是可选的失败回调：观测层不能成为对话失败的原因，但「观测层在丢数据」
+ * 这件事应该可见——否则用户发现计数不对时没有任何线索。index.ts 装配时传
+ * `ctx.logger.warn`，让写入失败（磁盘满、权限问题、版本守卫）在日志里留痕。
+ */
+function safe(run: () => void | Promise<void>, onError?: (error: unknown) => void): void {
   try {
     const result = run();
     if (result !== null && typeof result === "object" && typeof (result as Promise<void>).then === "function") {
-      void (result as Promise<void>).then(undefined, () => {});
+      void (result as Promise<void>).then(undefined, (error) => {
+        // 观测失败不是对话失败，但也不是沉默失败。
+        try {
+          onError?.(error);
+        } catch {
+          // 回调本身抛错：不能因此打断对话。
+        }
+      });
     }
-  } catch {
-    // 观测失败不是对话失败。
+  } catch (error) {
+    // 观测失败不是对话失败，但也不是沉默失败。
+    try {
+      onError?.(error);
+    } catch {
+      // 回调本身抛错：不能因此打断对话。
+    }
   }
 }
 
@@ -221,14 +241,15 @@ export function modelIdOfOptions(options: unknown): string {
  *
  * @param {object} inner - 适配器实例。
  * @param {UsageSinks} sinks - 写入口。
+ * @param {(error: unknown) => void} [onError] - 写入失败时的回调（如 logger.warn）。
  * @returns {object} 套好观察层的适配器。
  */
-export function withUsageObserver(inner: object, sinks: UsageSinks): object {
+export function withUsageObserver(inner: object, sinks: UsageSinks, onError?: (error: unknown) => void): object {
   const wrapStream = (stream: (options: unknown) => AsyncIterableIterator<unknown>, options: unknown) => {
     const modelId = modelIdOfOptions(options);
     const source = stream(options);
     if (modelId === "") return source;
-    return observeStream(source, modelId, sinks);
+    return observeStream(source, modelId, sinks, onError);
   };
 
   return new Proxy(inner, {
@@ -265,7 +286,7 @@ export function withUsageObserver(inner: object, sinks: UsageSinks): object {
             return new Proxy(inner, {
               get(target: object, prop: string | symbol, receiver: object) {
                 if (prop === "stream") {
-                  return (o: unknown) => observeStream(innerStream.call(target, o), modelId, sinks);
+                  return (o: unknown) => observeStream(innerStream.call(target, o), modelId, sinks, onError);
                 }
                 return Reflect.get(target, prop, receiver);
               }

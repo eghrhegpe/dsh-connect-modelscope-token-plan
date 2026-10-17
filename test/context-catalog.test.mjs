@@ -2,7 +2,13 @@
 // 既有 inference-vision.test.mjs 的 mock 形态，另加声明窗口与覆盖两条路径。
 import { strict as assert } from "node:assert";
 import { createInferenceClient } from "../src/host/inference-client.ts";
-import { CURATED_CONTEXT_WINDOWS, curatedWindowOf } from "../src/host/context-catalog.ts";
+import {
+  CURATED_AS_OF,
+  CURATED_CONTEXT_WINDOWS,
+  curatedCatalogAgeDays,
+  curatedCatalogStale,
+  curatedWindowOf,
+} from "../src/host/context-catalog.ts";
 import { contextWindowSourceOf, rosterWithAvailability } from "../src/host/llm-models.ts";
 
 // ── 表本身：值合法、命中/未命中判据 ──
@@ -85,5 +91,21 @@ const roster = rosterWithAvailability(entries, []);
 const dsRow = roster.find((row) => row.id === "deepseek-ai/DeepSeek-V4.1-Flash");
 assert.equal(dsRow?.contextSource, "curated");
 assert.equal(dsRow?.contextWindow, 1048576);
+
+// ── 过期判据：静态策展表必须能被指出「该复核了」 ──────────────────────────
+{
+  assert.match(CURATED_AS_OF, /^\d{4}-\d{2}-\d{2}$/, "核对日期是 ISO 日期");
+  const asOf = new Date(CURATED_AS_OF + "T00:00:00Z");
+  assert.equal(curatedCatalogAgeDays(asOf), 0, "核对当天 = 0 天");
+  assert.equal(curatedCatalogStale(asOf), false, "核对当天不算过期");
+  // 默认容忍 180 天：179 天不算过期，181 天算。
+  const at179 = new Date(asOf.getTime() + 179 * 86_400_000);
+  const at181 = new Date(asOf.getTime() + 181 * 86_400_000);
+  assert.equal(curatedCatalogStale(at179), false, "179 天仍在容忍期");
+  assert.equal(curatedCatalogStale(at181), true, "181 天该提醒复核");
+  assert.equal(curatedCatalogAgeDays(at181), 181);
+  // 时钟早于核对日期（时钟回拨/时区）读作 0，不产生负数。
+  assert.equal(curatedCatalogAgeDays(new Date(asOf.getTime() - 86_400_000)), 0, "未来日期不算负年龄");
+}
 
 console.log("context-catalog.test.mjs: all checks passed");

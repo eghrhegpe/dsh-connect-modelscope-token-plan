@@ -142,8 +142,12 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
         throw new Error("a ModelScope token is required");
       }
       if (!isPlausibleToken(value.trim())) {
+        // 形状闸是本插件自己的判据，不是上游的。魔搭若改了令牌格式，合法令牌会
+        // 在这里被拒——错误消息必须留一条「确认令牌正确就找维护者」的出路，否则
+        // 用户只会反复怀疑自己复制错了。
         throw new Error(
-          "that does not look like a ModelScope access token (expected ms- followed by hex digits)"
+          "that does not look like a ModelScope access token (expected ms- followed by at least 16 hex digits); " +
+          "if you are sure the token is correct, this plugin's shape check may be out of date"
         );
       }
       const service = resolveService();
@@ -166,16 +170,21 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
      * 服务实现里 unset 抛错时，吞掉错误会让路由回 `ok: true` + `source: credentials`，
      * 而令牌**仍在 `~/.dsh/.credentials.yaml` 里并且仍被 resolve() 读回来**。
      * 「忘掉令牌」是一个安全动作，谎报成功比失败更糟——用户以为凭据已删干净。
-     * 内存副本无论如何都先清掉（它才是本进程真正持有的那份）。
+     *
+     * **先 unset 成功、再删内存**：反过来的顺序有一个竞态——unset 抛错时内存
+     * 已删，下次 resolve() 会走 env 回退读回那个本该被删掉的令牌（如果 env
+     * 里也有 `MODELSCOPE_API_KEY`）。用户以为凭据已删干净，但它「复活」了。
+     * 现在 unset 失败时内存保留，resolve() 会读到内存里的旧值并报错（因为
+     * `source` 不是 `null`，但用户认为已经删了）——至少不会静默回退到 env。
      */
     async forget() {
-      memory.delete(TOKEN_REF);
-      // 同上：令牌换手，清掉旧结论。
-      lastCheck = null;
       const service = resolveService();
       if (service !== null && typeof service.unset === "function") {
         await service.unset(TOKEN_REF);
       }
+      // unset 成功后才删内存与旧结论（令牌换手，上次的探针结论不再成立）。
+      memory.delete(TOKEN_REF);
+      lastCheck = null;
     },
 
     /**

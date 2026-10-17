@@ -34,7 +34,7 @@ export async function readJsonBody(request: any, limit = MAX_JSON_BODY_BYTES): P
     for await (const chunk of request) {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       received += buffer.byteLength;
-      if (received > limit) return { ok: false, error: "request body is too large" };
+      if (received > limit) return { ok: false, error: `request body is too large (max ${limit} bytes)` };
       chunks.push(buffer);
     }
   } catch {

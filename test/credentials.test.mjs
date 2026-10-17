@@ -116,6 +116,27 @@ for (let hexLen = 12; hexLen <= 80; hexLen += 4) {
   assert.equal(unsetCalls, 1, "确实尝试了 unset");
 }
 
+// §4a unset 失败时**内存副本必须保留**：先删内存再 unset 的旧顺序有一个竞态——
+// unset 抛错后内存已空，下次 resolve 会静默回退到 env，那个用户要求删掉的令牌
+// 就「复活」了（source 从 credentials 变成 env，面板看起来还是「已配置」）。
+{
+  let serviceAvailable = true;
+  const failing = {
+    resolve: async () => (serviceAvailable ? { value: "ms-3f2a1b8c1111222233334444555566" } : undefined),
+    set: async () => {},
+    unset: async () => { throw new Error("EACCES: credentials file is read-only"); }
+  };
+  const env = { [TOKEN_REF]: "ms-ffffffffffffffffffffffffffffffff" };
+  const store = createTokenStore({ credentials: () => (serviceAvailable ? failing : null), env });
+  await store.save("ms-3f2a1b8c1111222233334444555566");
+  await assert.rejects(() => store.forget(), /read-only/, "unset 失败照旧传播");
+  // 服务随后不可用（注销/重启中的常见状态）：此时唯一的答案来源就是内存副本。
+  serviceAvailable = false;
+  const after = await store.resolve();
+  assert.equal(after.value, "ms-3f2a1b8c1111222233334444555566", "unset 失败后内存副本仍在");
+  assert.equal(after.source, "memory", "不得静默回退到 env——那等于让已请求删除的令牌复活");
+}
+
 // §4b unset 正常时干净通过，且不碰 env 回退。
 {
   const map = new Map();

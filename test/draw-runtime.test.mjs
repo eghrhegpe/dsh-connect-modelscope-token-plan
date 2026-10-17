@@ -353,6 +353,26 @@ section("awaitDrawTask 三种结局：done / failed / pending", async () => {
   assert.ok(pending.polls >= 1, "pending 也要报轮询次数（诊断用）");
 });
 
+section("abort 立即中断轮询中的 sleep（不必等满间隔）", async () => {
+  const controller = new AbortController();
+  const { fetchImpl, calls } = scriptedFetch([res(200, { task_status: "RUNNING" })]);
+  const started = Date.now();
+  setTimeout(() => controller.abort(), 20);
+  const out = await awaitDrawTask({
+    ...BASE,
+    taskId: "t1",
+    fetchImpl,
+    // 间隔远大于 abort 时刻：没有 abort 支持时这里要等 30s 才会走到预算检查。
+    waitMs: 60_000,
+    pollIntervalMs: 30_000,
+    signal: controller.signal
+  });
+  const elapsed = Date.now() - started;
+  assert.equal(out.kind, "pending", "abort 是「还没好」，不是失败");
+  assert.ok(elapsed < 5_000, `abort 必须立即生效（实测 ${elapsed}ms，间隔 30s）`);
+  assert.equal(calls.length, 0, "sleep 被中断，第一轮轮询都没发出");
+});
+
 // ── 两段式工具：一次调用不再阻塞整轮对话 ──────────────────────────────────────
 /** 装配一个工具（捕获 peer 的 defineTool 入参，直接调它的 execute）。 */
 function makeTool({ steps, settings = {}, jobs, getEntries, cooldown }) {

@@ -234,7 +234,13 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
      */
     async fetchModels(contextOverride?: number | null): Promise<{ entries: CatalogEntry[]; ids: string[]; fetchedAt: string }> {
       const url = settings.apiBase + "/models";
-      const body = await read(`models:${contextOverride ?? "catalog"}`, async () => {
+      // 覆盖值的缓存用更短的 TTL：每个不同的覆盖值都会产生一个独立的缓存条目，
+      // 如果用户在面板上频繁改覆盖值（128K→256K→512K→1M），每个值都会缓存一份
+      // 目录（含 37 个模型 × 2 个请求 = 74 个请求/份）。限制覆盖值的缓存数量，
+      // 避免恶意或无意的切换撑大缓存。
+      const cacheKey = contextOverride != null ? `models:override:${contextOverride}` : "models:catalog";
+      const cacheTtl = contextOverride != null ? Math.min(settings.cacheSeconds * 1000, 5000) : settings.cacheSeconds * 1000;
+      const body = await read(cacheKey, async () => {
         const response = await fetchWithTimeout(url, { method: "GET" });
         if (!response.ok) {
           const message = await readErrorMessage(response);
@@ -307,7 +313,7 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
           .filter((entry) => entry.id !== "");
         const ids2 = entries.map((entry) => entry.id);
         return { entries, ids: ids2, fetchedAt: new Date().toISOString() };
-      }, settings.cacheSeconds * 1000) as { entries: CatalogEntry[]; ids: string[]; fetchedAt: string };
+      }, cacheTtl) as { entries: CatalogEntry[]; ids: string[]; fetchedAt: string };
       return body;
     },
 
