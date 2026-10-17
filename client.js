@@ -1994,16 +1994,17 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				style: S.modelList,
 				role: "list"
 			}, group.rows.map(renderRosterRow)));
-		})), h("div", { style: S.rosterFoot }, h("button", {
+		})));
+		const resetRow = h("div", { style: S.rosterFoot }, h("button", {
 			type: "button",
 			style: S.button,
 			disabled: busy,
 			onClick: onReset
-		}, tt("provider.reset"))));
+		}, tt("provider.reset")));
 		return h("div", null, switchRow, alertNode, tokenHint, h("div", { style: {
 			...S.sectionTitle,
 			margin: "18px 0 8px"
-		} }, tt("provider.models")), rosterBlock, contextNode, error !== null ? h("div", {
+		} }, tt("provider.models")), rosterBlock, contextNode, resetRow, error !== null ? h("div", {
 			style: S.formError,
 			role: "alert"
 		}, error) : null);

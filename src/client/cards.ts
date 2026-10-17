@@ -715,8 +715,18 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
                 );
               })
             ),
-        h("div", { style: S.rosterFoot }, h("button", { type: "button", style: S.button, disabled: busy, onClick: onReset }, tt("provider.reset")))
       );
+
+  // 「回到默认」**不在清单面板里**（原来嵌在它的页脚）：它重置的是整张卡——开关、
+  // 清单、以及上面那个上下文窗口覆盖——摆在清单页脚会读成「只重置清单」。移到卡片
+  // 最底、所有设置之后，与出图卡同一摆法（那张卡是「状态 → 选择 → 操作 → 说明」）。
+  //
+  // 上下文窗口那段提示不跟着往下搬：它不是卡级的「为什么还没生效」，而是那个选择器
+  // 的字段说明（谁会被这个值盖住），离控件太远就没人读了。
+  //
+  // `test/dom-render.test.mjs` §9 按**文字**找两个「回到默认」并点第一个，所以它必须
+  // 仍在 provider 卡内、且在出图卡之前——本位置满足。
+  const resetRow = h("div", { style: S.rosterFoot }, h("button", { type: "button", style: S.button, disabled: busy, onClick: onReset }, tt("provider.reset")));
 
   return h(
     "div",
@@ -727,6 +737,7 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
     h("div", { style: { ...S.sectionTitle, margin: "18px 0 8px" } }, tt("provider.models")),
     rosterBlock,
     contextNode,
+    resetRow,
     error !== null ? h("div", { style: S.formError, role: "alert" }, error) : null
   );
 }
