@@ -155,6 +155,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.reset": "回到默认",
 			"provider.enabledCount": "已启用 {count} / {total}",
 			"provider.rosterHint": "勾选要进入 DSH 模型选择器的模型；不勾 = 全部提供",
+			"provider.search": "搜索模型名或 ID",
+			"provider.noMatch": "没有匹配的模型。",
+			"provider.groupCount": "{count} 个",
+			"provider.groupSelected": "已选 {count}",
 			"provider.quotaExhausted": "额度耗尽",
 			"provider.vision": "视觉",
 			"provider.notConfigured": "还没有访问令牌，先到「接入」tab 配置",
@@ -172,8 +176,19 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.mounted": "已注册：{tool}",
 			"draw.notMounted": "未注册——勾选上方开关即可开启。",
 			"draw.restartHint": "开关立即保存，但工具的挂载发生在**下次 Host 启动**（工具注册无法撤销）。",
-			"draw.models": "出图将使用以下模型",
+			"draw.currentTitle": "当前使用：",
+			"draw.currentNone": "当前目录里没有可用的出图模型——出图会失败（先确认访问令牌已配置、目录已拉到）。",
+			"draw.currentSrc.preferred": "按你的指定",
+			"draw.currentSrc.declaredTextToImage": "自动：平台声明为文生图",
+			"draw.currentSrc.knownTextToImage": "自动：已知可纯文生图",
+			"draw.currentSrc.catalogFirst": "自动：目录里的第一个出图模型",
+			"draw.models": "出图模型（单选；不选则由插件自动挑）",
 			"draw.badge": "出图",
+			"draw.badge.textToImage": "文生图",
+			"draw.badge.imageToImage": "图生图·改图",
+			"draw.needsImage": "需要输入图",
+			"draw.needsImageTitle": "该模型不能纯文生图：必须通过 imageUrl 传一张图（图生图/改图）。",
+			"draw.auto": "自动选择（推荐）",
 			"draw.noCandidates": "当前目录里没有出图模型（平台声明 image-to-image / text-to-image 的条目为空）；出图不可用。",
 			"draw.needsKey": "还没有访问令牌，先到「接入」tab 配置。",
 			"draw.reset": "回到默认",
@@ -280,6 +295,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.reset": "Reset",
 			"provider.enabledCount": "{count} / {total} enabled",
 			"provider.rosterHint": "Tick the models to offer; unticked = offer all",
+			"provider.search": "Search model name or ID",
+			"provider.noMatch": "No matching models.",
+			"provider.groupCount": "{count}",
+			"provider.groupSelected": "{count} selected",
 			"provider.quotaExhausted": "Quota exhausted",
 			"provider.vision": "vision",
 			"provider.notConfigured": "No token yet — configure it in the Access tab",
@@ -297,8 +316,19 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.mounted": "Registered: {tool}",
 			"draw.notMounted": "Not registered — tick the switch above.",
 			"draw.restartHint": "The switch saves at once, but the tool mounts at the NEXT Host start (a tool registration cannot be undone).",
-			"draw.models": "Draw calls will use the models below",
+			"draw.currentTitle": "In use:",
+			"draw.currentNone": "No usable image model in the catalogue right now — drawing will fail (check the access token and that the catalogue has loaded).",
+			"draw.currentSrc.preferred": "your choice",
+			"draw.currentSrc.declaredTextToImage": "auto: platform-declared text-to-image",
+			"draw.currentSrc.knownTextToImage": "auto: known to accept text-to-image",
+			"draw.currentSrc.catalogFirst": "auto: first image model in the catalogue",
+			"draw.models": "Image model (pick one; leave it on auto and the plugin chooses)",
 			"draw.badge": "image",
+			"draw.badge.textToImage": "text-to-image",
+			"draw.badge.imageToImage": "image-to-image / edit",
+			"draw.needsImage": "needs an input image",
+			"draw.needsImageTitle": "This model cannot do pure text-to-image: pass an input image via imageUrl (image-to-image / edit).",
+			"draw.auto": "Auto (recommended)",
 			"draw.noCandidates": "This catalogue declares no image model (no entry with image-to-image / text-to-image); drawing is unavailable.",
 			"draw.needsKey": "No token yet — configure it in the Access tab.",
 			"draw.reset": "Reset",
@@ -759,6 +789,27 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				gap: 8
 			},
 			modelRowOff: { opacity: .55 },
+			modelGroup: {
+				display: "flex",
+				alignItems: "center",
+				gap: 6,
+				width: "100%",
+				padding: "10px 4px 2px",
+				background: "none",
+				border: "none",
+				textAlign: "left",
+				cursor: "pointer",
+				fontSize: 12,
+				fontWeight: 600,
+				color: "var(--dsw-alias-label-secondary)"
+			},
+			modelGroupOwner: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" },
+			modelGroupCount: {
+				fontWeight: 400,
+				opacity: .75,
+				fontVariantNumeric: "tabular-nums"
+			},
+			modelRowGrouped: { paddingLeft: 22 },
 			modelCheck: {
 				flex: "none",
 				width: 15,
@@ -1036,13 +1087,25 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const candidates = Array.isArray(d.candidateIds) ? d.candidateIds.map((id) => String(id ?? "")).filter((id) => id !== "") : [];
 		const reason = d.absentReason;
 		const absentReason = reason === "no-tools-service" || reason === "peer-load-failed" || reason === "registry-refused" ? reason : null;
+		const rawCandidates = Array.isArray(d.candidates) ? d.candidates.map((entry) => {
+			const row = entry ?? {};
+			return {
+				id: String(row.id ?? ""),
+				capability: row.capability === "text-to-image" ? "text-to-image" : row.capability === "image-to-image" ? "image-to-image" : "other",
+				textToImage: row.textToImage === true
+			};
+		}).filter((row) => row.id !== "") : null;
+		const effectiveSource = d.effectiveSource === "preferred" || d.effectiveSource === "declared-text-to-image" || d.effectiveSource === "known-text-to-image" || d.effectiveSource === "catalog-first" ? d.effectiveSource : null;
 		return {
 			enabled: d.enabled === true,
 			source: d.source === "panel" ? "panel" : "config",
 			candidateIds: candidates,
 			candidateCount: typeof d.candidateCount === "number" && Number.isFinite(d.candidateCount) ? d.candidateCount : candidates.length,
+			...rawCandidates !== null ? { candidates: rawCandidates } : {},
 			preferredModel: typeof d.preferredModel === "string" && d.preferredModel !== "" ? d.preferredModel : null,
 			preferredSource: d.preferredSource === "panel" ? "panel" : "config",
+			..."effectiveModel" in d ? { effectiveModel: typeof d.effectiveModel === "string" && d.effectiveModel !== "" ? d.effectiveModel : null } : {},
+			..."effectiveSource" in d ? { effectiveSource } : {},
 			absentReason,
 			mountPending: d.mountPending === true,
 			toolName: typeof d.toolName === "string" && d.toolName !== "" ? d.toolName : "modelscope_draw_image"
@@ -1097,8 +1160,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			source: "config",
 			candidateIds: [],
 			candidateCount: 0,
+			candidates: [],
 			preferredModel: null,
 			preferredSource: "config",
+			effectiveModel: null,
+			effectiveSource: null,
 			absentReason: null,
 			mountPending: false,
 			toolName: "modelscope_draw_image"
@@ -1559,6 +1625,33 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, tt("token.link")));
 	}
 	/**
+	* 按 owner 把清单分组，**推荐的三家置顶**（组内保持目录首见序）。
+	*
+	* 分组的理由只有一个：`owner/model` 的 owner 前缀在每一行里重复，而面板一屏能放
+	* 十几行——同一个 owner 说十几遍既占宽度又不提供任何信息。置顶沿用「推荐」徽章的
+	* 同一份 `FEATURED_OWNERS`，两处不可能对「哪三家值得置顶」说两套话。
+	* @param {RosterRow[]} rows - 归一后的清单行。
+	* @returns {{owner: string, rows: RosterRow[]}[]} 分组（置顶 owner 在前）。
+	*/
+	function groupByOwner(rows) {
+		const order = [];
+		const byOwner = /* @__PURE__ */ new Map();
+		for (const row of rows) {
+			const owner = catalogOwner(row.id);
+			const bucket = byOwner.get(owner);
+			if (bucket === void 0) {
+				byOwner.set(owner, [row]);
+				order.push(owner);
+			} else bucket.push(row);
+		}
+		const featured = FEATURED_OWNERS.filter((owner) => byOwner.has(owner));
+		const rest = order.filter((owner) => !FEATURED_OWNERS.includes(owner));
+		return [...featured, ...rest].map((owner) => ({
+			owner,
+			rows: byOwner.get(owner) ?? []
+		}));
+	}
+	/**
 	* 接入为 DSH 模型的区块（开关 + 注册状态 + 允许清单）。
 	*
 	* 这是 M4 把抽象「试调」升级成真接入的落点：开关翻转即 POST provider 路由，
@@ -1589,6 +1682,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const hostIds = status.enabledIds;
 		const hostKey = useMemo(() => JSON.stringify(hostIds), [hostIds]);
 		const [draft, setDraft] = useState(() => hostIds.slice());
+		const [search, setSearch] = useState("");
+		const [collapsed, setCollapsed] = useState([]);
 		const hideAllMode = parseAllowedList(draft).mode === "none";
 		useEffect(() => {
 			setDraft(normalizeRosterSave(hostIds));
@@ -1702,53 +1797,19 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			fontSize: 11,
 			color: "var(--dsw-alias-label-secondary)"
 		} }, tt(sourceKey)));
-		const rosterBlock = roster.length === 0 ? h("div", { style: {
-			...S.muted,
-			fontSize: 12,
-			marginTop: 6
-		} }, tt("provider.rosterHint")) : h("div", { style: S.modelPanel }, h("div", { style: S.rosterTools }, h("span", {
-			style: S.rosterCount,
-			title: format(tt("provider.enabledCount"), {
-				count: ticked,
-				total: roster.length
-			})
-		}, format(tt("provider.enabledCount"), {
-			count: ticked,
-			total: roster.length
-		})), h("button", {
-			type: "button",
-			style: S.rosterBulk,
-			disabled: busy,
-			onClick: () => {
-				setDraft(rosterIds.slice());
-				onSaveList(rosterIds.slice());
-			}
-		}, tt("provider.allowAll")), h("button", {
-			type: "button",
-			style: S.rosterBulk,
-			disabled: busy,
-			onClick: () => {
-				const none = hideAllRoster();
-				setDraft(none);
-				onSaveList(none);
-			}
-		}, tt("provider.hideAll")), h("button", {
-			type: "button",
-			style: S.primary,
-			disabled: busy,
-			onClick: () => onSaveList(draft.slice())
-		}, tt("provider.saveList"))), h("ul", {
-			style: S.modelList,
-			role: "list"
-		}, roster.map((row) => {
+		const renderRosterRow = (row) => {
 			const id = row.id;
 			const unusable = row.available === false || row.quotaExhausted === true;
 			return h("li", {
 				key: id,
 				style: unusable ? {
 					...S.modelRow,
+					...S.modelRowGrouped,
 					...S.modelRowOff
-				} : S.modelRow
+				} : {
+					...S.modelRow,
+					...S.modelRowGrouped
+				}
 			}, h("div", { style: S.modelRowHead }, h("label", { style: {
 				display: "flex",
 				alignItems: "center",
@@ -1782,13 +1843,101 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				style: {
 					...S.formNote,
 					margin: 0,
-					marginLeft: "auto"
+					marginLeft: "auto",
+					whiteSpace: "nowrap"
 				},
 				href: modelscopeModelUrl(row.id),
 				target: "_blank",
 				rel: "noreferrer",
 				title: tt("models.viewOnSiteTitle")
 			}, tt("models.viewOnSite"))));
+		};
+		const query = search.trim().toLowerCase();
+		const visibleRows = query === "" ? roster : roster.filter((row) => `${row.id} ${String(row.name ?? "")}`.toLowerCase().includes(query));
+		const ownerGroups = groupByOwner(visibleRows);
+		const rosterBlock = roster.length === 0 ? h("div", { style: {
+			...S.muted,
+			fontSize: 12,
+			marginTop: 6
+		} }, tt("provider.rosterHint")) : h("div", { style: S.modelPanel }, h("div", { style: S.rosterTools }, h("input", {
+			type: "search",
+			name: "provider-model-search",
+			autoComplete: "off",
+			style: {
+				...S.input,
+				flex: "1 1 160px",
+				minWidth: 0
+			},
+			placeholder: tt("provider.search"),
+			"aria-label": tt("provider.search"),
+			value: search,
+			disabled: busy,
+			onChange: (event) => setSearch(String(event.target?.value ?? ""))
+		}), h("span", {
+			style: S.rosterCount,
+			title: format(tt("provider.enabledCount"), {
+				count: ticked,
+				total: roster.length
+			})
+		}, format(tt("provider.enabledCount"), {
+			count: ticked,
+			total: roster.length
+		})), h("button", {
+			type: "button",
+			style: S.rosterBulk,
+			disabled: busy,
+			onClick: () => {
+				setDraft(rosterIds.slice());
+				onSaveList(rosterIds.slice());
+			}
+		}, tt("provider.allowAll")), h("button", {
+			type: "button",
+			style: S.rosterBulk,
+			disabled: busy,
+			onClick: () => {
+				const none = hideAllRoster();
+				setDraft(none);
+				onSaveList(none);
+			}
+		}, tt("provider.hideAll")), h("button", {
+			type: "button",
+			style: S.primary,
+			disabled: busy,
+			onClick: () => onSaveList(draft.slice())
+		}, tt("provider.saveList"))), visibleRows.length === 0 ? h("div", { style: {
+			...S.muted,
+			fontSize: 12,
+			padding: "10px 4px"
+		} }, tt("provider.noMatch")) : h("ul", {
+			style: S.modelList,
+			role: "list"
+		}, ownerGroups.map((group) => {
+			const isCollapsed = query === "" && collapsed.includes(group.owner);
+			const groupTicked = hideAllMode ? 0 : group.rows.filter((row) => draft.includes(row.id)).length;
+			return h("li", { key: group.owner }, h("button", {
+				type: "button",
+				style: S.modelGroup,
+				"aria-expanded": !isCollapsed,
+				"aria-label": `${tt(isCollapsed ? "section.expand" : "section.collapse")}: ${group.owner}`,
+				onClick: () => setCollapsed((current) => current.includes(group.owner) ? current.filter((owner) => owner !== group.owner) : [...current, group.owner])
+			}, h("svg", {
+				viewBox: "0 0 16 16",
+				width: 12,
+				height: 12,
+				fill: "none",
+				stroke: "currentColor",
+				strokeWidth: "1.5",
+				strokeLinecap: "round",
+				strokeLinejoin: "round",
+				"aria-hidden": "true",
+				style: isCollapsed ? {
+					...S.chevron,
+					transform: "rotate(-90deg)"
+				} : S.chevron
+			}, h("path", { d: "M3 6l5 5 5-5" })), h("span", { style: S.modelGroupOwner }, group.owner), h("span", { style: S.modelGroupCount }, format(tt("provider.groupCount"), { count: group.rows.length })), groupTicked > 0 ? h("span", { style: S.modelGroupCount }, format(tt("provider.groupSelected"), { count: groupTicked })) : null), isCollapsed ? null : h("ul", {
+				style: S.modelList,
+				role: "list"
+			}, group.rows.map(renderRosterRow)));
 		})), h("div", { style: S.rosterFoot }, h("button", {
 			type: "button",
 			style: S.button,
@@ -1817,11 +1966,15 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	* @param {object} props - 渲染参数。
 	* @returns {unknown} 卡片节点。
 	*/
-	function DrawCard({ draw, busy, error, onToggle, onReset, tokenPresent, tt }) {
+	function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, onAutoModel, tokenPresent, tt }) {
 		const status = drawOf(draw);
 		const enabled = status.enabled === true;
 		const candidates = status.candidateIds;
 		const sourceKey = status.source === "panel" ? "draw.source.panel" : "draw.source.config";
+		const effectiveModel = status.effectiveModel;
+		const hasEffectiveKey = effectiveModel !== void 0;
+		const candidateDetails = status.candidates;
+		const currentSourceKey = status.effectiveSource === "preferred" ? "draw.currentSrc.preferred" : status.effectiveSource === "declared-text-to-image" ? "draw.currentSrc.declaredTextToImage" : status.effectiveSource === "known-text-to-image" ? "draw.currentSrc.knownTextToImage" : status.effectiveSource === "catalog-first" ? "draw.currentSrc.catalogFirst" : null;
 		const switchRow = h("div", { style: {
 			display: "flex",
 			gap: 10,
@@ -1872,32 +2025,97 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			...S.formNote,
 			color: "var(--dsw-alias-state-warn-primary)"
 		} }, tt("draw.needsKey")) : null;
-		const candidateBlock = candidates.length === 0 ? h("div", { style: {
+		const currentBlock = !hasEffectiveKey ? null : effectiveModel === null || effectiveModel === "" ? h("div", {
+			style: {
+				...S.muted,
+				fontSize: 12,
+				marginTop: 8
+			},
+			role: "status"
+		}, tt("draw.currentNone")) : h("div", {
+			style: {
+				...S.formNote,
+				marginTop: 8,
+				display: "flex",
+				gap: 6,
+				flexWrap: "wrap",
+				alignItems: "baseline"
+			},
+			role: "status"
+		}, h("span", null, tt("draw.currentTitle")), h("code", {
+			style: S.modelName,
+			title: effectiveModel
+		}, effectiveModel), currentSourceKey === null ? null : h("span", { style: { color: "var(--dsw-alias-label-secondary)" } }, tt(currentSourceKey)));
+		const RADIO_NAME = "modelscope-draw-model";
+		const badgeKeyOf = (capability) => capability === "text-to-image" ? "draw.badge.textToImage" : capability === "image-to-image" ? "draw.badge.imageToImage" : "draw.badge";
+		const candidateRows = Array.isArray(candidateDetails) ? candidateDetails.map((row) => ({
+			id: row.id,
+			capability: row.capability,
+			textToImage: row.textToImage
+		})) : candidates.map((id) => ({
+			id,
+			capability: null,
+			textToImage: null
+		}));
+		/** 一行广播的骨架：单选框 + 名字（+ 其余徽章由调用方给）。 */
+		const radioRow = (key, checked, label, labelText, disabled, onChange, extra) => h("li", {
+			key,
+			style: S.modelRow
+		}, h("div", { style: S.modelRowHead }, h("label", { style: {
+			display: "flex",
+			alignItems: "center",
+			gap: 10,
+			flex: "1 1 auto",
+			minWidth: 0,
+			cursor: disabled ? "default" : "pointer"
+		} }, h("input", {
+			type: "radio",
+			name: RADIO_NAME,
+			checked,
+			disabled,
+			onChange,
+			style: S.modelCheck,
+			"aria-label": label
+		}), h("span", {
+			style: S.modelName,
+			title: label
+		}, labelText)), ...extra));
+		const candidateBlock = candidateRows.length === 0 ? h("div", { style: {
 			...S.muted,
 			fontSize: 12,
 			marginTop: 6
-		} }, tt("draw.noCandidates")) : h("div", { style: {
-			display: "flex",
-			flexDirection: "column",
-			gap: 4
-		} }, candidates.map((id) => h("div", {
-			key: id,
-			style: S.modelRowHead
-		}, h("code", {
-			style: S.modelName,
-			title: id
-		}, id), h("span", { style: S.modelBadge }, tt("draw.badge")), h("a", {
-			style: {
-				...S.formNote,
-				margin: 0,
-				marginLeft: "auto"
-			},
-			href: modelscopeModelUrl(id),
-			target: "_blank",
-			rel: "noreferrer",
-			title: tt("models.viewOnSiteTitle")
-		}, tt("models.viewOnSite")))));
-		return h("div", null, switchRow, statusNode, restartHint, tokenHint, h("div", { style: {
+		} }, tt("draw.noCandidates")) : h("div", { style: S.modelPanel }, h("ul", {
+			style: S.modelList,
+			role: "radiogroup",
+			"aria-label": tt("draw.models")
+		}, radioRow("__auto__", status.preferredModel === null, tt("draw.auto"), tt("draw.auto"), busy, () => onAutoModel(), []), ...candidateRows.map((row) => radioRow(row.id, status.preferredModel === row.id, row.id, row.id, busy, () => onSelectModel(row.id), [
+			h("span", {
+				key: "badge",
+				style: S.modelBadge
+			}, tt(badgeKeyOf(row.capability))),
+			row.textToImage === false ? h("span", {
+				key: "need",
+				style: {
+					...S.modelBadge,
+					color: "var(--dsw-alias-state-warn-primary)"
+				},
+				title: tt("draw.needsImageTitle")
+			}, tt("draw.needsImage")) : null,
+			h("a", {
+				key: "link",
+				style: {
+					...S.formNote,
+					margin: 0,
+					marginLeft: "auto",
+					whiteSpace: "nowrap"
+				},
+				href: modelscopeModelUrl(row.id),
+				target: "_blank",
+				rel: "noreferrer",
+				title: tt("models.viewOnSiteTitle")
+			}, tt("models.viewOnSite"))
+		]))));
+		return h("div", null, switchRow, statusNode, restartHint, tokenHint, currentBlock, h("div", { style: {
 			...S.sectionTitle,
 			margin: "18px 0 8px"
 		} }, tt("draw.models")), candidateBlock, h("div", { style: S.rosterFoot }, h("button", {
@@ -2264,6 +2482,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		]);
 		const toggleDraw = useCallback((enabled) => void runDrawWrite(DRAW_PATH, { enabled }), [runDrawWrite]);
 		const resetDraw = useCallback(() => void runDrawWrite(DRAW_RESET_PATH, {}), [runDrawWrite]);
+		const saveDrawModel = useCallback((modelId) => void runDrawWrite(DRAW_PATH, { modelId }), [runDrawWrite]);
 		const [trendBusy, setTrendBusy] = useState(false);
 		const [trendError, setTrendError] = useState(null);
 		const saveTrendWindow = useCallback(async (windowDays) => {
@@ -2408,6 +2627,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			error: drawError,
 			onToggle: toggleDraw,
 			onReset: resetDraw,
+			onSelectModel: (id) => saveDrawModel(id),
+			onAutoModel: () => saveDrawModel(null),
 			tokenPresent: data?.token?.present === true,
 			tt
 		})));

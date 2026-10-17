@@ -153,9 +153,31 @@ export interface DrawStatus {
    */
   candidateIds: string[];
   candidateCount: number;
-  /** 生效的默认模型；`null` = 自动（取候选第一个）。 */
+  /**
+   * 候选的明细：能力档 + 「实测可纯文生图」。面板每行的徽章与提示从它派生。
+   *
+   * 可选：旧 Host 只给 `candidateIds`，面板退化为只显示 id（不假装知道能力）。
+   */
+  candidates?: {
+    id: string;
+    /** 平台声明的能力档（platform 说 `image-to-image` 就是 `image-to-image`）。 */
+    capability: "text-to-image" | "image-to-image" | "other";
+    /** 实测可纯文生图（平台声明 text-to-image，或已知的 `Qwen/Qwen-Image-Edit`）。 */
+    textToImage: boolean;
+  }[];
+  /** 面板/配置保存的默认模型；`null` = 未指定，走自动选择。 */
   preferredModel: string | null;
   preferredSource: "panel" | "config";
+  /**
+   * **当前实际会用**的模型 id（`pickDrawModel` 的裁决结果，含自动选择）。
+   * `null` = 目录里没有出图模型，调用会以「没有候选」失败。
+   */
+  effectiveModel?: string | null;
+  /**
+   * 为什么是 `effectiveModel`。面板据此把「你指定的」与「自动挑的」分开说清——
+   * 只报 id 不报理由，用户看到两个候选却不知道哪个在生效。
+   */
+  effectiveSource?: "preferred" | "declared-text-to-image" | "known-text-to-image" | "catalog-first" | null;
   /**
    * 工具缺席的原因；`null` = 开关没开，或已成功挂载。
    *

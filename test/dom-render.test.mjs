@@ -519,6 +519,13 @@ const buttons = () => qa("button");
 const tabButton = (key) => byText('[role="tab"]', tt(key));
 /** roster 复选框每次重渲染都是新节点，所以每次都要重新取。 */
 const rosterChecks = () => qa('input[type="checkbox"][aria-label]');
+/**
+ * 按 **id** 取那一行的复选框。
+ *
+ * 清单自 2026-10-17 起按 owner 分组（推荐的三家置顶），DOM 顺序不再等于 roster 的
+ * 到货序——下标寻址会随 FEATURED_OWNERS 的改动悄悄漂到别的行上。
+ */
+const rosterCheckOf = (id) => rosterChecks().find((el) => el.getAttribute("aria-label") === id);
 const toggleSwitches = () => qa('input[type="checkbox"]:not([aria-label])');
 const sectionBody = (titleKey) => {
   const head = buttons().find((el) => el.textContent.trim() === tt(titleKey));
@@ -671,10 +678,17 @@ await settle();
 // toggle-switch.ts 写着：开关内层的 input 不写 aria-label（隐式 label 命名），roster
 // 复选框写 aria-label = 模型 id。那条契约在真 DOM 里的落点就是下面这两行。
 assert.equal(toggleSwitches().length, 2, "provider 与出图各一个滑杆开关");
-assert.deepEqual(rosterChecks().map((el) => el.getAttribute("aria-label")), [DEEPSEEK, QWEN, GLM], "roster 每行一个复选框，aria-label = 模型 id");
-assert.equal(rosterChecks()[2].disabled, true, "额度耗尽的行 disabled（灰显但不从清单里删）");
-assert.equal(rosterChecks()[1].checked, true, "enabledIds 命中的行勾中");
-assert.equal(rosterChecks()[0].checked, false, "未命中的行不勾");
+// 顺序 = **推荐 owner 置顶**（FEATURED_OWNERS 的声明序 deepseek-ai → ZhipuAI → Qwen），
+// 不是 roster 的到货序（DEEPSEEK, QWEN, GLM）。三个 owner 都在置顶集里，所以这里
+// 观察到的就是声明序；到货序留给「组内」那一段去验证。
+assert.deepEqual(
+  rosterChecks().map((el) => el.getAttribute("aria-label")),
+  [DEEPSEEK, GLM, QWEN],
+  "roster 每行一个复选框，aria-label = 模型 id；顺序为置顶 owner 声明序"
+);
+assert.equal(rosterCheckOf(GLM).disabled, true, "额度耗尽的行 disabled（灰显但不从清单里删）");
+assert.equal(rosterCheckOf(QWEN).checked, true, "enabledIds 命中的行勾中");
+assert.equal(rosterCheckOf(DEEPSEEK).checked, false, "未命中的行不勾");
 assert.match(bodyText(), /已启用 1 \/ 3/, "已启用计数上屏");
 assert.match(bodyText(), /视觉/, "vision 行带「视觉」标记");
 assert.match(bodyText(), /推荐/, "FEATURED_OWNERS 的 owner 带「推荐」标记");
@@ -684,7 +698,7 @@ await settle();
 assert.deepEqual(jsonOf(lastPost(HOST.PROVIDER_PATH)), { enabled: true }, "翻 provider 开关：POST /provider 且发的是**翻转后**的值");
 assert.equal(toggleSwitches()[0].disabled, true, "写盘在途时开关 disabled");
 assert.ok(bodyText().includes(tt("provider.busy")), "开关标签换成「切换中…」");
-assert.equal(rosterChecks()[0].disabled, true, "同一张卡的复选框也随 busy 禁用（两张卡各有一套 busy 才有意义）");
+assert.equal(rosterCheckOf(DEEPSEEK).disabled, true, "同一张卡的复选框也随 busy 禁用（两张卡各有一套 busy 才有意义）");
 releaseHeld(0);
 await settle();
 assert.equal(toggleSwitches()[0].disabled, false, "写盘结束后开关恢复可用");
@@ -707,9 +721,9 @@ await settle();
 assert.deepEqual(jsonOf(lastPost(PROVIDER_ROSTER_PATH)), { enabledIds: [HIDE_ALL_MODELS] }, "「全部隐藏」发哨兵，不混排真实 id");
 assert.match(bodyText(), /已启用 0 \/ 3/, "哨兵态下计数为 0（与 Host 的「含哨兵即 none」同口径）");
 assert.ok(rosterChecks().every((el) => el.checked === false), "哨兵态下没有任何一行画成勾中");
-rosterChecks()[0].click();
+rosterCheckOf(DEEPSEEK).click();
 await settle();
-assert.equal(rosterChecks()[0].checked, true, "勾一个真实模型 → 该行画成勾中");
+assert.equal(rosterCheckOf(DEEPSEEK).checked, true, "勾一个真实模型 → 该行画成勾中");
 byText("button", tt("provider.saveList")).click();
 await settle();
 assert.deepEqual(jsonOf(lastPost(PROVIDER_ROSTER_PATH)), { enabledIds: [DEEPSEEK] }, "勾一个真实模型必须退出哨兵态（曾经的混排 bug：UI 说 1 个、Host 落 0 个）");
@@ -717,10 +731,10 @@ byText("button", tt("provider.allowAll")).click();
 await settle();
 assert.deepEqual(jsonOf(lastPost(PROVIDER_ROSTER_PATH))?.enabledIds?.slice()?.sort(), [DEEPSEEK, GLM, QWEN].sort(), "「全部」发整份 roster ids");
 // 额度耗尽那行是禁用的：真 DOM 里点它不该改动清单。
-const beforeUnusable = rosterChecks()[2].checked;
-rosterChecks()[2].click();
+const beforeUnusable = rosterCheckOf(GLM).checked;
+rosterCheckOf(GLM).click();
 await settle();
-assert.equal(rosterChecks()[2].checked, beforeUnusable, "禁用行点不动，勾选态不变");
+assert.equal(rosterCheckOf(GLM).checked, beforeUnusable, "禁用行点不动，勾选态不变");
 
 // ══════════════════════════════════════════════════════════════════════════
 // §9 两个「回到默认」（同一个字样、两条不同路由）

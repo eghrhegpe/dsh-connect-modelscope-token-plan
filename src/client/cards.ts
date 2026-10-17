@@ -356,6 +356,36 @@ export function TokenForm({ token, busy, error, onSave, onForget, onVerify, veri
   );
 }
 
+/** 清单里的一行（`ProviderStatus.roster` 的元素）。 */
+type RosterRow = ProviderStatus["roster"][number];
+
+/**
+ * 按 owner 把清单分组，**推荐的三家置顶**（组内保持目录首见序）。
+ *
+ * 分组的理由只有一个：`owner/model` 的 owner 前缀在每一行里重复，而面板一屏能放
+ * 十几行——同一个 owner 说十几遍既占宽度又不提供任何信息。置顶沿用「推荐」徽章的
+ * 同一份 `FEATURED_OWNERS`，两处不可能对「哪三家值得置顶」说两套话。
+ * @param {RosterRow[]} rows - 归一后的清单行。
+ * @returns {{owner: string, rows: RosterRow[]}[]} 分组（置顶 owner 在前）。
+ */
+export function groupByOwner(rows: RosterRow[]): { owner: string; rows: RosterRow[] }[] {
+  const order: string[] = [];
+  const byOwner = new Map<string, RosterRow[]>();
+  for (const row of rows) {
+    const owner = catalogOwner(row.id);
+    const bucket = byOwner.get(owner);
+    if (bucket === undefined) {
+      byOwner.set(owner, [row]);
+      order.push(owner);
+    } else {
+      bucket.push(row);
+    }
+  }
+  const featured = FEATURED_OWNERS.filter((owner) => byOwner.has(owner));
+  const rest = order.filter((owner) => !(FEATURED_OWNERS as readonly string[]).includes(owner));
+  return [...featured, ...rest].map((owner) => ({ owner, rows: byOwner.get(owner) ?? [] }));
+}
+
 /**
  * 接入为 DSH 模型的区块（开关 + 注册状态 + 允许清单）。
  *
@@ -401,6 +431,10 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
   const hostIds = status.enabledIds;
   const hostKey = useMemo(() => JSON.stringify(hostIds), [hostIds]);
   const [draft, setDraft] = useState<string[]>(() => hostIds.slice());
+  // 搜索词与折叠的 owner。两者都是**视图态**——与 draft 不同（draft 是要写盘的
+  // 值），它们只影响当下怎么画，所以不随 Host 值刷新、也不进任何 POST。
+  const [search, setSearch] = useState("");
+  const [collapsed, setCollapsed] = useState<string[]>([]);
   // 哨兵态是独占态：draft 经 shared/allow-list.ts 的 parseAllowedList 解释，
   // mode === "none" 时整个清单就是「全部隐藏」（Host 同一份解释）。勾选、
   // 计数与保存都按这个口径，混排（哨兵 + 真实 id）不会出现。
@@ -502,6 +536,58 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
     h("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary)" } }, tt(sourceKey))
   );
 
+  // 一行清单。抽成局部函数是因为分组后要按组各画一遍。
+  const renderRosterRow = (row: RosterRow) => {
+    const id = row.id;
+    const unusable = row.available === false || row.quotaExhausted === true;
+    return h(
+      "li",
+      { key: id, style: unusable ? { ...S.modelRow, ...S.modelRowGrouped, ...S.modelRowOff } : { ...S.modelRow, ...S.modelRowGrouped } },
+      h(
+        "div",
+        { style: S.modelRowHead },
+        h(
+          "label",
+          { style: { display: "flex", alignItems: "center", gap: 10, flex: "1 1 auto", minWidth: 0, cursor: busy || unusable ? "default" : "pointer" } },
+          h("input", {
+            type: "checkbox", checked: !hideAllMode && draft.includes(id), disabled: busy || unusable,
+            onChange: () => toggleOne(id), style: S.modelCheck, "aria-label": id
+          }),
+          h("span", { style: S.modelName, title: id }, row.name)
+        ),
+        row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null,
+        typeof row.contextWindow === "number"
+          ? h(
+            "span",
+            // 策展值带来源标记：同一窗口数字，「策展」与「覆盖/目录」的
+            // 可信度不同——面板把它点出来，用户才知道 262144 是查表得
+            // 来、平台没亲口说。title 说全文案，badge 文本走短词。
+            {
+              style: row.contextSource === "curated" ? { ...S.modelBadge, color: "var(--dsw-alias-label-secondary)" } : S.modelBadge,
+              title: row.contextSource === "curated" ? tt("provider.contextCuratedTitle") : tt("provider.contextWindow")
+            },
+            row.contextSource === "curated" ? formatWindow(row.contextWindow) + " *" : formatWindow(row.contextWindow)
+          )
+          : null,
+        (FEATURED_OWNERS as readonly string[]).includes(catalogOwner(row.id))
+          ? h("span", { style: S.modelBadgeFeatured, title: tt("models.featuredTitle") }, tt("provider.featured"))
+          : null,
+        row.quotaExhausted === true
+          ? h("span", { style: { ...S.modelBadge, color: "var(--dsw-alias-state-error-primary)" } }, tt("provider.quotaExhausted"))
+          : null,
+        // 外链保留**可读的**「在魔搭查看 →」：缩成一枚 ↗ 省了宽度，却让第一次看到
+        // 它的人猜不出它干什么。省下的那点宽度不值得这个代价（2026-10-17）。
+        h("a", { style: { ...S.formNote, margin: 0, marginLeft: "auto", whiteSpace: "nowrap" }, href: modelscopeModelUrl(row.id), target: "_blank", rel: "noreferrer", title: tt("models.viewOnSiteTitle") }, tt("models.viewOnSite"))
+      )
+    );
+  };
+
+  // 搜索先过滤、再分组。搜索时**忽略折叠态**——匹配到的东西被折叠藏着，会让人以为
+  // 「搜不到」；`query` 只归一一次，后面的判空都看它。
+  const query = search.trim().toLowerCase();
+  const visibleRows = query === "" ? roster : roster.filter((row) => `${row.id} ${String(row.name ?? "")}`.toLowerCase().includes(query));
+  const ownerGroups = groupByOwner(visibleRows);
+
   const rosterBlock = roster.length === 0
     ? h("div", { style: { ...S.muted, fontSize: 12, marginTop: 6 } }, tt("provider.rosterHint"))
     : h(
@@ -510,6 +596,19 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
         h(
           "div",
           { style: S.rosterTools },
+          // `name` + autoComplete 是给浏览器的口令：这枚框不是让密码管理器往里填
+          // 已保存账号的地方（同 Agnes 的搜索框处理）。
+          h("input", {
+            type: "search",
+            name: "provider-model-search",
+            autoComplete: "off",
+            style: { ...S.input, flex: "1 1 160px", minWidth: 0 },
+            placeholder: tt("provider.search"),
+            "aria-label": tt("provider.search"),
+            value: search,
+            disabled: busy,
+            onChange: (event: unknown) => setSearch(String((event as { target?: { value?: string } }).target?.value ?? ""))
+          }),
           h("span", {
             style: S.rosterCount,
             title: format(tt("provider.enabledCount"), { count: ticked, total: roster.length })
@@ -527,52 +626,45 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
             onClick: () => onSaveList(draft.slice())
           }, tt("provider.saveList"))
         ),
-        h(
-          "ul",
-          { style: S.modelList, role: "list" },
-          roster.map((row) => {
-            const id = row.id;
-            const unusable = row.available === false || row.quotaExhausted === true;
-            return h(
-              "li",
-              { key: id, style: unusable ? { ...S.modelRow, ...S.modelRowOff } : S.modelRow },
-              h(
-                "div",
-                { style: S.modelRowHead },
-                h(
-                  "label",
-                  { style: { display: "flex", alignItems: "center", gap: 10, flex: "1 1 auto", minWidth: 0, cursor: busy || unusable ? "default" : "pointer" } },
-                  h("input", {
-                    type: "checkbox", checked: !hideAllMode && draft.includes(id), disabled: busy || unusable,
-                    onChange: () => toggleOne(id), style: S.modelCheck, "aria-label": id
-                  }),
-                  h("span", { style: S.modelName, title: id }, row.name)
-                ),
-                row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null,
-                typeof row.contextWindow === "number"
-                  ? h(
-                    "span",
-                    // 策展值带来源标记：同一窗口数字，「策展」与「覆盖/目录」的
-                    // 可信度不同——面板把它点出来，用户才知道 262144 是查表得
-                    // 来、平台没亲口说。title 说全文案，badge 文本走短词。
+        visibleRows.length === 0
+          ? h("div", { style: { ...S.muted, fontSize: 12, padding: "10px 4px" } }, tt("provider.noMatch"))
+          : h(
+              "ul",
+              { style: S.modelList, role: "list" },
+              ownerGroups.map((group) => {
+                // 折叠只在「没在搜索」时生效（见上）。
+                const isCollapsed = query === "" && collapsed.includes(group.owner);
+                const groupTicked = hideAllMode ? 0 : group.rows.filter((row) => draft.includes(row.id)).length;
+                return h(
+                  "li",
+                  { key: group.owner },
+                  h(
+                    "button",
                     {
-                      style: row.contextSource === "curated" ? { ...S.modelBadge, color: "var(--dsw-alias-label-secondary)" } : S.modelBadge,
-                      title: row.contextSource === "curated" ? tt("provider.contextCuratedTitle") : tt("provider.contextWindow")
+                      type: "button",
+                      style: S.modelGroup,
+                      "aria-expanded": !isCollapsed,
+                      "aria-label": `${tt(isCollapsed ? "section.expand" : "section.collapse")}: ${group.owner}`,
+                      onClick: () => setCollapsed((current) => (current.includes(group.owner) ? current.filter((owner) => owner !== group.owner) : [...current, group.owner]))
                     },
-                    row.contextSource === "curated" ? formatWindow(row.contextWindow) + " *" : formatWindow(row.contextWindow)
-                  )
-                  : null,
-                (FEATURED_OWNERS as readonly string[]).includes(catalogOwner(row.id))
-                  ? h("span", { style: S.modelBadgeFeatured, title: tt("models.featuredTitle") }, tt("provider.featured"))
-                  : null,
-                row.quotaExhausted === true
-                  ? h("span", { style: { ...S.modelBadge, color: "var(--dsw-alias-state-error-primary)" } }, tt("provider.quotaExhausted"))
-                  : null,
-                h("a", { style: { ...S.formNote, margin: 0, marginLeft: "auto" }, href: modelscopeModelUrl(row.id), target: "_blank", rel: "noreferrer", title: tt("models.viewOnSiteTitle") }, tt("models.viewOnSite"))
-              )
-            );
-          })
-        ),
+                    // 折叠时转 -90°（▸），展开时是基础的下箭头（▾）——树的常规读法。
+                    h(
+                      "svg",
+                      {
+                        viewBox: "0 0 16 16", width: 12, height: 12, fill: "none", stroke: "currentColor",
+                        strokeWidth: "1.5", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true",
+                        style: isCollapsed ? { ...S.chevron, transform: "rotate(-90deg)" } : S.chevron
+                      },
+                      h("path", { d: "M3 6l5 5 5-5" })
+                    ),
+                    h("span", { style: S.modelGroupOwner }, group.owner),
+                    h("span", { style: S.modelGroupCount }, format(tt("provider.groupCount"), { count: group.rows.length })),
+                    groupTicked > 0 ? h("span", { style: S.modelGroupCount }, format(tt("provider.groupSelected"), { count: groupTicked })) : null
+                  ),
+                  isCollapsed ? null : h("ul", { style: S.modelList, role: "list" }, group.rows.map(renderRosterRow))
+                );
+              })
+            ),
         h("div", { style: S.rosterFoot }, h("button", { type: "button", style: S.button, disabled: busy, onClick: onReset }, tt("provider.reset")))
       );
 
@@ -603,12 +695,16 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
  * @param {object} props - 渲染参数。
  * @returns {unknown} 卡片节点。
  */
-export function DrawCard({ draw, busy, error, onToggle, onReset, tokenPresent, tt }: {
+export function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, onAutoModel, tokenPresent, tt }: {
   draw: DrawStatus | null;
   busy: boolean;
   error: string | null;
   onToggle: (enabled: boolean) => void;
   onReset: () => void;
+  /** 把某个候选设为默认（面板保存值）。 */
+  onSelectModel: (id: string) => void;
+  /** 清掉默认，回到自动选择。 */
+  onAutoModel: () => void;
   tokenPresent?: boolean | undefined;
   tt: Tt;
 }): unknown {
@@ -616,6 +712,17 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, tokenPresent, t
   const enabled = status.enabled === true;
   const candidates = status.candidateIds;
   const sourceKey = status.source === "panel" ? "draw.source.panel" : "draw.source.config";
+  // 生效模型与候选明细都是**可选**的（旧 Host 不给）：缺席就整块不渲染，
+  // 而不是编一个「自动选中第一个」——那会把「不知道」画成「知道」。
+  const effectiveModel = status.effectiveModel;
+  const hasEffectiveKey = effectiveModel !== undefined;
+  const candidateDetails = status.candidates;
+  const currentSourceKey: DictionaryKey | null =
+    status.effectiveSource === "preferred" ? "draw.currentSrc.preferred"
+      : status.effectiveSource === "declared-text-to-image" ? "draw.currentSrc.declaredTextToImage"
+        : status.effectiveSource === "known-text-to-image" ? "draw.currentSrc.knownTextToImage"
+          : status.effectiveSource === "catalog-first" ? "draw.currentSrc.catalogFirst"
+            : null;
 
   const switchRow = h(
     "div",
@@ -661,18 +768,102 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, tokenPresent, t
     ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("draw.needsKey"))
     : null;
 
-  const candidateBlock = candidates.length === 0
+  // ── 当前使用：谁在生效、为什么是它 ──
+  // 这一行是这张卡此前最缺的东西：候选列表只说明「有哪些」，不说明「用哪个」，
+  // 用户看到两个 Qwen-Image-Edit 无从判断。
+  const currentBlock = !hasEffectiveKey
+    ? null
+    : effectiveModel === null || effectiveModel === ""
+      ? h("div", { style: { ...S.muted, fontSize: 12, marginTop: 8 }, role: "status" }, tt("draw.currentNone"))
+      : h(
+        "div",
+        { style: { ...S.formNote, marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "baseline" }, role: "status" },
+        h("span", null, tt("draw.currentTitle")),
+        h("code", { style: S.modelName, title: effectiveModel }, effectiveModel),
+        currentSourceKey === null
+          ? null
+          : h("span", { style: { color: "var(--dsw-alias-label-secondary)" } }, tt(currentSourceKey))
+      );
+
+  // 单选框的名字：一个表单里只能有一组生效模型，`name` 让浏览器管住「单选」这
+  // 件事（不用自己记哪个被点过）。aria-label 用模型 id，与 roster 的复选框同款
+  // 约定（真 DOM 里的可辨认性由此而来）。
+  const RADIO_NAME = "modelscope-draw-model";
+  // 能力档与 textToImage 都来自 Host 的候选明细；旧 Host 没有明细时退化为只显示
+  // id 与通用「出图」徽章——不猜能力。
+  const badgeKeyOf = (capability: "text-to-image" | "image-to-image" | "other" | null): DictionaryKey =>
+    capability === "text-to-image" ? "draw.badge.textToImage"
+      : capability === "image-to-image" ? "draw.badge.imageToImage"
+        : "draw.badge";
+
+  const candidateRows: { id: string; capability: "text-to-image" | "image-to-image" | "other" | null; textToImage: boolean | null }[] =
+    Array.isArray(candidateDetails)
+      ? candidateDetails.map((row) => ({ id: row.id, capability: row.capability, textToImage: row.textToImage }))
+      : candidates.map((id) => ({ id, capability: null, textToImage: null }));
+
+  /** 一行广播的骨架：单选框 + 名字（+ 其余徽章由调用方给）。 */
+  const radioRow = (key: string, checked: boolean, label: string, labelText: string, disabled: boolean, onChange: () => void, extra: unknown[]) =>
+    h(
+      "li",
+      { key, style: S.modelRow },
+      h(
+        "div",
+        { style: S.modelRowHead },
+        h(
+          "label",
+          { style: { display: "flex", alignItems: "center", gap: 10, flex: "1 1 auto", minWidth: 0, cursor: disabled ? "default" : "pointer" } },
+          h("input", {
+            type: "radio",
+            name: RADIO_NAME,
+            checked,
+            disabled,
+            onChange,
+            style: S.modelCheck,
+            "aria-label": label
+          }),
+          h("span", { style: S.modelName, title: label }, labelText)
+        ),
+        ...extra
+      )
+    );
+
+  const candidateBlock = candidateRows.length === 0
     ? h("div", { style: { ...S.muted, fontSize: 12, marginTop: 6 } }, tt("draw.noCandidates"))
     : h(
       "div",
-      { style: { display: "flex", flexDirection: "column", gap: 4 } },
-      candidates.map((id) =>
-        h(
-          "div",
-          { key: id, style: S.modelRowHead },
-          h("code", { style: S.modelName, title: id }, id),
-          h("span", { style: S.modelBadge }, tt("draw.badge")),
-          h("a", { style: { ...S.formNote, margin: 0, marginLeft: "auto" }, href: modelscopeModelUrl(id), target: "_blank", rel: "noreferrer", title: tt("models.viewOnSiteTitle") }, tt("models.viewOnSite"))
+      { style: S.modelPanel },
+      h(
+        "ul",
+        { style: S.modelList, role: "radiogroup", "aria-label": tt("draw.models") },
+        // 「自动选择」也是一枚单选项，占第一行：单选组必须能表达「不指定」，
+        // 否则用户指定过一次就再也回不到自动（那是「设为默认」按钮表达不了的）。
+        radioRow(
+          "__auto__",
+          status.preferredModel === null,
+          tt("draw.auto"),
+          tt("draw.auto"),
+          busy,
+          () => onAutoModel(),
+          []
+        ),
+        ...candidateRows.map((row) =>
+          radioRow(
+            row.id,
+            status.preferredModel === row.id,
+            row.id,
+            row.id,
+            busy,
+            () => onSelectModel(row.id),
+            [
+              h("span", { key: "badge", style: S.modelBadge }, tt(badgeKeyOf(row.capability))),
+              // 图生图条目里，只有实测能吃纯文生图的那个不必给输入图——这个差别
+              // 正是「Qwen-Image-Edit 到底是文生图还是改图」的答案。
+              row.textToImage === false
+                ? h("span", { key: "need", style: { ...S.modelBadge, color: "var(--dsw-alias-state-warn-primary)" }, title: tt("draw.needsImageTitle") }, tt("draw.needsImage"))
+                : null,
+              h("a", { key: "link", style: { ...S.formNote, margin: 0, marginLeft: "auto", whiteSpace: "nowrap" }, href: modelscopeModelUrl(row.id), target: "_blank", rel: "noreferrer", title: tt("models.viewOnSiteTitle") }, tt("models.viewOnSite"))
+            ]
+          )
         )
       )
     );
@@ -684,9 +875,16 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, tokenPresent, t
     statusNode,
     restartHint,
     tokenHint,
+    currentBlock,
     h("div", { style: { ...S.sectionTitle, margin: "18px 0 8px" } }, tt("draw.models")),
     candidateBlock,
-    h("div", { style: S.rosterFoot }, h("button", { type: "button", style: S.button, disabled: busy, onClick: onReset }, tt("draw.reset"))),
+    // 只剩「回到默认」一个按钮：「自动选择」已是单选项（在上面的单选组里），
+    // 一颗按钮再表达一次同一件事只会让人怀疑两者不等价。
+    h(
+      "div",
+      { style: S.rosterFoot },
+      h("button", { type: "button", style: S.button, disabled: busy, onClick: onReset }, tt("draw.reset"))
+    ),
     error !== null ? h("div", { style: S.formError, role: "alert" }, error) : null
   );
 }

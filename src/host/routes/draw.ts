@@ -20,7 +20,7 @@
  * @module dsh-connect-modelscope-token-plan/routes/draw
  */
 import { DRAW_PATH } from "./paths.ts";
-import { imageGenModelIds } from "../llm-models.ts";
+import { drawCandidates, resolveDrawModelChoice } from "../llm-models.ts";
 import { drawToolNote } from "../draw-tool-state.ts";
 import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "../switch-precedence.ts";
 import { optional } from "../util.ts";
@@ -77,18 +77,24 @@ export function registerDrawRoute(ctx: any, wiring: DrawRouteWiring) {
     const panelSwitch = await optional(drawStore.enabled());
     const panelModelId = await optional(drawStore.modelId());
     const entries = await readEntries(inference);
-    const candidateIds = imageGenModelIds(entries);
-    const effectiveModelId = resolveSwitchValue(panelModelId, settings.drawModelId === "" ? undefined : settings.drawModelId) ?? null;
+    // 候选明细与「当前使用谁、为什么」都从 llm-models 的同一份判定派生（与快照
+    // 聚合、工具里 pickDrawModel 同源），面板据此画出能力徽章与生效模型。
+    const candidates = drawCandidates(entries);
+    const preferredModelId = resolveSwitchValue(panelModelId, settings.drawModelId === "" ? undefined : settings.drawModelId) ?? null;
+    const choice = resolveDrawModelChoice(entries, undefined, preferredModelId ?? undefined);
     return {
       ok: true,
       enabled: resolveSwitchEnabled(panelSwitch, settings.drawEnabled),
       source: switchSource(panelSwitch),
       // 候选来自**目录**（平台声明的出图能力），不是 provider 的允许清单——用户
       // 裁剪 chat picker 不该波及出图工具的候选。
-      candidateIds,
-      candidateCount: candidateIds.length,
-      preferredModel: effectiveModelId,
+      candidateIds: candidates.map((row) => row.id),
+      candidateCount: candidates.length,
+      candidates,
+      preferredModel: preferredModelId,
       preferredSource: switchSource(panelModelId),
+      effectiveModel: choice.id,
+      effectiveSource: choice.source,
       // 工具的实际挂载结果。`null` = 开关没开或已成功挂载；非 null = 缺席原因码
       // （措辞在客户端 i18n 里，与 sensenova 的 DRAW_ABSENT_KEY 同一套分工）。
       absentReason: drawToolNote(),

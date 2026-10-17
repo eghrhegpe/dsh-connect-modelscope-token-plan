@@ -44,7 +44,7 @@ import {
   readTaskId,
   readTaskStatus
 } from "./draw.ts";
-import { isImageGenModel, imageGenModelIds, textToImageModelIds, KNOWN_T2I_MODEL_ID } from "./llm-models.ts";
+import { isImageGenModel, imageGenModelIds, resolveDrawModelChoice, KNOWN_T2I_MODEL_ID } from "./llm-models.ts";
 import { createDrawJobs, type DrawJob, type DrawJobs } from "./draw-jobs.ts";
 import { str } from "./util.ts";
 
@@ -426,16 +426,10 @@ export async function runDrawOnce({
  * @returns {string|null} 选中的 id。
  */
 export function pickDrawModel(entries: unknown, requested?: string, preferred?: string): string | null {
-  const want = str(requested, "");
-  if (want !== "") return want;
-  const preferredId = str(preferred, "");
-  if (preferredId !== "") return preferredId;
-  const ids = imageGenModelIds(entries);
-  if (ids.length === 0) return null;
-  const t2i = textToImageModelIds(entries);
-  if (t2i.length > 0) return t2i[0] ?? null;
-  if (ids.includes(KNOWN_T2I_MODEL_ID)) return KNOWN_T2I_MODEL_ID;
-  return ids[0] ?? null;
+  // 判定与理由的唯一实现在 llm-models.resolveDrawModelChoice（peer-free、离线可测）；
+  // 这里只取 id。面板要的是同一份裁决的**理由**（effectiveSource），所以两份消费
+  // 者读的是同一个函数，不会各说一套。
+  return resolveDrawModelChoice(entries, requested, preferred).id;
 }
 
 /**

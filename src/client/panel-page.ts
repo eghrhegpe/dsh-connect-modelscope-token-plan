@@ -148,6 +148,9 @@ export function PanelPage({ tt, localeSubscribe }: {
   }, [load, postWrite, tt]);
   const toggleDraw = useCallback((enabled: boolean) => void runDrawWrite(DRAW_PATH, { enabled }), [runDrawWrite]);
   const resetDraw = useCallback(() => void runDrawWrite(DRAW_RESET_PATH, {}), [runDrawWrite]);
+  // 指定 / 清除默认出图模型：`modelId: null` = 回到自动选择（Host 侧
+  // drawStore.saveModelId(null) 清掉覆盖，pickDrawModel 重走优先级）。
+  const saveDrawModel = useCallback((modelId: string | null) => void runDrawWrite(DRAW_PATH, { modelId }), [runDrawWrite]);
 
   // 趋势显示窗口（画多少天）。与 provider/draw 各自一套 busy/error：三处写路径都
   // 落在同一个面板里，共用一个 busy 会让保存一处把别处也置灰。`null` = 跟随配置默认。
@@ -306,6 +309,8 @@ export function PanelPage({ tt, localeSubscribe }: {
         error: drawError,
         onToggle: toggleDraw,
         onReset: resetDraw,
+        onSelectModel: (id: string) => saveDrawModel(id),
+        onAutoModel: () => saveDrawModel(null),
         tokenPresent: data?.token?.present === true,
         tt
       })

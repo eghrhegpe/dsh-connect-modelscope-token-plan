@@ -710,6 +710,102 @@ export function textToImageModelIds(entries: unknown): string[] {
 }
 
 /**
+ * 一个出图候选：id + 它的能力档 + 「能不能纯文生图」。
+ *
+ * `textToImage` 与 `capability === "text-to-image"` **不是一回事**，刻意分开：
+ * 平台当前只声明了 `image-to-image` 条目，其中 `Qwen/Qwen-Image-Edit` 实测也吃
+ * 纯文生图（不带 `image_url`），而 `MusePublic/Qwen-Image-Edit` 必须给输入图。
+ * 前者是「平台声明」，后者是「我们实测已知」——面板据此把差别画出来，而不是
+ * 把两者笼统标成「出图」。
+ */
+export interface DrawCandidate {
+  id: string;
+  capability: "text-to-image" | "image-to-image" | "other";
+  /** 实测可纯文生图（平台声明 text-to-image，或 `KNOWN_T2I_MODEL_ID`）。 */
+  textToImage: boolean;
+}
+
+/**
+ * 一份目录里的出图候选，按首见顺序去重，带能力档与纯文生图标记。
+ *
+ * 与 {@link imageGenModelIds} 同一份判定（只认平台声明的出图能力），只是把
+ * `reference` 需要的两个附加位一起投出来——面板的每一行徽章与「当前使用」都从
+ * 这里派生，不各自再判一次。
+ * @param {unknown} entries - 归一目录条目。
+ * @returns {DrawCandidate[]} 出图候选。
+ */
+export function drawCandidates(entries: unknown): DrawCandidate[] {
+  const position = new Map<string, number>();
+  const out: DrawCandidate[] = [];
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const e = entry as CatalogEntry;
+    if (!isImageGenModel(e)) continue;
+    const id = str(e.id, "");
+    if (id === "") continue;
+    const capability = resolveModelCapability(e);
+    const row: DrawCandidate = {
+      id,
+      capability: capability === "text-to-image" ? "text-to-image" : capability === "image-to-image" ? "image-to-image" : "other",
+      textToImage: capability === "text-to-image" || id === KNOWN_T2I_MODEL_ID
+    };
+    const seen = position.get(id);
+    if (seen === undefined) {
+      position.set(id, out.length);
+      out.push(row);
+    } else {
+      out[seen] = row;
+    }
+  }
+  return out;
+}
+
+/**
+ * 出图模型的选择理由——`pickDrawModel` 命中的是哪一级。
+ *
+ * 存在的理由：面板必须能说清「当前用的是谁、为什么是它」。只报 id 而不报理由，
+ * 用户看到两个候选却不知道哪个在生效，也不知道自己能不能覆盖——这正是
+ * 「面板看不懂」的成因。
+ */
+export type DrawModelSource = "preferred" | "declared-text-to-image" | "known-text-to-image" | "catalog-first";
+
+/** 一次出图模型裁决的结果；`id: null` = 目录里没有出图模型。 */
+export interface DrawModelChoice {
+  id: string | null;
+  source: DrawModelSource | null;
+}
+
+/**
+ * 从目录里挑一个出图模型，并说明**为什么是它**。
+ *
+ * 优先级（高 → 低），与 `draw-runtime.ts` 的 `pickDrawModel` 同一份：
+ * 1. `requested` —— 工具调用里显式给的 model（这里不投理由，调用方场景）；
+ * 2. `preferred` —— 面板保存 / 配置 `drawModelId`；用户点了谁就是谁，不校验在不在目录；
+ * 3. 平台声明为 `text-to-image` 的条目（将来目录补上真文生图模型时自动优先）；
+ * 4. 已知能纯文生图的 `KNOWN_T2I_MODEL_ID`（今天目录的坑位）；
+ * 5. 目录里第一个出图模型。
+ *
+ * `requested` 会以 `preferred` 的理由返回——它同样是「有人指定了」，面板不需要
+ * 为一次工具调用区分这两者。
+ * @param {unknown} entries - 归一目录条目。
+ * @param {string} [requested] - 工具调用显式指定的 id。
+ * @param {string} [preferred] - 面板/配置的默认 id。
+ * @returns {DrawModelChoice} 选中的 id 与理由。
+ */
+export function resolveDrawModelChoice(entries: unknown, requested?: string, preferred?: string): DrawModelChoice {
+  const want = str(requested, "");
+  if (want !== "") return { id: want, source: "preferred" };
+  const preferredId = str(preferred, "");
+  if (preferredId !== "") return { id: preferredId, source: "preferred" };
+  const ids = imageGenModelIds(entries);
+  if (ids.length === 0) return { id: null, source: null };
+  const t2i = textToImageModelIds(entries);
+  if (t2i.length > 0) return { id: t2i[0] ?? null, source: "declared-text-to-image" };
+  if (ids.includes(KNOWN_T2I_MODEL_ID)) return { id: KNOWN_T2I_MODEL_ID, source: "known-text-to-image" };
+  return { id: ids[0] ?? null, source: "catalog-first" };
+}
+
+/**
  * 带额度可用性的面板 roster。
  *
  * 与 {@link rosterOf} 一样每 chat 模型 id 一行，但每行还带该模型额度池是否耗尽。

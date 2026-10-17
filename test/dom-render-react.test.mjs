@@ -106,8 +106,18 @@ const SRC_MODE = process.env.DSH_DOM_TARGET === "src";
 const A = "deepseek-ai/DeepSeek-V3";
 const B = "Qwen/Qwen3-8B";
 const C = "ZhipuAI/GLM-4.5-Air";
+// 两个**非置顶** owner 的模型：清单按 owner 分组后，「换序」只能在组内观察——
+// 置顶那三家的相对位置由 FEATURED_OWNERS 的声明序决定，与到货序无关。
+const M = "MiniMax/MiniMax-M3";
+const S = "stepfun-ai/Step-3.7-Flash";
 const row = (id, name, extra = {}) => ({ id, name, vision: false, available: true, quotaExhausted: false, ...extra });
-let rosterOrder = [row(A, "DeepSeek V3"), row(B, "Qwen3 8B"), row(C, "GLM-4.5-Air", { available: false, quotaExhausted: true })];
+let rosterOrder = [
+  row(A, "DeepSeek V3"),
+  row(B, "Qwen3 8B"),
+  row(C, "GLM-4.5-Air", { available: false, quotaExhausted: true }),
+  row(M, "MiniMax M3"),
+  row(S, "Step 3.7 Flash")
+];
 /** 余额是**可替换**的：胶囊那节要在同一棵树里切「为正 / 为 0 / 读不到」三种读数。 */
 let balanceFixture = { available: 143, total: 143, frozen: 0, fetchedAt: null, error: null };
 const snapshotBody = () => ({
@@ -115,8 +125,8 @@ const snapshotBody = () => ({
   token: { present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false, readError: null },
   balance: balanceFixture,
   quota: { daily: { usedLocal: 7 }, perModel: [], countingNote: "local-counting" },
-  events: [], trend: { days: 14, buckets: [] }, models: { available: true, count: 3, sample: [A], error: null },
-  provider: { enabled: false, source: "config", llmAvailable: true, registered: false, error: null, modelCount: 3, enabledCount: 0, allowed: "all", enabledIds: [], roster: rosterOrder },
+  events: [], trend: { days: 14, buckets: [] }, models: { available: true, count: 5, sample: [A], error: null },
+  provider: { enabled: false, source: "config", llmAvailable: true, registered: false, error: null, modelCount: 5, enabledCount: 0, allowed: "all", enabledIds: [], roster: rosterOrder },
   draw: { enabled: false, source: "config", candidateIds: [], candidateCount: 0, preferredModel: null, preferredSource: "config", absentReason: null, mountPending: false, toolName: "modelscope_draw_image" },
   shapeWarnings: [], quotaError: null
 });
@@ -191,14 +201,32 @@ await act(async () => { byText("button", tt("panel.refresh")).click(); });
 assert.equal(document.activeElement, input, "重渲染后焦点仍在那个输入框上（不是掉回 <body>）");
 
 // §4 列表换序：勾选跟着模型 id 走，不跟着位置走
+//
+// 清单自 2026-10-17 起按 owner 分组（推荐的三家置顶），所以 DOM 顺序不再等于到货序，
+// 而是「置顶 owner（按 FEATURED_OWNERS 声明序）→ 其余按首见序；组内保持到货序」。
+// 于是「换序」只能在**组内**观察：M/S 换了先后，置顶那三家原地不动。
 await act(async () => { byText('[role="tab"]', tt("tab.models")).click(); });
-assert.deepEqual(rosterChecks().map((el) => el.getAttribute("aria-label")), [A, B, C], "换序前：id 顺序");
+assert.deepEqual(
+  rosterChecks().map((el) => el.getAttribute("aria-label")),
+  [A, C, B, M, S],
+  "换序前：置顶 owner 在前（声明序），非置顶的按首见"
+);
 const ticked = () => rosterChecks().filter((el) => el.checked).map((el) => el.getAttribute("aria-label"));
-await act(async () => { rosterChecks()[1].click(); });
-assert.deepEqual(ticked(), [B], "勾中第二行（B）");
-rosterOrder = [row(C, "GLM-4.5-Air", { available: false, quotaExhausted: true }), row(B, "Qwen3 8B"), row(A, "DeepSeek V3")];
+await act(async () => { rosterChecks().find((el) => el.getAttribute("aria-label") === B).click(); });
+assert.deepEqual(ticked(), [B], "勾中 B");
+rosterOrder = [
+  row(S, "Step 3.7 Flash"),
+  row(M, "MiniMax M3"),
+  row(C, "GLM-4.5-Air", { available: false, quotaExhausted: true }),
+  row(B, "Qwen3 8B"),
+  row(A, "DeepSeek V3")
+];
 await act(async () => { byText("button", tt("panel.refresh")).click(); });
-assert.deepEqual(rosterChecks().map((el) => el.getAttribute("aria-label")), [C, B, A], "换序后：id 顺序");
+assert.deepEqual(
+  rosterChecks().map((el) => el.getAttribute("aria-label")),
+  [A, C, B, S, M],
+  "换序后：置顶那三家不动，非置顶的 S/M 按新到货序"
+);
 assert.deepEqual(ticked(), [B], "换序后勾中的仍是 B（按 id，不按位置）");
 
 // §5 真 React 的受控链路：打字 → onChange → state → payload（mini 那条测的是替身）

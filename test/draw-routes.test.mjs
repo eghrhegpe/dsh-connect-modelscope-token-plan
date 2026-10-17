@@ -112,6 +112,14 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由仍注册（两条独立�
   assert.equal(res.body.preferredModel, null, "默认自动");
   assert.equal(res.body.toolName, "modelscope_draw_image");
   assert.equal(res.body.mountPending, false, "开关没开时不算 pending");
+  // 候选明细：能力档 + 纯文生图标记（面板每行的徽章与提示从它派生）。
+  assert.deepEqual(res.body.candidates, [
+    { id: "Qwen/Qwen-Image-Edit", capability: "image-to-image", textToImage: true },
+    { id: "MusePublic/Qwen-Image-Edit", capability: "image-to-image", textToImage: false }
+  ], "平台声明的能力档 + 实测可纯文生图的标记（Qwen 可以，MusePublic 需要输入图）");
+  // 「当前使用」：自动选择的实际结果与理由——面板此前完全没显示这两样。
+  assert.equal(res.body.effectiveModel, "Qwen/Qwen-Image-Edit", "自动选择偏向已知可纯文生图的 id");
+  assert.equal(res.body.effectiveSource, "known-text-to-image", "并说明为什么是它");
 }
 
 // ── 候选不含普通 chat 与吃图模型 ──
@@ -155,6 +163,9 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由仍注册（两条独立�
   assert.equal(res.body.preferredModel, "MusePublic/Qwen-Image-Edit");
   assert.equal(res.body.preferredSource, "panel");
   assert.equal(res.body.enabled, true, "只改模型不该动开关");
+  // 指定后生效模型跟着变，理由是「按你的指定」——面板据此不再显示「自动」。
+  assert.equal(res.body.effectiveModel, "MusePublic/Qwen-Image-Edit", "指定即生效");
+  assert.equal(res.body.effectiveSource, "preferred", "理由从自动切到指定");
 }
 
 // ── modelId: null 清掉偏好（回到自动） ──
@@ -162,6 +173,8 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由仍注册（两条独立�
   const res = await call(handlers, DRAW_PATH, makeReq("POST", { body: { modelId: null } }));
   assert.equal(res.status, 200);
   assert.equal(res.body.preferredModel, null, "null = 清掉偏好，回到自动");
+  assert.equal(res.body.effectiveModel, "Qwen/Qwen-Image-Edit", "清掉偏好后回到自动选择的结果");
+  assert.equal(res.body.effectiveSource, "known-text-to-image", "理由也回到自动那一档");
 }
 
 // ── 拒绝空 body：不能静默成功 ──

@@ -15,7 +15,7 @@ import { PLUGIN_VERSION, name } from "./host-config.ts";
 import { CODE } from "./codes.ts";
 import { resolveEnabledIds } from "./provider-store.ts";
 import { resolveWindowDays } from "./usage-prefs-store.ts";
-import { rosterWithAvailability, imageGenModelIds } from "./llm-models.ts";
+import { rosterWithAvailability, drawCandidates, resolveDrawModelChoice } from "./llm-models.ts";
 import { parseAllowedList, enabledCountOf } from "../shared/allow-list.ts";
 import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "./switch-precedence.ts";
 import { drawToolNote } from "./draw-tool-state.ts";
@@ -193,14 +193,21 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
   const draw = await soft((async () => {
     const panel = await drawStore.enabled().catch(() => null);
     const panelModel = await drawStore.modelId().catch(() => null);
-    const candidateIds = imageGenModelIds(modelEntries);
+    // 候选明细（能力档 + 纯文生图标记）与「当前使用谁、为什么」都从同一份
+    // llm-models 判定派生——面板每行徽章与顶部「当前使用」不可能对它说两套话。
+    const candidates = drawCandidates(modelEntries);
+    const preferred = resolveSwitchValue(panelModel, settings.drawModelId === "" ? undefined : settings.drawModelId) ?? null;
+    const choice = resolveDrawModelChoice(modelEntries, undefined, preferred ?? undefined);
     return {
       enabled: resolveSwitchEnabled(panel, settings.drawEnabled),
       source: switchSource(panel),
-      candidateIds,
-      candidateCount: candidateIds.length,
-      preferredModel: resolveSwitchValue(panelModel, settings.drawModelId === "" ? undefined : settings.drawModelId) ?? null,
+      candidateIds: candidates.map((row) => row.id),
+      candidateCount: candidates.length,
+      candidates,
+      preferredModel: preferred,
       preferredSource: switchSource(panelModel),
+      effectiveModel: choice.id,
+      effectiveSource: choice.source,
       // 缺席原因由 draw-register 在挂载时写入（仅内存）；开关未开时它也是 null，
       // 面板据 enabled 区分「没开」与「开了但不在」。
       absentReason: drawToolNote(),

@@ -27,6 +27,7 @@ import {
   defineDrawTool
 } from "../src/host/draw-runtime.ts";
 import { createDrawJobs } from "../src/host/draw-jobs.ts";
+import { drawCandidates, resolveDrawModelChoice } from "../src/host/llm-models.ts";
 
 const checks = [];
 function section(name, body) {
@@ -133,6 +134,46 @@ section("pickDrawModel 目录里没有出图模型时返回 null（不发注定�
   assert.equal(pickDrawModel([{ id: "a/b", tasks: ["text-generation"] }]), null);
   assert.equal(pickDrawModel([]), null);
   assert.equal(pickDrawModel(null), null);
+});
+
+section("选择理由（面板「当前使用」显示的来源）：id 与 source 一一对应", () => {
+  // 面板必须能说清「用哪个、为什么」——只报 id 不报理由，用户看到两个
+  // Qwen-Image-Edit 无从判断哪个在生效。
+  const t2i = [
+    { id: "Qwen/Qwen-Image-Edit", tasks: ["image-to-image"] },
+    { id: "q/real-t2i", tasks: ["text-to-image-synthesis"] }
+  ];
+  assert.deepEqual(resolveDrawModelChoice(t2i), { id: "q/real-t2i", source: "declared-text-to-image" });
+
+  const both = [
+    { id: "MusePublic/Qwen-Image-Edit", tasks: ["image-to-image"] },
+    { id: "Qwen/Qwen-Image-Edit", tasks: ["image-to-image"] }
+  ];
+  assert.deepEqual(resolveDrawModelChoice(both), { id: "Qwen/Qwen-Image-Edit", source: "known-text-to-image" });
+
+  // 已知可纯文生图的 id 不在目录时：第一个候选，理由如实说是「目录第一个」。
+  const noKnown = [{ id: "other/Edit", tasks: ["image-to-image"] }];
+  assert.deepEqual(resolveDrawModelChoice(noKnown), { id: "other/Edit", source: "catalog-first" });
+
+  // 指定（面板/配置）压过一切；工具显式请求同样记作 preferred。
+  assert.deepEqual(resolveDrawModelChoice(both, undefined, "MusePublic/Qwen-Image-Edit"), { id: "MusePublic/Qwen-Image-Edit", source: "preferred" });
+  assert.deepEqual(resolveDrawModelChoice(both, "req/x", "pref/y"), { id: "req/x", source: "preferred" });
+  // 空目录：id 与理由都是 null（面板渲染「没有候选」，不编一个选中值）。
+  assert.deepEqual(resolveDrawModelChoice([]), { id: null, source: null });
+});
+
+section("候选明细：能力档 + 纯文生图标记（Qwen 可纯文生图，MusePublic 需要输入图）", () => {
+  const entries = [
+    { id: "some/chat", tasks: ["text-generation"] },
+    { id: "MusePublic/Qwen-Image-Edit", tasks: ["image-to-image"] },
+    { id: "Qwen/Qwen-Image-Edit", tasks: ["image-to-image"] },
+    { id: "q/t2i", tasks: ["text-to-image-synthesis"] }
+  ];
+  assert.deepEqual(drawCandidates(entries), [
+    { id: "MusePublic/Qwen-Image-Edit", capability: "image-to-image", textToImage: false },
+    { id: "Qwen/Qwen-Image-Edit", capability: "image-to-image", textToImage: true },
+    { id: "q/t2i", capability: "text-to-image", textToImage: true }
+  ], "平台声明的能力档 + 已知可纯文生图的实测标记");
 });
 
 section("目录里 unknown 能力的条目不进候选（宁可漏，不肯猜）", () => {

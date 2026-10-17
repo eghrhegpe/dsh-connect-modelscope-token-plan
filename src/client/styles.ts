@@ -122,6 +122,12 @@ export const S = {
   modelRow: { display: "flex", flexDirection: "column", gap: 2, padding: "8px 4px", borderBottom: "1px solid var(--dsw-alias-border-l1)" },
   modelRowHead: { display: "flex", alignItems: "center", gap: 8 },
   modelRowOff: { opacity: 0.55 },
+  // 按 owner 分组的清单：`owner/model` 的前缀在每一行里重复，12 行同名 owner 只该
+  // 说一次。组头是可点的一整行（chevron + owner + 数量 + 已选），组内行缩进。
+  modelGroup: { display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "10px 4px 2px", background: "none", border: "none", textAlign: "left", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--dsw-alias-label-secondary)" },
+  modelGroupOwner: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" },
+  modelGroupCount: { fontWeight: 400, opacity: 0.75, fontVariantNumeric: "tabular-nums" },
+  modelRowGrouped: { paddingLeft: 22 },
   modelCheck: { flex: "none", width: 15, height: 15, cursor: "pointer", accentColor: BRAND, margin: 0 },
   // `0 1 auto` (not `1 1 auto`): the name hugs the rate chip instead of
   // stretching to the right edge; the label shrinks, so ellipsis still works.

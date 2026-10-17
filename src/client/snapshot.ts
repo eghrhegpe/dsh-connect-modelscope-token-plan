@@ -233,8 +233,11 @@ export const DEGRADED_DRAW: DrawStatus = Object.freeze({
   source: "config",
   candidateIds: [],
   candidateCount: 0,
+  candidates: [],
   preferredModel: null,
   preferredSource: "config",
+  effectiveModel: null,
+  effectiveSource: null,
   absentReason: null,
   mountPending: false,
   toolName: "modelscope_draw_image"
@@ -259,14 +262,40 @@ export function drawOf(raw: unknown): DrawStatus {
   const absentReason = reason === "no-tools-service" || reason === "peer-load-failed" || reason === "registry-refused"
     ? reason
     : null;
+  // 候选明细：旧 Host 只给 `candidateIds`。**不**从 id 编一档能力出来——编出来
+  // 的 `image-to-image` 会把「不知道」说成「平台这么声明」。缺席即缺席，面板退化为
+  // 只显示 id（`candidates` 字段整键不带）。
+  const rawCandidates: { id: string; capability: "text-to-image" | "image-to-image" | "other"; textToImage: boolean }[] | null =
+    Array.isArray(d.candidates)
+      ? (d.candidates as unknown[]).map((entry) => {
+        const row = (entry ?? {}) as Record<string, unknown>;
+        const id = String(row.id ?? "");
+        const capability: "text-to-image" | "image-to-image" | "other" =
+          row.capability === "text-to-image" ? "text-to-image"
+            : row.capability === "image-to-image" ? "image-to-image"
+              : "other";
+        return { id, capability, textToImage: row.textToImage === true };
+      }).filter((row) => row.id !== "")
+      : null;
+  const effectiveSource =
+    d.effectiveSource === "preferred" || d.effectiveSource === "declared-text-to-image" ||
+    d.effectiveSource === "known-text-to-image" || d.effectiveSource === "catalog-first"
+      ? d.effectiveSource
+      : null;
   return {
     enabled: d.enabled === true,
     source: d.source === "panel" ? "panel" : "config",
     candidateIds: candidates,
     // NaN 也是 "number"：与 providerOf 同一条理由，Number.isFinite 一并挡掉。
     candidateCount: typeof d.candidateCount === "number" && Number.isFinite(d.candidateCount) ? d.candidateCount : candidates.length,
+    ...(rawCandidates !== null ? { candidates: rawCandidates } : {}),
     preferredModel: typeof d.preferredModel === "string" && d.preferredModel !== "" ? d.preferredModel : null,
     preferredSource: d.preferredSource === "panel" ? "panel" : "config",
+    // 旧 Host 不带这两键：保留缺席（面板不显示「当前使用」行），不猜一个默认值。
+    ...("effectiveModel" in d
+      ? { effectiveModel: typeof d.effectiveModel === "string" && d.effectiveModel !== "" ? d.effectiveModel : null }
+      : {}),
+    ...("effectiveSource" in d ? { effectiveSource } : {}),
     absentReason,
     mountPending: d.mountPending === true,
     toolName: typeof d.toolName === "string" && d.toolName !== "" ? d.toolName : "modelscope_draw_image"
