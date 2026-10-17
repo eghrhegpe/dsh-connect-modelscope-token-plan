@@ -83,13 +83,12 @@ export const S = {
   // 高按区间内最大值相对显示；只有首末日期做轴，逐日读数走每根柱的 title/aria。
   // 柱色与横向条同一枚品牌色，沿用趋势卡同一套 token，不新开一套配色。
   trendChartBars: { display: "flex", alignItems: "flex-end", gap: 2, height: 96, padding: "0 1px" },
-  trendChartBar: { flex: 1, minWidth: 2, height: "100%", display: "flex", alignItems: "flex-end" },
+  // `position: relative` 是承重：次数标签绝对定位在**这根柱的坐标系**里，`bottom`
+  // 由调用方按柱高算（见 cards.ts 的 TrendBars），标签于是骑在柱顶而不是另起一行。
+  trendChartBar: { flex: 1, minWidth: 2, height: "100%", display: "flex", alignItems: "flex-end", position: "relative" },
   trendChartFill: { width: "100%", minHeight: 2, borderRadius: 2, background: BRAND },
-  // 逐柱读数行：排在柱群**上方**（标准柱状图约定——数值标签在顶、类别轴在底）。
-  // 柱高只表达相对量，这一行把每次调用的**绝对值**补回来。与柱群同一套 flex，
-  // 一列数字正对一根柱。
-  trendChartValues: { display: "flex", gap: 2, padding: "0 1px", marginBottom: 6 },
-  trendChartValue: { flex: 1, minWidth: 0, textAlign: "center", fontSize: 10, lineHeight: "14px", color: "var(--dsw-alias-label-secondary)", fontVariantNumeric: "tabular-nums" },
+  // 骑在柱顶的次数标签：9px、单行高、不吃指针事件（悬停仍归柱自己的 title）。
+  trendChartValue: { position: "absolute", left: 0, right: 0, fontSize: 9, lineHeight: 1, textAlign: "center", color: "var(--dsw-alias-label-secondary)", fontVariantNumeric: "tabular-nums", pointerEvents: "none" },
   trendChartAxis: { display: "flex", justifyContent: "space-between", gap: 12, marginTop: 6, fontSize: 11, color: "var(--dsw-alias-label-secondary)" },
   muted: { color: "var(--dsw-alias-label-secondary)" },
   error: { color: "var(--dsw-alias-state-error-primary)" },

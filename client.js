@@ -648,7 +648,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				minWidth: 2,
 				height: "100%",
 				display: "flex",
-				alignItems: "flex-end"
+				alignItems: "flex-end",
+				position: "relative"
 			},
 			trendChartFill: {
 				width: "100%",
@@ -656,20 +657,16 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				borderRadius: 2,
 				background: BRAND
 			},
-			trendChartValues: {
-				display: "flex",
-				gap: 2,
-				padding: "0 1px",
-				marginBottom: 6
-			},
 			trendChartValue: {
-				flex: 1,
-				minWidth: 0,
+				position: "absolute",
+				left: 0,
+				right: 0,
+				fontSize: 9,
+				lineHeight: 1,
 				textAlign: "center",
-				fontSize: 10,
-				lineHeight: "14px",
 				color: "var(--dsw-alias-label-secondary)",
-				fontVariantNumeric: "tabular-nums"
+				fontVariantNumeric: "tabular-nums",
+				pointerEvents: "none"
 			},
 			trendChartAxis: {
 				display: "flex",
@@ -1359,17 +1356,39 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}), h("div", { style: S.trendLegend }, tt("trend.legend")));
 	}
 	/**
-	* 轴上的日期短标注：砍掉年份（`2026-10-04` → `10-04`）。
+	* 轴上的日期短标注：砍掉年份与补零（`2026-09-18` → `9-18`）。
 	*
-	* 轴的跨度最多 trendDays（默认 14，多在同年内），年份在两端重复出现，占掉的
-	* 宽度全是从柱子上匀来的。不是 `YYYY-MM-DD` 形状时原样返回——宁可显示一个陌生
-	* 字符串，也不按位置硬切出一个可能错的日期。
+	* 轴的跨度最多 trendDays（默认 14，多在同年内），年份在刻度间重复出现，占掉的
+	* 宽度全是从图的呼吸里匀来的；补零的 `09` 同样多占一格而没多给信息。不是
+	* `YYYY-MM-DD` 形状时原样返回——宁可显示一个陌生字符串，也不按位置硬切。
 	* @param {string} key - 天桶 dateKey（本地日期 YYYY-MM-DD）。
 	* @returns {string} 短标注。
 	*/
 	function shortDateKey(key) {
 		const value = typeof key === "string" ? key : "";
-		return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value.slice(5) : value;
+		const match = /^\d{4}-(\d{2})-(\d{2})$/.exec(value);
+		return match === null ? value : `${Number(match[1])}-${Number(match[2])}`;
+	}
+	/**
+	* 轴刻度落在哪些桶上（返回下标）。
+	*
+	* 桶数 ≤ {@link MAX_TICKS} 时逐日都标；否则按 `(n-1)/(MAX_TICKS-1)` 等距取点、
+	* 首尾必含——与姊妹插件 Agnes 的用量图同一取法（它 30 天标 7 个）。等距取点是
+	* 对**下标**取整而不是对像素分均，所以刻度与其柱子所属的区间大体对齐，只是轴
+	* 用 `space-between` 铺开；两端的日期恒为真实首末日。
+	* @param {number} count - 桶数。
+	* @returns {number[]} 升序下标。
+	*/
+	function tickIndices(count) {
+		if (!Number.isFinite(count) || count <= 0) return [];
+		if (count <= MAX_TICKS) return Array.from({ length: count }, (_, index) => index);
+		const step = (count - 1) / 6;
+		const out = [];
+		for (let tick = 0; tick < MAX_TICKS; tick += 1) {
+			const index = Math.round(tick * step);
+			if (index > (out[out.length - 1] ?? -1)) out.push(index);
+		}
+		return out;
 	}
 	/** 近 N 天本地调用趋势（天桶；缺桶 = 该日 0 次，真实零）——**竖向柱状图**。 */
 	function TrendBars({ buckets, tt }) {
@@ -1379,19 +1398,19 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			calls: Number.isFinite(bucket.calls) ? Math.max(0, bucket.calls) : 0
 		}));
 		const max = Math.max(0, ...rows.map((row) => row.calls));
-		const first = rows[0]?.dateKey ?? "";
-		const last = rows[rows.length - 1]?.dateKey ?? "";
-		return h("div", null, h("div", { style: S.trendChartValues }, rows.map((row) => h("span", {
-			key: row.dateKey,
-			style: S.trendChartValue,
-			"aria-hidden": "true"
-		}, count(row.calls)))), h("div", { style: S.trendChartBars }, rows.map((row) => {
+		return h("div", null, h("div", { style: S.trendChartBars }, rows.map((row) => {
 			const pct = max > 0 ? row.calls / max * 100 : 0;
 			return h("div", {
 				key: row.dateKey,
 				style: S.trendChartBar,
 				title: `${row.dateKey}: ${count(row.calls)}`
-			}, h("div", {
+			}, row.calls > 0 ? h("span", {
+				style: {
+					...S.trendChartValue,
+					bottom: `calc(${pct}% + 3px)`
+				},
+				"aria-hidden": "true"
+			}, count(row.calls)) : null, h("div", {
 				style: {
 					...S.trendChartFill,
 					height: `${pct}%`
@@ -1402,7 +1421,14 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				"aria-valuemin": 0,
 				"aria-valuemax": 100
 			}));
-		})), h("div", { style: S.trendChartAxis }, h("span", null, shortDateKey(first)), h("span", null, shortDateKey(last))), h("div", { style: S.trendLegend }, tt("trend.legend")));
+		})), h("div", { style: S.trendChartAxis }, tickIndices(rows.length).map((index) => {
+			const key = rows[index]?.dateKey ?? "";
+			return h("span", {
+				key,
+				title: key,
+				style: { whiteSpace: "nowrap" }
+			}, shortDateKey(key));
+		})), h("div", { style: S.trendLegend }, tt("trend.legend")));
 	}
 	/** 事件流（429/错误），Newest-first。 */
 	function EventsList({ events, tt }) {
@@ -1819,7 +1845,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			role: "alert"
 		}, error) : null);
 	}
-	var EVENT_KIND_KEY, DRAW_ABSENT_KEY;
+	var MAX_TICKS, EVENT_KIND_KEY, DRAW_ABSENT_KEY;
 	var init_cards = __esmMin((() => {
 		init_format();
 		init_runtime();
@@ -1828,6 +1854,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		init_snapshot();
 		init_toggle_switch();
 		init_allow_list();
+		MAX_TICKS = 7;
 		EVENT_KIND_KEY = {
 			quota: "events.quota",
 			rate_limit: "events.rate_limit",

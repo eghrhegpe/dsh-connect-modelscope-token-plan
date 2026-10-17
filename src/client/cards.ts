@@ -137,17 +137,44 @@ export function ModelUsageTable({ rows, tt }: { rows: Array<{ modelId: string; c
 }
 
 /**
- * 轴上的日期短标注：砍掉年份（`2026-10-04` → `10-04`）。
+ * 轴上的日期短标注：砍掉年份与补零（`2026-09-18` → `9-18`）。
  *
- * 轴的跨度最多 trendDays（默认 14，多在同年内），年份在两端重复出现，占掉的
- * 宽度全是从柱子上匀来的。不是 `YYYY-MM-DD` 形状时原样返回——宁可显示一个陌生
- * 字符串，也不按位置硬切出一个可能错的日期。
+ * 轴的跨度最多 trendDays（默认 14，多在同年内），年份在刻度间重复出现，占掉的
+ * 宽度全是从图的呼吸里匀来的；补零的 `09` 同样多占一格而没多给信息。不是
+ * `YYYY-MM-DD` 形状时原样返回——宁可显示一个陌生字符串，也不按位置硬切。
  * @param {string} key - 天桶 dateKey（本地日期 YYYY-MM-DD）。
  * @returns {string} 短标注。
  */
 function shortDateKey(key: string): string {
   const value = typeof key === "string" ? key : "";
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value.slice(5) : value;
+  const match = /^\d{4}-(\d{2})-(\d{2})$/.exec(value);
+  return match === null ? value : `${Number(match[1])}-${Number(match[2])}`;
+}
+
+/** 轴上最多标几个日子（含首尾）。7 个是 Agnes 用量图的密度，窄面板下也不挤。 */
+const MAX_TICKS = 7;
+
+/**
+ * 轴刻度落在哪些桶上（返回下标）。
+ *
+ * 桶数 ≤ {@link MAX_TICKS} 时逐日都标；否则按 `(n-1)/(MAX_TICKS-1)` 等距取点、
+ * 首尾必含——与姊妹插件 Agnes 的用量图同一取法（它 30 天标 7 个）。等距取点是
+ * 对**下标**取整而不是对像素分均，所以刻度与其柱子所属的区间大体对齐，只是轴
+ * 用 `space-between` 铺开；两端的日期恒为真实首末日。
+ * @param {number} count - 桶数。
+ * @returns {number[]} 升序下标。
+ */
+function tickIndices(count: number): number[] {
+  if (!Number.isFinite(count) || count <= 0) return [];
+  if (count <= MAX_TICKS) return Array.from({ length: count }, (_, index) => index);
+  const step = (count - 1) / (MAX_TICKS - 1);
+  const out: number[] = [];
+  for (let tick = 0; tick < MAX_TICKS; tick += 1) {
+    const index = Math.round(tick * step);
+    // 取整可能撞车（桶数刚过 MAX_TICKS 时），去重保升序。
+    if (index > (out[out.length - 1] ?? -1)) out.push(index);
+  }
+  return out;
 }
 
 /** 近 N 天本地调用趋势（天桶；缺桶 = 该日 0 次，真实零）——**竖向柱状图**。 */
@@ -162,22 +189,9 @@ export function TrendBars({ buckets, tt }: { buckets: TrendBucket[]; tt: Tt }): 
     calls: Number.isFinite(bucket.calls) ? Math.max(0, bucket.calls) : 0
   }));
   const max = Math.max(0, ...rows.map((row) => row.calls));
-  // 只有首末日期做轴（且砍掉年份）：14~30 根柱各自带一个完整日期会挤成一团，
-  // 逐日读数改走柱群正下方的数字行 + 每根柱的 title/aria。
-  const first = rows[0]?.dateKey ?? "";
-  const last = rows[rows.length - 1]?.dateKey ?? "";
   return h(
     "div",
     null,
-    // 逐柱读数行：柱高只表达相对量，这一行把每次调用的**绝对值**补回来。与柱群
-    // 同一套 flex，一列数字正对一根柱。排在柱群**上方**——标准柱状图的数值标签在
-    // 顶、类别轴（日期）在底。`aria-hidden`：柱自己已带同一条 aria-label，不标就
-    // 等于让读屏把每个数读两遍。
-    h(
-      "div",
-      { style: S.trendChartValues },
-      rows.map((row) => h("span", { key: row.dateKey, style: S.trendChartValue, "aria-hidden": "true" }, count(row.calls)))
-    ),
     h(
       "div",
       { style: S.trendChartBars },
@@ -186,6 +200,12 @@ export function TrendBars({ buckets, tt }: { buckets: TrendBucket[]; tt: Tt }): 
         return h(
           "div",
           { key: row.dateKey, style: S.trendChartBar, title: `${row.dateKey}: ${count(row.calls)}` },
+          // 次数标签**骑在柱顶**（相对本柱绝对定位，bottom = 柱高 + 3px）：比另起
+          // 一行数字更贴柱，也不必为最长的那根柱预留一条空白行。0 次不标——空柱
+          // 没有高度可骑，标了只会堆在基线上（与姊妹插件 Agnes 同一处理）。
+          row.calls > 0
+            ? h("span", { style: { ...S.trendChartValue, bottom: `calc(${pct}% + 3px)` }, "aria-hidden": "true" }, count(row.calls))
+            : null,
           h("div", {
             // 0 次 = 0% 高 + minHeight 的 2px 底座：天桶确实存在，不是空心缺柱。
             style: { ...S.trendChartFill, height: `${pct}%` },
@@ -198,7 +218,15 @@ export function TrendBars({ buckets, tt }: { buckets: TrendBucket[]; tt: Tt }): 
         );
       })
     ),
-    h("div", { style: S.trendChartAxis }, h("span", null, shortDateKey(first)), h("span", null, shortDateKey(last))),
+    // 轴：约 7 个等距刻度（首尾必含），不是只有两端。title 给出完整日期，悬停可见。
+    h(
+      "div",
+      { style: S.trendChartAxis },
+      tickIndices(rows.length).map((index) => {
+        const key = rows[index]?.dateKey ?? "";
+        return h("span", { key, title: key, style: { whiteSpace: "nowrap" } }, shortDateKey(key));
+      })
+    ),
     h("div", { style: S.trendLegend }, tt("trend.legend"))
   );
 }
