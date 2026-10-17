@@ -213,5 +213,27 @@
         "to": "      return resolveSwitchValue(null, settings.drawModelId === \"\" ? undefined : settings.drawModelId) ?? null;"
       }
     ]
+  },
+  {
+    "target": "src/host/routes/token.ts",
+    "test": "routes.test.mjs",
+    "mutants": [
+      {
+        "name": "**单个路由族**漏掉信任围栏（token 保存/遗忘变成任意网页可打）——这条在加枚举门禁之前是活着的：手写的三条 403 用例分别在 snapshot / draw / provider 上，谁都没守着 token",
+        "from": "import { writeJson, refuseMethod, withOrigin, respondError, readJsonBodyOr400 } from \"./http.ts\";",
+        "to": "import { writeJson, refuseMethod, respondError, readJsonBodyOr400 } from \"./http.ts\";\nconst withOrigin = (handler) => handler;"
+      }
+    ]
+  },
+  {
+    "target": "src/host/routes/http.ts",
+    "test": "routes.test.mjs",
+    "mutants": [
+      {
+        "name": "围栏整体失效（isAdmitted 判据恒假 → 所有路由对任意 Host 开门）",
+        "from": "    if (!isAdmitted(request, allowedHosts)) {",
+        "to": "    if (false) {"
+      }
+    ]
   }
 ]

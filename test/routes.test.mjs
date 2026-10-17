@@ -10,7 +10,7 @@ import { buildSnapshotBody } from "../src/host/snapshot-aggregate.ts";
 import { name, resolveSettings } from "../src/host/host-config.ts";
 import { registerProbeRoute } from "../src/host/routes/probe.ts";
 import { CODE } from "../src/host/codes.ts";
-import { SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH } from "../src/host/routes/paths.ts";
+import { SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, DRAW_PATH, DRAW_RESET_PATH } from "../src/host/routes/paths.ts";
 
 process.env.DSH_HOME = mkdtempSync(join(tmpdir(), "ms-routes-"));
 
@@ -65,6 +65,54 @@ const call = async (handlers, path, req) => {
 const handlers = new Map();
 apply(makeCtx(handlers), {}, { env: {} });
 assert.ok([SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, PROBE_PATH].every((p) => handlers.has(p)), "四条路由全部注册");
+
+// ── 信任围栏必须是**结构事实**，不是「每个路由族记得手写一条 403 用例」──
+//
+// 围栏的机制是 `withOrigin` 逐个包在 handler 外层，而「每个路由都包了」这件事此前
+// 只由三处**手写**的 403 用例间接守着（snapshot / draw / provider 各一条）。缺口
+// 形态很具体：加一个路由（或一整族路由）时，忘了包 `withOrigin` **且**忘了补那条
+// 403 用例，就静默漏——而「把『记得登记』变成结构事实」正是本仓库的既有纪律
+// （test/run-all.mjs 的文件头把「每个套件都被跑到」从自觉登记改成 glob 事实）。
+//
+// 所以这里改成**枚举**：把 `apply()` 捕获到的每一个路径都拿恶意 Host / 跨站 Origin
+// 打一遍，全部必须 403。将来新增路由只要忘了包围栏，这条自动变红，不需要谁记得。
+{
+  const fenced = new Map();
+  apply(makeCtx(fenced), {}, { env: {} });
+  const registered = [...fenced.keys()].sort();
+  // 清单按**各自实际形态**归类，不要为了让分类整齐去改生产代码的形状（与
+  // panel.test.mjs 的 LITERAL_SUFFIXES / DERIVED_SUFFIXES 同一条注记）：
+  // `/draw/reset` 是 paths.ts 里的字面量，`/provider/*` 是 provider.ts 用
+  // `${PROVIDER_PATH}/…` 拼的派生路由。
+  const expected = [
+    SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH,
+    PROVIDER_PATH, `${PROVIDER_PATH}/roster`, `${PROVIDER_PATH}/reset`, `${PROVIDER_PATH}/context`,
+    DRAW_PATH, DRAW_RESET_PATH
+  ].sort();
+  assert.deepEqual(
+    registered,
+    expected,
+    "注册的路由集合变了——新路由必须过 withOrigin 围栏，并把它的路径加进本断言\n" +
+    "        （否则它不受这条枚举门禁保护：忘了包围栏也不会有人发现）"
+  );
+  for (const path of registered) {
+    const handler = fenced.get(path);
+    const badHost = makeRes();
+    await handler(makeReq("GET", { host: "evil.example" }), badHost);
+    assert.equal(badHost.status, 403, `${path}：白名单外 Host 必须 403（围栏漏了？）`);
+    assert.equal(badHost.body?.ok, false, `${path}：403 要带面板认的失败形状`);
+
+    const crossSite = makeRes();
+    await handler(makeReq("GET", { host: "localhost:3080", origin: "https://evil.example" }), crossSite);
+    assert.equal(crossSite.status, 403, `${path}：跨站 Origin 必须 403（围栏漏了？）`);
+
+    // 围栏在最外层：被拒的请求**在方法闸之前**就返回，所以恶意请求既不会读 body、
+    // 也不会因为方法不对而被误报成 405。这条同时钉住「围栏不是第二道死守卫」。
+    const methodOnHostile = makeRes();
+    await handler(makeReq("POST", { host: "evil.example" }), methodOnHostile);
+    assert.equal(methodOnHostile.status, 403, `${path}：围栏必须先于方法闸（恶意请求不得拿到 405 这种「路由存在」的信息）`);
+  }
+}
 
 // ── provider.json 版本不符：读侧宽容，但必须说出来 ──
 //
