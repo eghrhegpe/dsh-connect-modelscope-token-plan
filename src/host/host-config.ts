@@ -72,6 +72,10 @@ export const CONFIG_DEFAULTS = Object.freeze({
    * 取 15 分钟：覆盖已观测到的最慢一次（537s）并留一倍余量。**注意超时放弃不等于
    * 任务死亡**——上游任务会继续跑（且记录最终会被回收，见 docs/SPIKE-image-gen.md
    * §坑 5）。宁可多等，不要把一张已经在生成的图扔掉。
+   *
+   * 「15 分钟够不够」我们**没有把握**（上面的实测还在恶化），所以夹取的上界
+   * `DRAW_TIMEOUT_MAX_MS` 取 30 分钟，严格高于本默认值——觉得不够就往上调，
+   * 别把它当上限用。
    */
   drawTimeoutMs: 900_000,
   /**
@@ -95,6 +99,21 @@ export const CONFIG_DEFAULTS = Object.freeze({
 export function clampInt(raw: unknown, def: number, min: number, max = Infinity): number {
   return Math.min(max, Math.max(min, Math.floor(num(raw, def))));
 }
+
+/**
+ * `drawTimeoutMs` 的**上界**——必须严格大于它的默认值。
+ *
+ * 这个上界曾经与默认值同为 900_000，于是该字段只能调小、不能调大。而「15 分钟
+ * 够不够」恰恰是本文件自己承认**没有把握**的问题：上面的注释记着同模型连测
+ * 61s→261s→**537s** 的单调恶化、5 分钟预算被实测击穿，docs/SPIKE-image-gen.md
+ * 还记着一次 900s 预算的 e2e 在 905s 放弃。把一个**已知可能不够用**的数值同时
+ * 写成默认值与硬上限，等于在用户最需要「多等一会儿」的时刻把旋钮焊死——而且
+ * 焊死在一个已被实测证伪的数上。
+ *
+ * 取 30 分钟：仍是有界的（不会让一次工具调用无限期挂着），但比默认值高出一倍，
+ * 慢档用户有可调空间。它同时是 `drawWaitMs` 的上界来源（见 resolveSettings）。
+ */
+export const DRAW_TIMEOUT_MAX_MS = 1_800_000;
 
 /**
  * 端点必须是合法的 http(s) 绝对地址；不是就在**挂载时**抛（resolveSettings
@@ -147,6 +166,10 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
     const siteBase = str(source.siteBase, CONFIG_DEFAULTS.siteBase).replace(/\/+$/, "");
     assertHttpUrl(apiBase, "apiBase");
     assertHttpUrl(siteBase, "siteBase");
+    // 出图总预算先算出来：它是单次等待预算的**上界**（下面那条）。两个数必须在
+    // 一处派生，否则「等待不该超过总放弃线」这条不变量就在两个地方各写一遍，
+    // 改一处忘一处。
+    const drawTimeoutMs = clampInt(source.drawTimeoutMs, CONFIG_DEFAULTS.drawTimeoutMs, 30_000, DRAW_TIMEOUT_MAX_MS);
     return {
       settings: {
         apiBase,
@@ -168,13 +191,15 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         registerProvider: source.registerProvider === true,
         // 出图三件套。超时同样夹上界：它直接喂给轮询截止，3e9 会让每一次出图
         // 立刻超时（与 pollSeconds / inferenceTimeoutMs 同一类坑）。下界 30s——
-        // 低于实测最快的一次出图（61s）没有意义。
+        // 低于实测最快的一次出图（61s）没有意义；上界 DRAW_TIMEOUT_MAX_MS 严格
+        // 高于默认值，见那个常数的注释（这里曾写成 900_000 = 默认值本身，字段
+        // 只能调小不能调大）。
         drawEnabled: source.drawEnabled === true,
         drawModelId: str(source.drawModelId, CONFIG_DEFAULTS.drawModelId),
-        drawTimeoutMs: clampInt(source.drawTimeoutMs, CONFIG_DEFAULTS.drawTimeoutMs, 30_000, 900_000),
-        // 单次等待预算：下界 10s（再低就没必要分段了），上界 = 总放弃线（超过它的
-        // 等待没有意义，工具里还会再夹一次）。
-        drawWaitMs: clampInt(source.drawWaitMs, CONFIG_DEFAULTS.drawWaitMs, 10_000, 900_000),
+        drawTimeoutMs,
+        // 单次等待预算：下界 10s（再低就没必要分段了），上界 = 刚算出的总放弃线
+        // （超过它的等待没有意义，draw-runtime 里还会再夹一次）。
+        drawWaitMs: clampInt(source.drawWaitMs, CONFIG_DEFAULTS.drawWaitMs, 10_000, drawTimeoutMs),
         // 允许主机名：默认集只增不替（typo 不能把面板锁在外面）。
         allowedHosts: resolveAllowedHosts(source)
       },

@@ -4,7 +4,7 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { CONFIG_DEFAULTS, PLUGIN_VERSION, name, resolveSettings, clampInt, hostName, isAdmitted } from "../src/host/host-config.ts";
+import { CONFIG_DEFAULTS, DRAW_TIMEOUT_MAX_MS, PLUGIN_VERSION, name, resolveSettings, clampInt, hostName, isAdmitted } from "../src/host/host-config.ts";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
@@ -30,7 +30,7 @@ for (const key of ["dailyQuotaTotal", "dailyQuotaPerModel"]) {
     `cordis.patch.yml 不该再有 ${key} 配置项（面板不消费它）`
   );
 }
-for (const key of ["trendDays", "cacheSeconds", "pollSeconds", "inferenceTimeoutMs", "maxEvents", "apiBase", "siteBase"]) {
+for (const key of ["trendDays", "cacheSeconds", "pollSeconds", "inferenceTimeoutMs", "maxEvents", "apiBase", "siteBase", "drawTimeoutMs", "drawWaitMs"]) {
   const patchValue = patch.match(new RegExp(String(key) + String.raw`:\s*([^#\n]+)`));
   assert.ok(patchValue, `cordis.patch.yml 缺少 ${key}（配置面与默认值必须同场）`);
   const literal = String(patchValue[1]).trim().replace(/^["']|["']$/g, "");
@@ -68,6 +68,41 @@ assert.equal(resolveSettings({ cacheSeconds: 999_999 }).settings.cacheSeconds, 6
 // 上界之内不该被改动（别把合法配置也夹掉）。
 assert.equal(resolveSettings({ pollSeconds: 3_600 }).settings.pollSeconds, 3_600, "上界本身是合法的");
 assert.equal(resolveSettings({ pollSeconds: 5 }).settings.pollSeconds, 5, "下界之上不改动");
+
+// §5c 出图总预算的夹取上界必须**严格高于**默认值，且单次等待预算是从它派生的。
+//
+// 回归用例：上界曾与默认值同为 900_000——于是这个字段只能调小、不能调大。而
+// host-config 自己的注释与 docs/SPIKE-image-gen.md 都记着「同模型连测 61s →
+// 261s → 537s，单调恶化」「5 分钟预算实测击穿」「一次 900s 预算的 e2e 在 905s
+// 放弃」。把上界焊在一个**已被实测证伪**的数值上，等于用户最需要多等一会儿的
+// 那一刻旋钮是死的。
+assert.ok(
+  DRAW_TIMEOUT_MAX_MS > CONFIG_DEFAULTS.drawTimeoutMs,
+  "上界必须严格大于默认值（相等 = 该字段只能调小）"
+);
+assert.equal(
+  resolveSettings({ drawTimeoutMs: 1_200_000 }).settings.drawTimeoutMs,
+  1_200_000,
+  "默认值与上界之间的取值必须真的生效（修复前被夹回 900000）"
+);
+assert.equal(
+  resolveSettings({ drawTimeoutMs: 99_999_999 }).settings.drawTimeoutMs,
+  DRAW_TIMEOUT_MAX_MS,
+  "超过上界才拉回 30 分钟"
+);
+assert.equal(resolveSettings({ drawTimeoutMs: 1_000 }).settings.drawTimeoutMs, 30_000, "下界 30s 不变");
+// 单次等待预算的上界是**算出来的**总放弃线，不是另一个写死的常数。
+assert.equal(
+  resolveSettings({ drawTimeoutMs: 60_000, drawWaitMs: 600_000 }).settings.drawWaitMs,
+  60_000,
+  "单次等待不得超过本轮的总放弃线（上界随 drawTimeoutMs 走）"
+);
+assert.equal(
+  resolveSettings({ drawTimeoutMs: 1_200_000, drawWaitMs: 1_200_000 }).settings.drawWaitMs,
+  1_200_000,
+  "总放弃线之内不作改动"
+);
+assert.equal(resolveSettings({ drawWaitMs: 1 }).settings.drawWaitMs, 10_000, "单次等待的下界 10s");
 
 // §6 allowedHosts 只增不替。
 const widened = resolveSettings({ allowedHosts: ["MyHost.Example"] });

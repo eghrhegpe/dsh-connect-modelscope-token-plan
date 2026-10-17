@@ -92,6 +92,26 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
   const doFetch = deps.fetchImpl ?? fetch;
   const { read } = createCoalescedFetch();
 
+  /**
+   * 详情端点任务标签的**独立**缓存与 TTL——与目录/余额的 `read` 刻意分开。
+   *
+   * 标签回答「这个模型吃不吃图」，是出厂能力，几乎不变；目录/余额回答「现在有
+   * 什么、还剩多少」——两者需要的陈旧度差着量级。它们曾共用 `cacheSeconds`
+   * （默认 60 秒），而面板与对话框胶囊按 `pollSeconds`（默认 30s）轮询快照、
+   * 快照每次都调 `fetchModels`：穿透时对目录里每个模型各打一次
+   * `siteBase/api/v1/models/{id}`。当前目录 ~37 条 = **每轮 38 个 HTTP 请求、
+   * 稳定每分钟一轮**（约 5 万/天），只为判一个布尔值，打的还是 modelscope.cn
+   * 网站上一个非公开、非契约的接口。那不叫新鲜，叫白打。
+   *
+   * `maxAgeMs` 必须一起抬：coalesced-fetch 的清扫上限默认 1 小时（那是「任何
+   * 调用方的最长 TTL」），不抬的话 6 小时的 TTL 会被清扫提前作废。键数等于目录
+   * 里的模型数（约 40 条），无界增长不成立。
+   */
+  const TAGS_TTL_MS = 6 * 3600_000;
+  const { read: readTags } = createCoalescedFetch({ maxAgeMs: TAGS_TTL_MS });
+  /** 详情端点的并发：长 TTL 之后扇出已经很稀，没必要一上来 6 路齐发去撞主站。 */
+  const TAG_FETCH_CONCURRENCY = 3;
+
   /** 带超时的一次 fetch（AbortController；abort → TIMEOUT_ERROR）。 */
   const fetchWithTimeout = async (url: string, init: RequestInit) => {
     const controller = new AbortController();
@@ -111,13 +131,14 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
   /**
    * 丢弃一个我们不读的响应体。
    *
-   * undici 里未消费的 body 会**占住连接**直到 GC。目录刷新会对 35 个模型并发打
-   * 详情端点（`Promise.all` 分批），其中任何一条走「!ok」或「形状不符」分支，
-   * 连接就一直挂着——短时间内连接池被这些挂起的响应吃满，后面的请求开始排队。
+   * undici 里未消费的 body 会**占住连接**直到 GC。标签扇出会对目录里 30–40 个
+   * 模型并发打详情端点（`mapWithConcurrency` 分批），其中任何一条走「!ok」或
+   * 「形状不符」分支，连接就一直挂着——短时间内连接池被这些挂起的响应吃满，
+   * 后面的请求开始排队。
    *
    * `cancel()` 是显式的弃权：告诉 undici「这个 body 我不要了」，它会立刻释放
    * 连接而不是等GC。用 `void` 前缀是因为这是best-effort——取消失败不影响我们
-   * 已经决定返回 `[]` 的结论。
+   * 已经决定的结果。
    */
   const discardBody = (response: Response): void => {
     try {
@@ -144,19 +165,34 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
   /**
    * 单个模型的详情端点任务标签（modelscope.cn/api/v1/models/{id}）。
    * 免认证 GET，零推理额度（实测匿名 200）。返回 `Data.Tasks[].Name`（+
-   * `widgets[].task` 兜底）去重后的标签数组；任意失败 / 非预期形状返回空数组，
-   * 调用方据此回退策展清单 + 名字启发。
+   * `widgets[].task` 兜底）去重后的标签数组。
+   *
+   * **失败一律抛，绝不返回 `[]`**：本函数的结果会被 {@link TAGS_TTL_MS} 缓存
+   * 六小时，而 `[]` 是一个**结论**（「这个模型没有任务标签」）。把 429 / 5xx /
+   * 形状漂移降级成 `[]` 再缓存，等于让一次网络抖动把某个模型的视觉标签钉死半天
+   * ——正是「读不到 ≠ 没有」的反面。coalesced-fetch 不缓存 rejection（失败被当
+   * 「不是答案」共享，但不落盘），所以抛出去的那一轮不会被记住；调用方 catch 成
+   * `[]`，只影响这一轮，下一轮照常重试。
    */
   const fetchTaskTags = async (id: string): Promise<string[]> => {
     const detailUrl = settings.siteBase + "/api/v1/models/" + encodeURI(id);
     const response = await fetchWithTimeout(detailUrl, { method: "GET", headers: { accept: "application/json" } });
-    // 下面两条「不读 body 就返回」的路径都必须先弃权，否则连接被挂住不放。
+    // 下面两条失败路径都必须先弃权，否则连接被挂住不放（见 discardBody）。
     if (!response.ok) {
       discardBody(response);
-      return [];
+      throw new Error("model detail failed with HTTP " + String(response.status));
     }
-    const json = (await response.json().catch(() => null)) as { Code?: unknown; Data?: { Tasks?: unknown; widgets?: unknown } } | null;
-    if (json === null || typeof json !== "object" || json.Code !== 200) return [];
+    let json: { Code?: unknown; Data?: { Tasks?: unknown; widgets?: unknown } } | null;
+    try {
+      json = (await response.json()) as { Code?: unknown; Data?: { Tasks?: unknown; widgets?: unknown } };
+    } catch {
+      // `json()` 抛在半路时 body 同样没有被消费完，连接会一直挂着——错误路径也要弃权。
+      discardBody(response);
+      throw new Error("model detail body was not JSON");
+    }
+    if (json === null || typeof json !== "object" || json.Code !== 200) {
+      throw new Error("model detail shape drifted (expected {Code:200, Data:{Tasks:[...]}})");
+    }
     const data = (json.Data ?? {}) as { Tasks?: unknown; widgets?: unknown };
     const tasks: string[] = [];
     for (const t of Array.isArray(data.Tasks) ? (data.Tasks as Record<string, unknown>[]) : []) {
@@ -212,9 +248,21 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
         const raws = json.data as unknown[];
         // 并行拉取每个模型的详情端点任务标签（modelscope.cn/api/v1/models/{id}），
         // 免认证、零推理额度；有界并发避免打爆主站。单模型失败不影响整体，tags 留空 →
-        // 该模型回退策展清单 + 名字启发。标签随目录一起被 cacheSeconds 缓存。
+        // 该模型回退策展清单 + 名字启发。
+        //
+        // 标签走**自己的** TAGS_TTL_MS 缓存，不随目录的 cacheSeconds 一起失效：这是
+        // 本插件最大的一处上游负载，而它服务的是一个几乎不变的布尔值（见 TAGS_TTL_MS
+        // 的注释）。失败**不落盘**（readTags 不缓存 rejection），所以这里 catch 成 `[]`
+        // 只影响这一轮，下一轮照常重试——不会把一次抖动钉成六小时的结论。
         const ids = (raws as Record<string, unknown>[]).map((r) => str(r.id, "")).filter((id) => id !== "");
-        const tagArrays = await mapWithConcurrency(ids, 6, (id) => fetchTaskTags(id).catch(() => [] as string[]));
+        const tagArrays = await mapWithConcurrency(ids, TAG_FETCH_CONCURRENCY, async (id): Promise<string[]> => {
+          try {
+            const cached = await readTags(`model-tags:${id}`, () => fetchTaskTags(id), TAGS_TTL_MS);
+            return Array.isArray(cached) ? (cached as string[]) : [];
+          } catch {
+            return [];
+          }
+        });
         const tagsById = new Map<string, string[]>();
         ids.forEach((id, i) => tagsById.set(id, tagArrays[i] ?? []));
         // 判断集中一份：inference-client 只透传原始条目（附带详情标签），vision/窗口/

@@ -291,4 +291,33 @@ async function* of(chunks) {
   assert.equal(r7b.calls[0].tokens, 2);
 }
 
+{
+  // prepareCall 返回的**句柄**带原型成员时，包裹不能把它们弄丢。
+  //
+  // 回归用例：这里曾写成 `{ ...handle, stream }`。对象展开只拷**自有可枚举**
+  // 属性，原型上的兄弟方法（abort / cancel 这类——peer 的 handle 正长这样）
+  // 会整批消失，用户按「停止生成」就是 TypeError；`#private` 槽也一并丢失。
+  // 同一个文件在包 adapter 时已经为「peer 的 stream 是原型方法」专门 bind 过
+  // （上面那条），句柄这条路径不该用更粗的手法。现在改成只覆盖 `stream` 一个
+  // 键的 Proxy，其余读取全部透传。
+  class PrototypeHandle {
+    constructor() { this.streamed = 0; }
+    stream() { this.streamed += 1; return of([{ type: "finish", reason: { kind: "stop" } }]); }
+    abort() { return `aborted:${this.streamed}`; }
+  }
+  const r12 = recorder();
+  const wrapped = withUsageObserver({
+    stream: () => of([]),
+    prepareCall: () => new PrototypeHandle(),
+  }, r12.sinks);
+  const prepared = await wrapped.prepareCall("p", "Qwen/Qwen3.5-35B-A3B");
+  assert.equal(typeof prepared.abort, "function", "句柄的原型方法必须还在（展开会丢）");
+  assert.equal(prepared.abort(), "aborted:0", "且以真句柄为 this 调用（实例状态/私有槽仍可见）");
+  const out12 = [];
+  for await (const chunk of prepared.stream({})) out12.push(chunk.type);
+  assert.deepEqual(out12, ["finish"], "包过的 stream 照常透出");
+  assert.equal(r12.calls.length, 1, "包过的 stream 照常记账");
+  assert.equal(prepared.streamed, 1, "stream 在原句柄上被调用（prototype 方法不能裸调）");
+}
+
 console.log("usage-observer.test.mjs: all assertions passed");

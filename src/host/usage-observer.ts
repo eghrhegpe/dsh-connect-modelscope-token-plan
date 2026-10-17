@@ -251,8 +251,25 @@ export function withUsageObserver(inner: object, sinks: UsageSinks): object {
           const wrap = (handle: unknown): unknown => {
             if (handle === null || typeof handle !== "object" || modelId === "") return handle;
             const inner = handle as { stream?: (o: unknown) => AsyncIterableIterator<unknown> };
-            if (typeof inner.stream !== "function") return handle;
-            return { ...inner, stream: (o: unknown) => observeStream(inner.stream!(o), modelId, sinks) };
+            const innerStream = inner.stream;
+            if (typeof innerStream !== "function") return handle;
+            // 用 Proxy 而不是 `{ ...handle, stream }`：对象展开只拷**自有可枚举**
+            // 属性，句柄原型上的兄弟方法（abort / cancel 这类）会整批消失，用户
+            // 按「停止生成」就是 TypeError。而且展开还会丢掉 `#private` 槽、把
+            // 原型换掉。Proxy 只覆盖 `stream` 一个键，其余读取、`in`、`typeof`、
+            // 私有字段访问全部原样透传到真句柄。
+            //
+            // `stream.call(target, …)`（target = 真句柄）同样是为了私有槽：以本
+            // 实例为 `this` 调用，方法体里的 `this.#x` 才找得到。文件上方那条
+            // 「原型方法必须绑定调用」的教训在这里第二次出现。
+            return new Proxy(inner, {
+              get(target: object, prop: string | symbol, receiver: object) {
+                if (prop === "stream") {
+                  return (o: unknown) => observeStream(innerStream.call(target, o), modelId, sinks);
+                }
+                return Reflect.get(target, prop, receiver);
+              }
+            });
           };
           const promise = prepared as { then?: (fn: (p: unknown) => unknown) => unknown } | null;
           if (promise !== null && typeof promise.then === "function") {
