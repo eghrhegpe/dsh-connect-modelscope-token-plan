@@ -30,7 +30,7 @@ export const zh = {
   "tab.access": "接入",
 
   "section.balance": "魔粒余额（官方数据）",
-  "section.local": "本地调用（仅经本插件的调用）",
+  "section.local": "本地调用（本客户端 · 仅经本插件）",
   "section.trend": "近 {days} 天本地调用趋势",
   "section.events": "限流与错误事件",
   "section.token": "访问令牌",
@@ -51,7 +51,7 @@ export const zh = {
   // token（目录键叫 `max_context_tokens`），照抄它。
   "quota.rowCalls": "{calls} 次",
   "quota.rowTokens": "{tokens} token",
-  "quota.note": "本地口径：只统计经本插件的调用，直连魔搭的其它客户端不计入；消耗总量以官方魔粒余额为准。",
+  "quota.note": "本地口径：只统计本客户端经本插件的调用（桌面端与 Web 端各记各的）；直连魔搭的其它客户端不计入。消耗总量以官方魔粒余额为准。",
   "quota.unavailable": "本地计数本次读不到（原因见上方提示）",
 
   // 目录表与其行内 usage 试调已删除（见 panel-page.ts modelsBody 注释），
@@ -203,7 +203,7 @@ export const en: typeof zh = {
   "tab.access": "Access",
 
   "section.balance": "Magicube balance (official)",
-  "section.local": "Local calls (only through this plugin)",
+  "section.local": "Local calls (this client · only through this plugin)",
   "section.trend": "Local call trend, last {days} days",
   "section.events": "Rate-limit and error events",
   "section.token": "Access token",
@@ -221,7 +221,7 @@ export const en: typeof zh = {
   "quota.headline": "Today {calls} calls · {models} models",
   "quota.rowCalls": "{calls} calls",
   "quota.rowTokens": "{tokens} tokens",
-  "quota.note": "Local scope: only calls through this plugin are counted; clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
+  "quota.note": "Local scope: only calls this client made through this plugin are counted (desktop and web keep separate ledgers); clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
   "quota.unavailable": "Local counters could not be read this time (reason in the notices above)",
 
   // The catalog table and its per-row usage probe were removed (see the

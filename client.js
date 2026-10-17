@@ -46,6 +46,25 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		return slash >= 0 ? id.slice(0, slash) : id;
 	}
 	/**
+	* 清单行要显示的名字：组头已经把 owner 说过一次，名字若还带着 `owner/` 前缀就切掉
+	* ——行宽还给名字本身。
+	*
+	* 为什么需要它：魔搭目录**只回 id**，没有单独的 name 字段，所以 Host 侧
+	* `str(entry.name, id)` 的兜底让每一行的 name 就等于 id（见 llm-models.ts）。分组
+	* 之后那些前缀与组头逐字重复，一个 34 个模型的清单里同一个 owner 要说十几遍。
+	*
+	* 只切**与 owner 逐字相同**的前缀：name 若是目录给的人话名字（`DeepSeek V4 Pro`）
+	* 或来自别的 owner，原样返回——不按位置硬切，免得把真正的名字切坏。行的 `title`
+	* 与复选框的 `aria-label` 仍然用完整 id，所以切掉的信息没有丢。
+	* @param {string} id - 完整模型 id（`owner/model`）。
+	* @param {string} name - 目录给的名字（通常等于 id）。
+	* @returns {string} 行内显示的名字。
+	*/
+	function trimOwnerPrefix(id, name) {
+		const prefix = `${catalogOwner(id)}/`;
+		return name.startsWith(prefix) ? name.slice(prefix.length) : name;
+	}
+	/**
 	* 徽章用的窗口短标注（tokens → "128K" / "1M"）——按**这个数被写出来时用的那个
 	* 进制**渲染，不把它换算到另一把尺上。
 	*
@@ -138,7 +157,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"tab.models": "模型",
 			"tab.access": "接入",
 			"section.balance": "魔粒余额（官方数据）",
-			"section.local": "本地调用（仅经本插件的调用）",
+			"section.local": "本地调用（本客户端 · 仅经本插件）",
 			"section.trend": "近 {days} 天本地调用趋势",
 			"section.events": "限流与错误事件",
 			"section.token": "访问令牌",
@@ -154,7 +173,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"quota.headline": "今日 {calls} 次 · {models} 个模型",
 			"quota.rowCalls": "{calls} 次",
 			"quota.rowTokens": "{tokens} token",
-			"quota.note": "本地口径：只统计经本插件的调用，直连魔搭的其它客户端不计入；消耗总量以官方魔粒余额为准。",
+			"quota.note": "本地口径：只统计本客户端经本插件的调用（桌面端与 Web 端各记各的）；直连魔搭的其它客户端不计入。消耗总量以官方魔粒余额为准。",
 			"quota.unavailable": "本地计数本次读不到（原因见上方提示）",
 			"probe.validity": "验令牌（零额度）",
 			"probe.validOk": "令牌有效（HTTP {status}）",
@@ -280,7 +299,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"tab.models": "Models",
 			"tab.access": "Access",
 			"section.balance": "Magicube balance (official)",
-			"section.local": "Local calls (only through this plugin)",
+			"section.local": "Local calls (this client · only through this plugin)",
 			"section.trend": "Local call trend, last {days} days",
 			"section.events": "Rate-limit and error events",
 			"section.token": "Access token",
@@ -296,7 +315,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"quota.headline": "Today {calls} calls · {models} models",
 			"quota.rowCalls": "{calls} calls",
 			"quota.rowTokens": "{tokens} tokens",
-			"quota.note": "Local scope: only calls through this plugin are counted; clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
+			"quota.note": "Local scope: only calls this client made through this plugin are counted (desktop and web keep separate ledgers); clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
 			"quota.unavailable": "Local counters could not be read this time (reason in the notices above)",
 			"probe.validity": "Verify token (free)",
 			"probe.validOk": "Token valid (HTTP {status})",
@@ -1864,7 +1883,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			}), h("span", {
 				style: S.modelName,
 				title: id
-			}, row.name)), row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null, typeof row.contextWindow === "number" ? h("span", {
+			}, trimOwnerPrefix(id, row.name))), row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null, typeof row.contextWindow === "number" ? h("span", {
 				style: row.contextSource === "curated" ? {
 					...S.modelBadge,
 					color: "var(--dsw-alias-label-secondary)"

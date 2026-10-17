@@ -91,6 +91,26 @@ export function catalogOwner(id: string): string {
 }
 
 /**
+ * 清单行要显示的名字：组头已经把 owner 说过一次，名字若还带着 `owner/` 前缀就切掉
+ * ——行宽还给名字本身。
+ *
+ * 为什么需要它：魔搭目录**只回 id**，没有单独的 name 字段，所以 Host 侧
+ * `str(entry.name, id)` 的兜底让每一行的 name 就等于 id（见 llm-models.ts）。分组
+ * 之后那些前缀与组头逐字重复，一个 34 个模型的清单里同一个 owner 要说十几遍。
+ *
+ * 只切**与 owner 逐字相同**的前缀：name 若是目录给的人话名字（`DeepSeek V4 Pro`）
+ * 或来自别的 owner，原样返回——不按位置硬切，免得把真正的名字切坏。行的 `title`
+ * 与复选框的 `aria-label` 仍然用完整 id，所以切掉的信息没有丢。
+ * @param {string} id - 完整模型 id（`owner/model`）。
+ * @param {string} name - 目录给的名字（通常等于 id）。
+ * @returns {string} 行内显示的名字。
+ */
+export function trimOwnerPrefix(id: string, name: string): string {
+  const prefix = `${catalogOwner(id)}/`;
+  return name.startsWith(prefix) ? name.slice(prefix.length) : name;
+}
+
+/**
  * 徽章用的窗口短标注（tokens → "128K" / "1M"）——按**这个数被写出来时用的那个
  * 进制**渲染，不把它换算到另一把尺上。
  *

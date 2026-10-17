@@ -8,7 +8,7 @@ import { count, format, isoTime } from "./format.ts";
 import { h, useEffect, useMemo, useState } from "./runtime.ts";
 import type { DictionaryKey, Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
-import { MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, modelscopeModelUrl, FEATURED_OWNERS, catalogOwner, formatWindow } from "./const.ts";
+import { MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, modelscopeModelUrl, FEATURED_OWNERS, catalogOwner, trimOwnerPrefix, formatWindow } from "./const.ts";
 import { providerOf, drawOf } from "./snapshot.ts";
 import { ToggleSwitch } from "./toggle-switch.ts";
 import { parseAllowedList, normalizeRosterSave, hideAllRoster } from "../shared/allow-list.ts";
@@ -595,7 +595,9 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
             type: "checkbox", checked: !hideAllMode && draft.includes(id), disabled: busy || unusable,
             onChange: () => toggleOne(id), style: S.modelCheck, "aria-label": id
           }),
-          h("span", { style: S.modelName, title: id }, row.name)
+          // 名字切掉组头已经说过的 `owner/` 前缀；完整 id 留在 title 与复选框的
+          // aria-label 上，所以切掉的信息没丢（见 const.ts 的 trimOwnerPrefix）。
+          h("span", { style: S.modelName, title: id }, trimOwnerPrefix(id, row.name))
         ),
         row.vision === true ? h("span", { style: S.modelBadge }, tt("provider.vision")) : null,
         typeof row.contextWindow === "number"

@@ -4,7 +4,7 @@
 // 面板现在按 Host 返回的顺序渲染，只保留 featured 徽标，不再按 owner 重排——
 // 所以排序规则连同它的 6 条性质断言一起删了，不留「有契约无实现」的孤儿。
 import { strict as assert } from "node:assert";
-import { FEATURED_OWNERS, catalogOwner, formatWindow } from "../src/client/const.ts";
+import { FEATURED_OWNERS, catalogOwner, trimOwnerPrefix, formatWindow } from "../src/client/const.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // catalogOwner：从 owner/model 取 owner
@@ -24,7 +24,32 @@ import { FEATURED_OWNERS, catalogOwner, formatWindow } from "../src/client/const
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// formatWindow：按上游写出来的那个进制渲染，不换算到另一把尺
+// trimOwnerPrefix：组头说过 owner，行里就别再说一遍
+//
+// 真实形态是「name === id」：魔搭目录只回 id，Host 侧 `str(entry.name, id)` 的兜底
+// 让每行都带 `owner/` 前缀——分组之后那截前缀与组头逐字重复十几遍。
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  assert.equal(
+    trimOwnerPrefix("deepseek-ai/DeepSeek-V4-Pro", "deepseek-ai/DeepSeek-V4-Pro"),
+    "DeepSeek-V4-Pro",
+    "name === id（目录的真实形态）→ 切掉组头说过的那截前缀"
+  );
+  assert.equal(
+    trimOwnerPrefix("deepseek-ai/DeepSeek-V4.1-Flash", "DeepSeek V4.1 Flash"),
+    "DeepSeek V4.1 Flash",
+    "目录给的是人话名字 → 原样返回"
+  );
+  assert.equal(
+    trimOwnerPrefix("Qwen/Qwen3-8B", "ZhipuAI/GLM-5.2"),
+    "ZhipuAI/GLM-5.2",
+    "名字带的是**别的** owner 的前缀 → 不按位置硬切"
+  );
+  assert.equal(trimOwnerPrefix("no-slash-id", "no-slash-id"), "no-slash-id", "没有斜杠的 id 不动");
+  assert.equal(trimOwnerPrefix("a/b/c", "a/b/c"), "b/c", "只切 owner 这一截，后面原样");
+}
+
+
 //
 // 这些期望值都取自真实数据：2 的幂那组来自档位表与策展表的出厂规格，十进制那组
 // 来自 models.dev / 目录自己写的数（见 host/context-catalog.ts 的逐条来源）。
