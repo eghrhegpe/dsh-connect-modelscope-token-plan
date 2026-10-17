@@ -410,10 +410,20 @@ function printReport(report) {
 
 const siblings = discoverSiblings();
 if (siblings.length === 0) {
-  console.log(
+  const absentNote =
     "cross-repo-drift: 未发现姊妹仓库（同级目录下没有 dsh-connect-*-token-plan）。\n" +
-    "  这不是错误——本工具是诊断，不是门禁。要指定仓库用 --sibling <dir>。"
-  );
+    "  这不是错误——本工具是诊断，不是门禁。要指定仓库用 --sibling <dir>。";
+  // `--json` 是机器可读契约：**stdout 只能是 JSON**，人话改道 stderr。
+  // 曾经的写法把上面这段打进 stdout 再 exit(0)，调用方（test/family-kernel.test.mjs）
+  // 的 JSON.parse 在读到第一个字符时就 SyntaxError——于是它自己头注里写明的
+  // 「姊妹不在场 = skip（CI 上必然走这条路）」从未生效，main 连红两次（48da3ea 起）。
+  // 缺席是 skip，不是失败：退出码仍是 0，原因一条不少地留给使用者。
+  if (asJson) {
+    console.error(absentNote);
+    console.log(JSON.stringify({ root: ROOT, reports: [], note: "no-siblings" }, null, 2));
+  } else {
+    console.log(absentNote);
+  }
   process.exit(0);
 }
 

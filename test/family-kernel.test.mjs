@@ -37,6 +37,52 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const KERNEL = JSON.parse(readFileSync(join(ROOT, "KERNEL.json"), "utf8"));
 const TOOL = join(ROOT, "tools", "dev", "cross-repo-drift.mjs");
 
+// ── §0 `--json` 契约：姊妹不在场时 stdout 必须仍是 JSON ──
+//
+// 这条排在一切之前，因为它守的是**下面那次调用本身**能否被解读。缺席分支是 CI 的常态
+// （别人的 checkout 里没有同族仓库），也正是它把本门禁连红过两个提交：工具曾把人话打进
+// stdout 再 exit(0)，上面的 JSON.parse 在第一个字符处就炸，「不在场 = skip」这条写在本
+// 文件头注里的语义从未生效过。判据：同一个 `--json` 调用，absence 下仍然可解析。
+//
+// 用不存在的 `--sibling` 强制走缺席分支——不依赖机器上恰好有没有同族仓库（本地/CI 同判）。
+{
+  const absentArgs = ["--json", "--sibling", join(ROOT, "no-such-sibling-repo")];
+  const absent = spawnSync(process.execPath, [TOOL, ...absentArgs], {
+    cwd: ROOT,
+    encoding: "utf8",
+    maxBuffer: 4 * 1024 * 1024
+  });
+  assert.equal(absent.status, 0, `姊妹不在场时退出码必须是 0（skip 不是失败），实得 ${absent.status}`);
+  let parsed;
+  try {
+    parsed = JSON.parse(absent.stdout);
+  } catch {
+    assert.fail(
+      "--json 在姊妹不在场时输出了非 JSON 的 stdout（机器可读契约被破坏，调用方必然炸）：\n" +
+      absent.stdout.slice(0, 300)
+    );
+  }
+  assert.deepEqual(parsed.reports, [], "姊妹不在场时 reports 应是空数组，而不是把人话混进 stdout");
+  assert.match(
+    absent.stderr,
+    /未发现姊妹仓库/,
+    "缺席的**原因**必须仍然说给使用者听——只是改道 stderr，不许沉默"
+  );
+
+  // 缺席也不许被 --strict 升格成失败：那条语义只针对「宣称与实测不符」。
+  const strictAbsent = spawnSync(process.execPath, [TOOL, ...absentArgs, "--strict"], {
+    cwd: ROOT,
+    encoding: "utf8",
+    maxBuffer: 4 * 1024 * 1024
+  });
+  assert.equal(
+    strictAbsent.status,
+    0,
+    `--strict 下姊妹不在场仍应是 skip（CI 语义），实得退出码 ${strictAbsent.status}`
+  );
+  console.log("family-kernel: §0 --json 契约（不在场 → reports:[]，原因在 stderr，--strict 不升格）✓");
+}
+
 const proc = spawnSync(process.execPath, [TOOL, "--json"], {
   cwd: ROOT,
   encoding: "utf8",
