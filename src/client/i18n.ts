@@ -46,6 +46,11 @@ export const zh = {
   "balance.unavailable": "魔粒余额暂不可读：{error}",
 
   "quota.headline": "今日 {calls} 次 · {models} 个模型",
+  // 单模型排行榜的两个读数各自带单位。裸后缀 `t`（`2 · 21,695t`）既不是 K/M 那样
+  // 的量级后缀，也不是任何语言的单位词，第一次看到只能猜。平台自己的叫法就是
+  // token（目录键叫 `max_context_tokens`），照抄它。
+  "quota.rowCalls": "{calls} 次",
+  "quota.rowTokens": "{tokens} token",
   "quota.note": "本地口径：只统计经本插件的调用，直连魔搭的其它客户端不计入；消耗总量以官方魔粒余额为准。",
   "quota.unavailable": "本地计数本次读不到（原因见上方提示）",
 
@@ -214,6 +219,8 @@ export const en: typeof zh = {
   "balance.unavailable": "Magicube balance temporarily unreadable: {error}",
 
   "quota.headline": "Today {calls} calls · {models} models",
+  "quota.rowCalls": "{calls} calls",
+  "quota.rowTokens": "{tokens} tokens",
   "quota.note": "Local scope: only calls through this plugin are counted; clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
   "quota.unavailable": "Local counters could not be read this time (reason in the notices above)",
 

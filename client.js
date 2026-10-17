@@ -130,6 +130,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"balance.usagePage": "官方用量明细（网页）→",
 			"balance.unavailable": "魔粒余额暂不可读：{error}",
 			"quota.headline": "今日 {calls} 次 · {models} 个模型",
+			"quota.rowCalls": "{calls} 次",
+			"quota.rowTokens": "{tokens} token",
 			"quota.note": "本地口径：只统计经本插件的调用，直连魔搭的其它客户端不计入；消耗总量以官方魔粒余额为准。",
 			"quota.unavailable": "本地计数本次读不到（原因见上方提示）",
 			"probe.validity": "验令牌（零额度）",
@@ -270,6 +272,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"balance.usagePage": "Official usage details (web) →",
 			"balance.unavailable": "Magicube balance temporarily unreadable: {error}",
 			"quota.headline": "Today {calls} calls · {models} models",
+			"quota.rowCalls": "{calls} calls",
+			"quota.rowTokens": "{tokens} tokens",
 			"quota.note": "Local scope: only calls through this plugin are counted; clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
 			"quota.unavailable": "Local counters could not be read this time (reason in the notices above)",
 			"probe.validity": "Verify token (free)",
@@ -1434,7 +1438,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			}, h("div", { style: S.trendRowHead }, h("span", {
 				style: S.trendModel,
 				title: row.modelId
-			}, row.modelId), h("span", { style: S.trendCredits }, count(row.calls) + (row.tokens !== null ? ` · ${count(row.tokens)}t` : ""))), pct >= 1 ? h("div", {
+			}, row.modelId), h("span", { style: S.trendCredits }, format(tt("quota.rowCalls"), { calls: count(row.calls) }) + (row.tokens !== null ? ` · ${format(tt("quota.rowTokens"), { tokens: count(row.tokens) })}` : ""))), pct >= 1 ? h("div", {
 				style: S.trendBar,
 				role: "progressbar",
 				"aria-valuenow": Math.round(pct),

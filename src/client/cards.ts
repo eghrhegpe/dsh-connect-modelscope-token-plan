@@ -127,7 +127,15 @@ export function ModelUsageTable({ rows, tt }: { rows: Array<{ modelId: string; c
           "div",
           { style: S.trendRowHead },
           h("span", { style: S.trendModel, title: row.modelId }, row.modelId),
-          h("span", { style: S.trendCredits }, count(row.calls) + (row.tokens !== null ? ` · ${count(row.tokens)}t` : ""))
+          // 两个读数分别走字典（`{calls} 次` / `{tokens} token`），不拼裸后缀：
+          // 单位跟着语言走，也顺带保住「读不到 token 时整段不画」这条——token 为
+          // null 只画次数，不画 `0 token`（读不到 ≠ 0）。
+          h(
+            "span",
+            { style: S.trendCredits },
+            format(tt("quota.rowCalls"), { calls: count(row.calls) }) +
+              (row.tokens !== null ? ` · ${format(tt("quota.rowTokens"), { tokens: count(row.tokens) })}` : "")
+          )
         ),
         pct >= 1 ? h("div", { style: S.trendBar, role: "progressbar", "aria-valuenow": Math.round(pct), "aria-valuemin": 0, "aria-valuemax": 100 }, h("div", { style: { ...S.barFill, width: `${pct}%` } })) : null
       );
