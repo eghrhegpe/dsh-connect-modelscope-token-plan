@@ -12,7 +12,7 @@
 |---|---|---|
 | `mutate.mjs` | `node tools/dev/mutate.mjs <specFile.json>` | 对源码施加「真实回归」变异，跑指定测试，**报告哪些变异没被抓住**。spec 形如 `[{ target, test, mutants: [{name, from, to}] }]`；`from` 必须唯一命中，否则记 `NOT-APPLIED`（绝不猜）。源码在 `finally` 里恢复。 |
 | `find-fake-gates.mjs` | `node tools/dev/find-fake-gates.mjs` | 静态扫描 `test/*.mjs`，找**看起来在验证、实际验证不到**的断言：声明了没进断言的变量、断言与自己造的桩比较、恒真断言、循环里与循环变量无关的断言等。 |
-| `probe-host-react.mjs` | `node tools/dev/probe-host-react.mjs` | 从本机 DSH 安装目录的 `app.asar` 里读出**宿主浏览器实际注入的 React 版本**。`test/dom-render-react.test.mjs` 钉的是宿主那一份的 reconciler 语义，pin 漂了就等于测着旧版本——升级 DSH 后先跑它核对（2026-10-15 实测：18.3.1）。 |
+| `probe-host-react.mjs` | `node tools/dev/probe-host-react.mjs <app.asar 路径>` | 从 DSH 安装目录的 `app.asar` 里读出**宿主浏览器实际注入的 React 版本**（路径必须传参，仓库里不写死本机绝对路径）。`test/dom-render-react.test.mjs` 钉的是宿主那一份的 reconciler 语义，pin 漂了就等于测着旧版本——升级 DSH 后先跑它核对（2026-10-15 实测：18.3.1）。 |
 
 **为什么变异测试是必要的**：新写的断言第一次跑就绿，**什么都不能证明**——它可能
 恒真、可能断言了个永远相等的值、可能根本没被执行到。`mutate.mjs` 是唯一能区分

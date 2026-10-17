@@ -7,7 +7,7 @@
 > 快照，与当前仓库不一致，**别拿来当现状判断**。
 >
 
-> 仓库：`C:\Users\zhujieling11\.dsh\plugins\dsh-connect-modelscope-token-plan`
+> 仓库：`<repo>`（本机插件目录，形如 `~/.dsh/plugins/dsh-connect-modelscope-token-plan`）
 > 状态：本地已就绪（`eb9842c`、工作树干净、tag `v0.1.0` 指向该提交、15 套件 + typecheck 全绿、pack 预演 16 条含三张图）。
 > **下面 1–2 步是外部动作，谨慎执行；3–5 步需要你的登录态。**
 
@@ -16,7 +16,7 @@
 ## 1. 推代码与 tag
 
 ```bash
-cd "C:/Users/zhujieling11/.dsh/plugins/dsh-connect-modelscope-token-plan"
+cd "<repo>"
 git push origin main
 git push origin v0.1.0
 ```

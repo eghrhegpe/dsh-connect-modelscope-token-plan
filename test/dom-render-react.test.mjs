@@ -68,7 +68,7 @@ try {
 assert.equal(
   React.version, EXPECTED_REACT_VERSION,
   `本套件的语义与被钉住的宿主 React 不一致：装的是 ${React.version}，期望 ${EXPECTED_REACT_VERSION}。\n` +
-  `    先跑 node tools/dev/probe-host-react.mjs 核对宿主当前版本，再决定改 pin 还是改 node_modules。`
+  `    先跑 node tools/dev/probe-host-react.mjs <app.asar 路径> 核对宿主当前版本，再决定改 pin 还是改 node_modules。`
 );
 assert.equal(typeof React.act, "function", "React 18.3 起 act 从 react 导出（不要用已废弃的 react-dom/test-utils）");
 const { act } = React;

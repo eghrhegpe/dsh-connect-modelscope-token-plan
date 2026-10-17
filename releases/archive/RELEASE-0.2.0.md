@@ -5,7 +5,7 @@
 > 记录）。**发新版请照 `RELEASING.md`（通用流程）新开一份 `RELEASE-0.3.0.md`**，
 > 别把这份已执行的当现行手册。
 >
-> 仓库：`C:\Users\zhujieling11\.dsh\plugins\dsh-connect-modelscope-token-plan`
+> 仓库：`<repo>`（本机插件目录，形如 `~/.dsh/plugins/dsh-connect-modelscope-token-plan`）
 > 远端：`https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan`
 > **本文件全部命令按 PowerShell 写**（`&&` 不可用，用 `;` 分行）。临时文件路径是
 > `$env:TEMP`，不是 `/tmp`。
@@ -19,7 +19,7 @@
 ## 1. 门禁全绿才准提交
 
 ```powershell
-cd "C:\Users\zhujieling11\.dsh\plugins\dsh-connect-modelscope-token-plan"
+cd "<repo>"
 npm run typecheck ; npm test
 ```
 

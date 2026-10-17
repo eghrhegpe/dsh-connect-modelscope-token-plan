@@ -1,10 +1,18 @@
 // 一次性可行性探针（不入库）：从 DSH 安装目录的 app.asar 里找出宿主浏览器侧真正注入的
 // React 版本——决定「用真 react-dom 做渲染门禁」值不值的关键事实：测试用的 React
 // 必须与线上 loader 表里那个是同一个大版本，否则门禁测的是另一个 reconciler。
-// 用法：node tools/dev/probe-host-react.mjs [asar 路径]
+// 用法：node tools/dev/probe-host-react.mjs <app.asar 路径>
 import { createReadStream } from "node:fs";
 
-const TARGET = process.argv[2] ?? "C:\\Users\\zhujieling11\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\app.asar";
+// 路径必须由调用方给出：写死一个本机绝对路径会把用户名与安装位置带进版本库，
+// 而 DSH 的安装目录本来就因平台/安装方式而异（见下面的提示）。
+const TARGET = process.argv[2];
+if (typeof TARGET !== "string" || TARGET.trim() === "") {
+  console.error("用法：node tools/dev/probe-host-react.mjs <app.asar 路径>");
+  console.error("  Windows 例：%LOCALAPPDATA%\\Programs\\DeepSeek Harness\\resources\\app.asar");
+  console.error("  macOS   例：/Applications/DeepSeek Harness.app/Contents/Resources/app.asar");
+  process.exit(2);
+}
 const NEEDLE = "bundleType";
 
 const stream = createReadStream(TARGET, { highWaterMark: 4 << 20 });
