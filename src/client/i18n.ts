@@ -66,7 +66,7 @@ export const zh = {
   // 所以只剩 token 管理用的零额度 validity probe。
   "models.viewOnSite": "在魔搭查看 →",
   "models.viewOnSiteTitle": "打开模型详情页（魔粒单价等只在网页展示）",
-  "models.featuredTitle": "推荐系列（深度求索 / 智谱 / 通义千问）",
+  "models.featuredTitle": "推荐厂商（深度求索 / 智谱 / 通义千问）——它们的模型置顶显示",
   "provider.featured": "推荐",
   "section.provider": "接入为 DSH 模型",
   "provider.enable": "把魔搭模型接入 DSH 模型选择器",
@@ -237,7 +237,7 @@ export const en: typeof zh = {
   // the token form uses.
   "models.viewOnSite": "View on ModelScope →",
   "models.viewOnSiteTitle": "Open the model page (per-model Magicube price is web-only)",
-  "models.featuredTitle": "Recommended family (DeepSeek / Zhipu / Qwen)",
+  "models.featuredTitle": "Recommended vendors (DeepSeek / Zhipu / Qwen) — their models are pinned to the top",
   "provider.featured": "Recommended",
   "section.provider": "Register as a DSH model",
   "provider.enable": "Register ModelScope models in the DSH model picker",

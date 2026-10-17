@@ -142,8 +142,9 @@ export const S = {
   modelName: { flex: "0 1 auto", minWidth: 0, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   modelBadge: { flex: "none", fontSize: 11, padding: "1px 7px", borderRadius: 999, background: "var(--dsw-alias-bg-layer-2)", color: "var(--dsw-alias-label-secondary)" },
   // 推荐（deepseek/glm/qwen 三家）与「视觉」**同构**：同一枚 pill，不改行背景、
-  // 不加左边线、不动名字字号——推荐是一个事实标签，不是一次整行高亮。整行染色
-  // 把三行拉成「被选中的行」，而它们只是一批里的三批模型；标签只标这一条。
+  // 不加左边线、不动名字字号——推荐是一个事实标签，不是一次整组高亮。它挂在
+  // **组头**（厂商级事实——`FEATURED_OWNERS` 列的就是 owner），每组一枚；挂在
+  // 行上会随同名 owner 的十几行各重复一遍。
   modelBadgeFeatured: { flex: "none", fontSize: 11, padding: "1px 7px", borderRadius: 999, background: "var(--dsw-alias-bg-layer-2)", color: BRAND, fontWeight: 600 },
   rosterFoot: { display: "flex", gap: 8, alignItems: "center", marginTop: 10 },
   // A roster's own frame — one step INSIDE the section card. The rule above

@@ -161,7 +161,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"probe.fail": "失败：{error}",
 			"models.viewOnSite": "在魔搭查看 →",
 			"models.viewOnSiteTitle": "打开模型详情页（魔粒单价等只在网页展示）",
-			"models.featuredTitle": "推荐系列（深度求索 / 智谱 / 通义千问）",
+			"models.featuredTitle": "推荐厂商（深度求索 / 智谱 / 通义千问）——它们的模型置顶显示",
 			"provider.featured": "推荐",
 			"section.provider": "接入为 DSH 模型",
 			"provider.enable": "把魔搭模型接入 DSH 模型选择器",
@@ -303,7 +303,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"probe.fail": "Failed: {error}",
 			"models.viewOnSite": "View on ModelScope →",
 			"models.viewOnSiteTitle": "Open the model page (per-model Magicube price is web-only)",
-			"models.featuredTitle": "Recommended family (DeepSeek / Zhipu / Qwen)",
+			"models.featuredTitle": "Recommended vendors (DeepSeek / Zhipu / Qwen) — their models are pinned to the top",
 			"provider.featured": "Recommended",
 			"section.provider": "Register as a DSH model",
 			"provider.enable": "Register ModelScope models in the DSH model picker",
@@ -1870,10 +1870,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 					color: "var(--dsw-alias-label-secondary)"
 				} : S.modelBadge,
 				title: row.contextSource === "curated" ? tt("provider.contextCuratedTitle") : tt("provider.contextWindow")
-			}, row.contextSource === "curated" ? formatWindow(row.contextWindow) + " *" : formatWindow(row.contextWindow)) : null, FEATURED_OWNERS.includes(catalogOwner(row.id)) ? h("span", {
-				style: S.modelBadgeFeatured,
-				title: tt("models.featuredTitle")
-			}, tt("provider.featured")) : null, row.quotaExhausted === true ? h("span", { style: {
+			}, row.contextSource === "curated" ? formatWindow(row.contextWindow) + " *" : formatWindow(row.contextWindow)) : null, row.quotaExhausted === true ? h("span", { style: {
 				...S.modelBadge,
 				color: "var(--dsw-alias-state-error-primary)"
 			} }, tt("provider.quotaExhausted")) : null, h("a", {
@@ -1971,7 +1968,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 					...S.chevron,
 					transform: "rotate(-90deg)"
 				} : S.chevron
-			}, h("path", { d: "M3 6l5 5 5-5" })), h("span", { style: S.modelGroupOwner }, group.owner), h("span", { style: S.modelGroupCount }, format(tt("provider.groupCount"), { count: group.rows.length })), groupTicked > 0 ? h("span", { style: S.modelGroupCount }, format(tt("provider.groupSelected"), { count: groupTicked })) : null), isCollapsed ? null : h("ul", {
+			}, h("path", { d: "M3 6l5 5 5-5" })), h("span", { style: S.modelGroupOwner }, group.owner), FEATURED_OWNERS.includes(group.owner) ? h("span", {
+				style: S.modelBadgeFeatured,
+				title: tt("models.featuredTitle")
+			}, tt("provider.featured")) : null, h("span", { style: S.modelGroupCount }, format(tt("provider.groupCount"), { count: group.rows.length })), groupTicked > 0 ? h("span", { style: S.modelGroupCount }, format(tt("provider.groupSelected"), { count: groupTicked })) : null), isCollapsed ? null : h("ul", {
 				style: S.modelList,
 				role: "list"
 			}, group.rows.map(renderRosterRow)));

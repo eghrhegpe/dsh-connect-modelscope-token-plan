@@ -611,9 +611,9 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
             row.contextSource === "curated" ? formatWindow(row.contextWindow) + " *" : formatWindow(row.contextWindow)
           )
           : null,
-        (FEATURED_OWNERS as readonly string[]).includes(catalogOwner(row.id))
-          ? h("span", { style: S.modelBadgeFeatured, title: tt("models.featuredTitle") }, tt("provider.featured"))
-          : null,
+        // 「推荐」不在这里——它是**厂商级**的标记，挂在组头（见下方 group head）。
+        // `FEATURED_OWNERS` 列的是 owner，挂到每一行上会让同名 owner 的十几行各说
+        // 一遍，而组头也在说：同一件事说十几遍，还把那十几行的宽度吃掉。
         row.quotaExhausted === true
           ? h("span", { style: { ...S.modelBadge, color: "var(--dsw-alias-state-error-primary)" } }, tt("provider.quotaExhausted"))
           : null,
@@ -700,6 +700,12 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
                       h("path", { d: "M3 6l5 5 5-5" })
                     ),
                     h("span", { style: S.modelGroupOwner }, group.owner),
+                    // 「推荐」是**厂商级**标记（`FEATURED_OWNERS` 是 owner 列表，
+                    // 见 const.ts 头注），所以每个 owner 只在组头挂一枚；同时它也是
+                    // 这一组被置顶的原因——只靠位置置顶，读者看不出凭什么是它。
+                    (FEATURED_OWNERS as readonly string[]).includes(group.owner)
+                      ? h("span", { style: S.modelBadgeFeatured, title: tt("models.featuredTitle") }, tt("provider.featured"))
+                      : null,
                     h("span", { style: S.modelGroupCount }, format(tt("provider.groupCount"), { count: group.rows.length })),
                     groupTicked > 0 ? h("span", { style: S.modelGroupCount }, format(tt("provider.groupSelected"), { count: groupTicked })) : null
                   ),

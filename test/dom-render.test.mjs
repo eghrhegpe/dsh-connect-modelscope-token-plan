@@ -691,7 +691,15 @@ assert.equal(rosterCheckOf(QWEN).checked, true, "enabledIds 命中的行勾中")
 assert.equal(rosterCheckOf(DEEPSEEK).checked, false, "未命中的行不勾");
 assert.match(bodyText(), /已启用 1 \/ 3/, "已启用计数上屏");
 assert.match(bodyText(), /视觉/, "vision 行带「视觉」标记");
+// 「推荐」是**厂商级**标记（FEATURED_OWNERS 列的是 owner，不是模型 id），所以它
+// 只挂在组头：fixture 三个 owner 都在置顶集里 → 恰好 3 枚。逐行挂会变成 3 组头
+// + 3 行 = 6 枚，同一件事说两遍（组头的 owner 名字本身就在说第一遍）。
 assert.match(bodyText(), /推荐/, "FEATURED_OWNERS 的 owner 带「推荐」标记");
+assert.equal(
+  (bodyText().match(/推荐/g) ?? []).length,
+  3,
+  "「推荐」每 owner 只在组头出现一枚，不逐行重复"
+);
 holdWrites = 1;
 toggleSwitches()[0].click();
 await settle();
