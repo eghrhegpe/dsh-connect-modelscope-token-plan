@@ -315,7 +315,7 @@ test/
 ├── panel.test.mjs           # 面板路由契约
 ├── routes.test.mjs          # 路由族
 ├── composer-pill.test.mjs   # 对话框胶囊
-├── family-kernel.test.mjs   # 三族插件一致性
+├── family-kernel.test.mjs   # 同族同源**宣称**的核对（数值重叠只报告，不判红）
 ├── env-hermetic.test.mjs    # 环境隔离
 ├── inference-vision.test.mjs # 视觉判定
 └── draw*.test.mjs           # 出图工具全套

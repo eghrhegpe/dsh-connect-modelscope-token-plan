@@ -5,13 +5,14 @@
  *
  * 本插件与 sensenova / agnes 是「受控复制」。2026-10-17 实测：与 sensenova 有 9 个
  * 内核文件重叠 ≥91.5%，与 agnes 只有 2 个——「受控」二字此前没有任何门禁，全靠
- * 头注自觉。本文件把账本变成红灯：
+ * 头注自觉。本文件把**自称**变成红灯：
  *
- *   §1 内核重叠：KERNEL.json 按姊妹仓库列 floor，跌破即红。内核文件在姊妹仓库里
- *      没有同名配对 = 账本与实测脱节，同样红。
+ *   §1 内核重叠（**只报告，不判红**）：打印 KERNEL.json 的基线与实测重叠，以及账本里
+ *      与姊妹没有同名配对的项。撤掉断言的理由见 §1 那段注释——它的输入是别人的仓库，
+ *      在 CI 上不存在、在开发者机器上会因别人改动而红。基线退化成「给人看的趋势读数」。
  *   §2 宣称核对：drift 工具的 claimMismatch（头注自称同源、实测不同源）在姊妹
- *      仓库在场时必须是 0——这是 `--strict` 语义的升格：从「有人手动跑诊断」变成
- *      「每次 npm test 都在跑」。
+ *      仓库在场时必须是 0。**这是本文件唯一保留的硬断言**，因为它判的是**本仓自己的
+ *      文档有没有说假话**（「抄错文档」那一类），而不是别人的文件长什么样。
  *
  * ## 判据只有一份
  *
@@ -102,7 +103,17 @@ for (const [key, spec] of Object.entries(KERNEL)) {
     continue;
   }
 
-  // ── §1 内核重叠 ──
+  // ── §1 内核重叠：**只报告，不判红**（2026-10-17 裁定）──
+  //
+  // 这半边曾经断言 `overlap >= floor` 与「账本与磁盘无脱节」。撤掉的理由不是嫌它严，
+  // 是它的**输入属于别的仓库**：floor 是「别人的文件今天长什么样」的函数，于是
+  //   - CI（干净检出、姊妹仓库不在场）上这半边根本不存在，永远看不到；
+  //   - 开发者机器上（姊妹恰好都在）它会因为你没碰过的那个仓库改了 `apply.ts` 而变红，
+  //     而处方是「去改 KERNEL.json 的 floor」——一条把「别人变了」翻译成「你去改账本」
+  //     的门禁，最终只会被橡皮图章式地放行。
+  // 判据该判的是**我们自己能不能被检查**：§2 的宣称核对判的是本仓文档自称的同源度与
+  // 实测是否相符（那是「抄错文档」的防线），保留为硬断言；数值重叠与账本在场性打印出来
+  // 给人看，不进退出码。
   const pairByFile = new Map(report.pairs.map((p) => [p.file, p]));
   const violations = [];
   const ghosts = [];
@@ -113,29 +124,26 @@ for (const [key, spec] of Object.entries(KERNEL)) {
       continue;
     }
     if (pair.overlap < floor - 1e-9) {
-      violations.push(`${file}  实测重叠 ${(pair.overlap * 100).toFixed(1)}%  < floor ${(floor * 100).toFixed(0)}%`);
+      violations.push(`${file}  ${(pair.overlap * 100).toFixed(1)}%  < 基线 ${(floor * 100).toFixed(0)}%`);
     }
   }
-  assert.deepEqual(
-    ghosts,
-    [],
-    `KERNEL.json 里这些文件与 ${key} 没有同名配对（账本与磁盘脱节，改账本或改代码，二选一，都要明着改）：\n  - ${ghosts.join("\n  - ")}`
-  );
-  assert.deepEqual(
-    violations,
-    [],
-    `与 ${key} 的内核文件跌破 floor（跌破 = 出现了结构分家，合法分家请显式改 KERNEL.json 的 floor 并说明理由）：\n  ${violations.join("\n  ")}`
+  const driftNote = violations.length === 0
+    ? "全部在基线上"
+    : `跌破基线的 ${violations.length} 项：${violations.join("；")}`;
+  console.log(
+    `family-kernel: ${key} 重叠报告（非门禁）—— ${driftNote}` +
+      (ghosts.length > 0 ? `；账本里与它没有同名配对的：${ghosts.join("、")}` : "")
   );
 
-  // ── §2 宣称核对（--strict 语义升格）──
+  // ── §2 宣称核对（唯一的硬断言：判的是本仓自己的文档）──
   const mismatches = report.mismatches ?? [];
   assert.deepEqual(
     mismatches,
     [],
-    `与 ${key} 存在「头注自称同源、实测不同源」的宣称：\n  ${mismatches.map((m) => (typeof m === "string" ? m : `${m.file}  实测重叠 ${(m.overlap * 100).toFixed(0)}%`)).join("\n  ")}`
+    `与 ${key} 存在「头注自称同源、实测不同源」的宣称（这是**本仓文档说假话**，必须改文档，不是改判据）：\n  ${mismatches.map((m) => (typeof m === "string" ? m : `${m.file}  实测重叠 ${(m.overlap * 100).toFixed(0)}%`)).join("\n  ")}`
   );
 
-  console.log(`family-kernel: ${key} ✓（内核 ${Object.keys(spec.files).length} 项全过 floor，宣称不符 0）`);
+  console.log(`family-kernel: ${key} ✓（宣称不符 0；重叠见上面那行报告，不进退出码）`);
 }
 
 const declared = Object.keys(KERNEL).filter((k) => k !== "_comment");

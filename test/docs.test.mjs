@@ -449,4 +449,40 @@ const FACTS = [
   );
 }
 
+// ── §14 AGENTS.md 代码地图：登记必须与磁盘一致（每个 src 文件都在，且不写幽灵行） ──
+//
+// 事故形态（2026-10-17 审计）：AGENTS.md 的代码地图 / 数据流 / 关键决策速查三张手维护的
+// 表**没有任何门禁**——整个 test/ 里 AGENTS 零引用（实测）。它是每个会话进门第一份读的
+// 文件，烂掉的代价比任何 docs 都高：错的地图会把下一轮会话指到不存在的文件上。同一天
+// 刚废掉的「每版手册」也正是从「干净」开始、靠复制传播的。
+//
+// 判据机械（两向都要）：
+//   ① 表行第一列登记的 `xxx.ts` 必须在磁盘上有对应文件（幽灵行 = 地图指向不存在的东西）；
+//   ② 磁盘上每个 src/**/*.ts 必须在表里登记（漏登记 = 新模块没人会读到）。
+// 第三列「关键导出」是散文，**无法机械核**（试过：正则当场误报 72/72），只能靠人——
+// 不在这条里装样子。
+{
+  const agents = read("AGENTS.md");
+  // 表行形如：| `routes/snapshot.ts` | 一句话职责 | `导出1`, `导出2` |
+  const rowFiles = [...agents.matchAll(/^\|\s*`([^`]+\.ts)`\s*\|/gm)].map((m) => m[1]);
+  assert.ok(rowFiles.length > 30, `AGENTS.md 代码地图只解析到 ${rowFiles.length} 行——表被改写/换格式了？`);
+  const roots = ["src/host", "src/client", "src/shared", "src/host/routes"];
+  const ghosts = rowFiles.filter((f) => !roots.some((r) => existsSync(join(root, r, f))));
+  assert.deepEqual(ghosts, [], `AGENTS.md 代码地图里这些文件磁盘上没有（幽灵行）：${ghosts.join("、")}`);
+  const onDisk = [];
+  for (const dir of ["src/host", "src/client", "src/shared", "src/host/routes"]) {
+    for (const e of readdirSync(join(root, dir), { withFileTypes: true })) {
+      if (e.isFile() && e.name.endsWith(".ts")) onDisk.push(e.name);
+    }
+  }
+  const registered = new Set(rowFiles.map((f) => f.split("/").pop()));
+  const missing = onDisk.filter((f) => !registered.has(f));
+  assert.deepEqual(
+    missing,
+    [],
+    `这些 src 文件没进 AGENTS.md 的代码地图（新模块没人会读到）：${missing.join("、")}\n` +
+      "把它加进对应的表（Host 侧 / Client 侧 / 共享），一句话职责 + 关键导出。"
+  );
+}
+
 console.log("docs.test.mjs: all checks passed");
