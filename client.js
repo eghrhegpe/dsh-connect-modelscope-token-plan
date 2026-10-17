@@ -46,22 +46,44 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		return slash >= 0 ? id.slice(0, slash) : id;
 	}
 	/**
-	* 徽章用的窗口短标注（tokens → "128K" / "1M"）。
+	* 徽章用的窗口短标注（tokens → "128K" / "1M"）——按**这个数被写出来时用的那个
+	* 进制**渲染，不把它换算到另一把尺上。
 	*
-	* K=1024、M=1024²，与档位值（131072…1048576）同一把尺。**不美化**：目录声明的
-	* 128000 显示成 "125K" 而不是 "128K"——标签必须能从数值反推出来，四舍五入到
-	* 好看的整数是撒谎。≥1M 用 M（`1.25M` 保留至多一位小数，去掉尾随 .0），
-	* ≥1024 用 K，更小的原样显示。
+	* 为什么不「一律除以 1024」：上游自己混用两种写法。档位表与模型的出厂规格是 2 的
+	* 幂（131072、262144、1048576），而目录声明与 models.dev / 策展表报的是十进制
+	* （128000、200000、256000、1000000——见 `context-catalog.ts` 里逐条抄下来的那些
+	* 数）。一律除 1024 会把后一类印成 125K / 195K / 250K / 977K：与上游自己写的名字
+	* 全都对不上。LongCat-Flash-Lite 上游就叫 256K，面板印 250K 是另一种撒谎；
+	* GLM-5.2 的 1M 印成 977K，读起来像「比档位里的 1M 小一截」——而档位里那个 1M 是
+	* 1048576，跟 1000000 差 4.6%，本来就是同一个市场叫法。
+	*
+	* 判据（与姊妹插件 Agnes 的 `tokenSize` 同一条规则，她那份头注记着同一个坑）：
+	*   1. ≥ 1M 走 M——十进制的 1,000,000 与二进制的 1,048,576 都读 "1M"；
+	*   2. 能整除 1000 的按十进制（128000 → "128K"、200000 → "200K"）；
+	*   3. 能整除 1024 的按二进制（131072 → "128K"、262144 → "256K"）；
+	*   4. 两者都不整除的零散声明按十进制取整（123456 → "123K"）；取整进位到四位数
+	*      就交给 M 档（999,999 读 "1M"，不读 "1000K"）。
+	*
+	* 代价说在明处：第 2、3 条会**撞车**——128000（两个进制都整除，走十进制）与
+	* 131072 都印 "128K"。这是有意的：窗口徽章回答的是「大概能放多少上下文」，而
+	* 128K / 256K / 1M 是上游与市场共用的叫法，跟它一致比区分那 2.4% 更有用。
+	*
+	* `tokens` 由调用方保证是正的有限数（`providerOf` 已挡），所以这里不再兜一次底。
 	* @param {number} tokens - 窗口大小（tokens）。
 	* @returns {string} 短标注。
 	*/
 	function formatWindow(tokens) {
-		if (tokens >= 1048576) {
-			const m = tokens / 1048576;
-			return `${m >= 10 || Number.isInteger(m) ? Math.round(m) : Math.round(m * 10) / 10}M`;
+		if (tokens >= 1e6) return millionLabel(tokens);
+		if (tokens >= 1024) {
+			const k = tokens % 1e3 === 0 ? tokens / 1e3 : tokens % 1024 === 0 ? tokens / 1024 : Math.round(tokens / 1e3);
+			return k >= 1e3 ? millionLabel(tokens) : `${k}K`;
 		}
-		if (tokens >= 1024) return `${Math.round(tokens / 1024)}K`;
 		return String(tokens);
+	}
+	/** M 档读数：≥10 只留整数，否则至多一位小数（`1048576` → "1M"、`2500000` → "2.5M"）。 */
+	function millionLabel(tokens) {
+		const m = tokens / 1e6;
+		return `${m >= 10 || Number.isInteger(m) ? Math.round(m) : Math.round(m * 10) / 10}M`;
 	}
 	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
 	var init_const = __esmMin((() => {
