@@ -108,6 +108,14 @@ export const S = {
   },
   formError: { color: "var(--dsw-alias-state-error-primary)", fontSize: 12, margin: "10px 0 0" },
   formNote: { color: "var(--dsw-alias-label-secondary)", fontSize: 12, margin: "10px 0 0" },
+  // 开关行里的中圆点：两侧都是可变内容（状态短语 / 来源标注），分隔符不能拼进
+  // 任一侧的文案——另一种语言会把它读成句子的一部分。
+  dotSep: { color: "var(--dsw-alias-label-secondary)", opacity: 0.55, fontSize: 11 },
+  // 卡片底部的**全局**设置（目前只有上下文窗口兜底）：模型清单是逐模型勾选，
+  // 这一块是盖在整批模型上的兜底值——粒度不同，用一条分隔线分开，也不给它
+  // 第二层边框（同一个框不画两次）。
+  advancedBlock: { marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--dsw-alias-border-l1)" },
+  advancedHint: { marginTop: 6, fontSize: 11, lineHeight: "16px", color: "var(--dsw-alias-label-secondary)" },
   // The model picker: a search box, then one flat row per model. The section
   // card owns the ONLY frame — a border per row was a card inside a card and
   // flattened the hierarchy (WorkBuddy lesson: inner elements never re-draw

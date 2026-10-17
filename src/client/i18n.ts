@@ -88,9 +88,14 @@ export const zh = {
   "provider.notConfigured": "还没有访问令牌，先到「接入」tab 配置",
   "provider.source.panel": "面板",
   "provider.source.config": "配置",
+  // 清单行徽章的 tooltip 用 `contextWindow`（泛称「上下文窗口」）；底部那个
+  // 选择器是**覆盖**开关，配 `contextDefault` 读成一对「覆盖 / 不覆盖」——
+  // 旧文案「默认（跟随目录）」把「不覆盖」说成了「跟随目录」，而它恰恰是盖过
+  // 目录与策展表的那一级，名不副实。
   "provider.contextWindow": "上下文窗口",
-  "provider.contextDefault": "默认（跟随目录）",
-  "provider.contextHint": "目录没声明窗口的模型按此值生效；保存后立即重新注册",
+  "provider.contextWindowOverride": "上下文窗口覆盖",
+  "provider.contextDefault": "不覆盖（默认）",
+  "provider.contextHint": "目录未声明窗口时套用此值（会盖过内置策展表）；保存后立即重新注册",
   "provider.contextCuratedTitle": "窗口来自内置策展表（models.dev 交叉真值），平台未亲口声明；带 * 标记",
 
   "section.draw": "出图工具",
@@ -253,8 +258,9 @@ export const en: typeof zh = {
   "provider.source.panel": "panel",
   "provider.source.config": "config",
   "provider.contextWindow": "Context window",
-  "provider.contextDefault": "Default (catalog)",
-  "provider.contextHint": "Applies to models whose catalog entry declares no window; re-registers immediately",
+  "provider.contextWindowOverride": "Context window override",
+  "provider.contextDefault": "No override (default)",
+  "provider.contextHint": "Applied when the catalog declares no window (it overrides the built-in curated table); re-registers immediately",
   "provider.contextCuratedTitle": "Window from the built-in curated table (models.dev cross-check), not declared by the platform; marked with *",
 
   "section.draw": "Draw tool",

@@ -165,8 +165,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.source.panel": "面板",
 			"provider.source.config": "配置",
 			"provider.contextWindow": "上下文窗口",
-			"provider.contextDefault": "默认（跟随目录）",
-			"provider.contextHint": "目录没声明窗口的模型按此值生效；保存后立即重新注册",
+			"provider.contextWindowOverride": "上下文窗口覆盖",
+			"provider.contextDefault": "不覆盖（默认）",
+			"provider.contextHint": "目录未声明窗口时套用此值（会盖过内置策展表）；保存后立即重新注册",
 			"provider.contextCuratedTitle": "窗口来自内置策展表（models.dev 交叉真值），平台未亲口声明；带 * 标记",
 			"section.draw": "出图工具",
 			"draw.enable": "开启后，agent 可在对话里用 modelscope_draw_image 生成或编辑图片",
@@ -304,8 +305,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.source.panel": "panel",
 			"provider.source.config": "config",
 			"provider.contextWindow": "Context window",
-			"provider.contextDefault": "Default (catalog)",
-			"provider.contextHint": "Applies to models whose catalog entry declares no window; re-registers immediately",
+			"provider.contextWindowOverride": "Context window override",
+			"provider.contextDefault": "No override (default)",
+			"provider.contextHint": "Applied when the catalog declares no window (it overrides the built-in curated table); re-registers immediately",
 			"provider.contextCuratedTitle": "Window from the built-in curated table (models.dev cross-check), not declared by the platform; marked with *",
 			"section.draw": "Draw tool",
 			"draw.enable": "Once on, the agent can generate or edit images with modelscope_draw_image",
@@ -749,6 +751,22 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				color: "var(--dsw-alias-label-secondary)",
 				fontSize: 12,
 				margin: "10px 0 0"
+			},
+			dotSep: {
+				color: "var(--dsw-alias-label-secondary)",
+				opacity: .55,
+				fontSize: 11
+			},
+			advancedBlock: {
+				marginTop: 14,
+				paddingTop: 12,
+				borderTop: "1px solid var(--dsw-alias-border-l1)"
+			},
+			advancedHint: {
+				marginTop: 6,
+				fontSize: 11,
+				lineHeight: "16px",
+				color: "var(--dsw-alias-label-secondary)"
 			},
 			rosterTools: {
 				display: "flex",
@@ -1694,30 +1712,20 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			return kept.includes(id) ? kept.filter((x) => x !== id) : [...kept, id];
 		});
 		const ticked = hideAllMode ? 0 : roster.filter((row) => draft.includes(row.id)).length;
-		const degraded = status.error === "unavailable";
-		let statusNode;
-		if (!degraded && typeof status.error === "string" && status.error !== "") statusNode = h("div", {
+		const alertNode = !(status.error === "unavailable") && typeof status.error === "string" && status.error !== "" ? h("div", {
 			style: S.formError,
 			role: "alert"
-		}, format(tt("provider.error"), { error: status.error }));
-		else if (status.registered === true) statusNode = h("div", {
-			style: {
-				fontSize: 12,
-				color: "var(--dsw-alias-label-secondary)"
-			},
-			role: "status"
-		}, tt("provider.registered"));
-		else if (status.llmAvailable !== true) statusNode = h("div", { style: {
-			...S.formNote,
-			color: "var(--dsw-alias-state-warn-primary)"
-		} }, tt("provider.llmMissing"));
-		else statusNode = h("div", {
-			style: {
-				...S.muted,
-				fontSize: 12
-			},
-			role: "status"
-		}, tt("provider.notRegistered"));
+		}, format(tt("provider.error"), { error: status.error })) : null;
+		const statusPhrase = alertNode !== null ? null : status.registered === true ? {
+			key: "provider.registered",
+			warn: false
+		} : status.llmAvailable !== true ? {
+			key: "provider.llmMissing",
+			warn: true
+		} : {
+			key: "provider.notRegistered",
+			warn: false
+		};
 		const tokenHint = enabled && tokenPresent === false ? h("div", { style: {
 			...S.formNote,
 			color: "var(--dsw-alias-state-warn-primary)"
@@ -1741,19 +1749,18 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				label: "1M"
 			}
 		];
-		const contextNode = onSaveContextWindow === void 0 ? null : h("div", { style: {
+		const contextNode = onSaveContextWindow === void 0 ? null : h("div", { style: S.advancedBlock }, h("div", { style: {
 			display: "flex",
 			gap: 8,
 			alignItems: "center",
-			flexWrap: "wrap",
-			margin: "0 0 8px"
+			flexWrap: "wrap"
 		} }, h("label", {
 			style: {
 				fontSize: 12,
 				color: "var(--dsw-alias-label-secondary)"
 			},
 			htmlFor: "provider-context-window"
-		}, tt("provider.contextWindow")), h("select", {
+		}, tt("provider.contextWindowOverride")), h("select", {
 			id: "provider-context-window",
 			style: {
 				...S.rosterBulk,
@@ -1771,13 +1778,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, tt("provider.contextDefault")), CONTEXT_TIERS.map((tier) => h("option", {
 			value: String(tier.value),
 			key: String(tier.value)
-		}, tier.label))), h("span", {
-			style: {
-				...S.muted,
-				fontSize: 11
-			},
-			title: tt("provider.contextHint")
-		}, tt("provider.contextHint")));
+		}, tier.label)))), h("div", { style: S.advancedHint }, tt("provider.contextHint")));
 		const switchRow = h("div", { style: {
 			display: "flex",
 			gap: 10,
@@ -1791,7 +1792,19 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			label: tt(enabled ? "provider.on" : "provider.off"),
 			busyLabel: tt("provider.busy"),
 			title: tt("provider.enable")
-		}), h("span", { style: {
+		}), statusPhrase === null ? null : h("span", {
+			style: S.dotSep,
+			"aria-hidden": "true"
+		}, "·"), statusPhrase === null ? null : h("span", {
+			role: "status",
+			style: {
+				fontSize: 12,
+				color: statusPhrase.warn ? "var(--dsw-alias-state-warn-primary)" : "var(--dsw-alias-label-secondary)"
+			}
+		}, tt(statusPhrase.key)), h("span", {
+			style: S.dotSep,
+			"aria-hidden": "true"
+		}, "·"), h("span", { style: {
 			fontSize: 11,
 			color: "var(--dsw-alias-label-secondary)"
 		} }, tt(sourceKey)));
@@ -1942,10 +1955,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			disabled: busy,
 			onClick: onReset
 		}, tt("provider.reset"))));
-		return h("div", null, switchRow, statusNode, tokenHint, contextNode, h("div", { style: {
+		return h("div", null, switchRow, alertNode, tokenHint, h("div", { style: {
 			...S.sectionTitle,
 			margin: "18px 0 8px"
-		} }, tt("provider.models")), rosterBlock, error !== null ? h("div", {
+		} }, tt("provider.models")), rosterBlock, contextNode, error !== null ? h("div", {
 			style: S.formError,
 			role: "alert"
 		}, error) : null);

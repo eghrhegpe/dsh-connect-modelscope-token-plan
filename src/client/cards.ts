@@ -459,18 +459,23 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
   });
   const ticked = hideAllMode ? 0 : roster.filter((row) => draft.includes(row.id)).length;
 
-  // 状态行，顺序即优先级：具体失败 > 能力缺口 > 已注册 > 未注册。
+  // 状态拆成**两件不同的事**：失败单独一行、显眼（role=alert）；一句话状态并进
+  // 开关那一行（见 switchRow）。原来「已接入」「已注册」「未注册」各占一行，
+  // 三行说的是同一件事的三个阶段，读起来像三件不同的事。
+  // 优先级不变：具体失败 > 能力缺口 > 已注册 > 未注册。
   const degraded = status.error === "unavailable";
-  let statusNode: unknown;
-  if (!degraded && typeof status.error === "string" && status.error !== "") {
-    statusNode = h("div", { style: S.formError, role: "alert" }, format(tt("provider.error"), { error: status.error }));
-  } else if (status.registered === true) {
-    statusNode = h("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" }, role: "status" }, tt("provider.registered"));
-  } else if (status.llmAvailable !== true) {
-    statusNode = h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("provider.llmMissing"));
-  } else {
-    statusNode = h("div", { style: { ...S.muted, fontSize: 12 }, role: "status" }, tt("provider.notRegistered"));
-  }
+  const alertNode = !degraded && typeof status.error === "string" && status.error !== ""
+    ? h("div", { style: S.formError, role: "alert" }, format(tt("provider.error"), { error: status.error }))
+    : null;
+  // 有 alert 时不再重复一句话状态：否则「接入失败：…」旁边挂着「已注册」，两句
+  // 话自相矛盾（error 与 registered 可以同时为真——那是回滚到旧对的状态）。
+  const statusPhrase: { key: DictionaryKey; warn: boolean } | null = alertNode !== null
+    ? null
+    : status.registered === true
+      ? { key: "provider.registered", warn: false }
+      : status.llmAvailable !== true
+        ? { key: "provider.llmMissing", warn: true }
+        : { key: "provider.notRegistered", warn: false };
 
   // 开关开着但还没有令牌：注册一定到不了位，明确指向「接入」tab，别让它
   // 看起来像「开了等一会儿就好」。
@@ -481,7 +486,9 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
   // 源标注：面板保存的值 / patch 的默认。
   const sourceKey = status.source === "panel" ? "provider.source.panel" : "provider.source.config";
 
-  // 全局上下文窗口选择器（作用于目录未声明窗口的模型）。
+  // 全局上下文窗口**覆盖**。放在卡片最底：插件自带策展表（19 个模型的交叉真值），
+  // 这个值只在目录未声明窗口时套用，却会盖过策展表——它是「覆盖」而不是「跟随」，
+  // 所以不该出现在开关旁边冒充主流程。
   //
   // 档位值用 2 的幂（模型界惯例的 K=1024）：128K=131072 … 1M=1048576。选中态
   // 直接读 `status.contextWindow`（保存后由调用方刷快照回显落盘值，select 是
@@ -498,30 +505,39 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
     ? null
     : h(
         "div",
-        { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "0 0 8px" } },
-        h("label", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" }, htmlFor: "provider-context-window" }, tt("provider.contextWindow")),
+        { style: S.advancedBlock },
         h(
-          "select",
-          {
-            id: "provider-context-window",
-            style: { ...S.rosterBulk, width: "auto" },
-            disabled: busy,
-            // 受控 select：选中态写在 select 的 `value` 上（React 对 <option
-            // selected> 发告警），null = 「默认」档（value=""）。保存后调用方刷
-            // 快照回显落盘值；落盘值不在档位里时 value 不匹配任何 option，浏览器
-            // 显示第一项，但下一发 onChange 仍发正确的值——可接受的边缘表现。
-            value: status.contextWindow === null ? "" : String(status.contextWindow),
-            onChange: (event: unknown) => {
-              const value = String((event as { target?: { value?: string | null } }).target?.value ?? "");
-              onSaveContextWindow(value === "" ? null : Number(value));
-            }
-          },
-          h("option", { value: "", key: "default" }, tt("provider.contextDefault")),
-          CONTEXT_TIERS.map((tier) => h("option", { value: String(tier.value), key: String(tier.value) }, tier.label))
+          "div",
+          { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
+          h("label", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" }, htmlFor: "provider-context-window" }, tt("provider.contextWindowOverride")),
+          h(
+            "select",
+            {
+              id: "provider-context-window",
+              style: { ...S.rosterBulk, width: "auto" },
+              disabled: busy,
+              // 受控 select：选中态写在 select 的 `value` 上（React 对 <option
+              // selected> 发告警），null = 「不覆盖」档（value=""）。保存后调用方刷
+              // 快照回显落盘值；落盘值不在档位里时 value 不匹配任何 option，浏览器
+              // 显示第一项，但下一发 onChange 仍发正确的值——可接受的边缘表现。
+              value: status.contextWindow === null ? "" : String(status.contextWindow),
+              onChange: (event: unknown) => {
+                const value = String((event as { target?: { value?: string | null } }).target?.value ?? "");
+                onSaveContextWindow(value === "" ? null : Number(value));
+              }
+            },
+            h("option", { value: "", key: "default" }, tt("provider.contextDefault")),
+            CONTEXT_TIERS.map((tier) => h("option", { value: String(tier.value), key: String(tier.value) }, tier.label))
+          )
         ),
-        h("span", { style: { ...S.muted, fontSize: 11 }, title: tt("provider.contextHint") }, tt("provider.contextHint"))
+        // 提示另起一行：它是这个值的适用面（谁会被盖、谁不会），塞在选择器右边
+        // 会把它挤成第二条标签，读起来像两个并列的控件。
+        h("div", { style: S.advancedHint }, tt("provider.contextHint"))
       );
 
+  // 开关行 = 一行话：「已接入 · 已注册（模型可在选择器里选用） · 面板」。开关的
+  // 文案是**开关自己的状态**，注册状态是**Host 里的落地情况**，两者可以不一致
+  // （开关开着但注册还没完成），所以两个词都留着，只用中圆点让它们读成一句话。
   const switchRow = h(
     "div",
     { style: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", margin: "0 0 8px" } },
@@ -533,6 +549,24 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
       busyLabel: tt("provider.busy"),
       title: tt("provider.enable")
     }),
+    // 中圆点分隔符各在**每一段之前**（第一段除外）。段落数随状态变——有 alert
+    // 时状态短语整段缺席，只剩「开关 · 来源」两段——所以点的位置必须跟着段走，
+    // 写死在某一处会在另一种组合下变成一个孤零零的「·」。
+    statusPhrase === null ? null : h("span", { style: S.dotSep, "aria-hidden": "true" }, "·"),
+    statusPhrase === null
+      ? null
+      : h(
+          "span",
+          {
+            role: "status",
+            style: {
+              fontSize: 12,
+              color: statusPhrase.warn ? "var(--dsw-alias-state-warn-primary)" : "var(--dsw-alias-label-secondary)"
+            }
+          },
+          tt(statusPhrase.key)
+        ),
+    h("span", { style: S.dotSep, "aria-hidden": "true" }, "·"),
     h("span", { style: { fontSize: 11, color: "var(--dsw-alias-label-secondary)" } }, tt(sourceKey))
   );
 
@@ -672,11 +706,11 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
     "div",
     null,
     switchRow,
-    statusNode,
+    alertNode,
     tokenHint,
-    contextNode,
     h("div", { style: { ...S.sectionTitle, margin: "18px 0 8px" } }, tt("provider.models")),
     rosterBlock,
+    contextNode,
     error !== null ? h("div", { style: S.formError, role: "alert" }, error) : null
   );
 }
