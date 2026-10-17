@@ -17,7 +17,7 @@ const warnings = [];
 const makeStore = (overrides = {}) => createFileUsageStore({
   name: PLUGIN_ID,
   profile: PROFILE,
-  trendDays: 3,
+  retentionDays: 3,
   maxEvents: 3,
   now: () => clock,
   logger: { warn: (m) => warnings.push(m) },
@@ -59,7 +59,7 @@ assert.deepEqual(trend.map((b) => b.dateKey), [localDateKey(new Date(2026, 9, 3)
 assert.equal(trend[1].calls, 3);
 assert.equal(trend[2].calls, 1);
 
-// §4 天桶修剪：trendDays=3，出现第 4 个天桶后最早的那个被删。
+// §4 天桶修剪：retentionDays=3，出现第 4 个天桶后最早的那个被删。
 const old = new Date(2026, 8, 20, 9, 0, 0);
 await store.recordCall({ modelId: "m/x", tokens: null, at: old });
 const t2 = new Date(2026, 9, 6, 8, 0, 0);

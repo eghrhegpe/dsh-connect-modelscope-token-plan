@@ -37,8 +37,23 @@ export const CONFIG_DEFAULTS = Object.freeze({
   apiBase: "https://api-inference.modelscope.cn/v1",
   /** 站点源站，只用于面板外链（访问令牌页 / 文档）。 */
   siteBase: "https://modelscope.cn",
-  /** 本地趋势保留天数（usage-store 天桶数量；超出即修剪）。 */
+  /**
+   * 趋势图**显示**天数（面板标题「近 N 天」与图上柱数）——默认值，用户可在面板里
+   * 改看多长。
+   *
+   * **与 retentionDays 是两件事**（2026-10-17 拆开）：这个数只决定「画多少」，
+   * 不再决定「留多少」。曾经一个 trendDays 同时是保留窗口，于是「想多看几天」等于
+   * 「改保留策略」，改小还会把历史当场剪掉——拆开正是为了消除这层耦合。
+   */
   trendDays: 14,
+  /**
+   * 本地趋势**保留**天数（usage-store 天桶的修剪窗口；超出即删）。
+   *
+   * 取 90：够回看一个季度，而每个天桶只是两个整数——留 90 天的磁盘代价可忽略。
+   * 显示窗口恒被夹在它之内（见 resolveSettings），所以「画得比留得多」这个会把
+   * 已剪的日子画成 0（与「那天真的没调用」在面板上无法区分）的组合不会出现。
+   */
+  retentionDays: 90,
   /** Host 侧对 /v1/models 的缓存秒数。 */
   cacheSeconds: 60,
   /** 面板轮询间隔——由 Host 下发、面板跟随，两端不各自假设。 */
@@ -137,6 +152,8 @@ export interface ResolvedSettings {
   apiBase: string;
   siteBase: string;
   trendDays: number;
+  /** 本地趋势的保留窗口（天桶修剪用），恒 ≥ trendDays。 */
+  retentionDays: number;
   cacheSeconds: number;
   pollSeconds: number;
   inferenceTimeoutMs: number;
@@ -170,11 +187,16 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
     // 一处派生，否则「等待不该超过总放弃线」这条不变量就在两个地方各写一遍，
     // 改一处忘一处。
     const drawTimeoutMs = clampInt(source.drawTimeoutMs, CONFIG_DEFAULTS.drawTimeoutMs, 30_000, DRAW_TIMEOUT_MAX_MS);
+    // 保留窗口先算出来：它是**显示窗口的上界**（下一条），两个数必须一处派生。
+    // 显示大于保留会把已剪掉的日子画成 0，而那与「那天真的没调用」在面板上长得
+    // 一模一样——所以显示被硬夹在保留之内，这条不变量只在这里写一次。
+    const retentionDays = clampInt(source.retentionDays, CONFIG_DEFAULTS.retentionDays, 1, 365);
     return {
       settings: {
         apiBase,
         siteBase,
-        trendDays: clampInt(source.trendDays, CONFIG_DEFAULTS.trendDays, 1, 365),
+        trendDays: clampInt(source.trendDays, CONFIG_DEFAULTS.trendDays, 1, retentionDays),
+        retentionDays,
         // 三个时长都必须有上界。`clampInt` 的 max 默认 Infinity，而这三个值直接
         // 喂给定时器与超时：
         //   · pollSeconds × 1000 交给 setInterval，超过 2^31-1 ms 时 Node 把延时
@@ -212,6 +234,7 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         apiBase: CONFIG_DEFAULTS.apiBase,
         siteBase: CONFIG_DEFAULTS.siteBase,
         trendDays: CONFIG_DEFAULTS.trendDays,
+        retentionDays: CONFIG_DEFAULTS.retentionDays,
         cacheSeconds: CONFIG_DEFAULTS.cacheSeconds,
         pollSeconds: CONFIG_DEFAULTS.pollSeconds,
         inferenceTimeoutMs: CONFIG_DEFAULTS.inferenceTimeoutMs,

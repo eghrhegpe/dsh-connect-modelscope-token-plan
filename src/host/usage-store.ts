@@ -149,16 +149,17 @@ function parsePayload(raw: unknown): { payload: UsagePayload | null; anomaly: st
  * @param {object} options
  * @param {string} options.name - 插件 slug（状态目录名，来自 host-config）。
  * @param {string|null} [options.profile] - profile 名；null = 共享目录。
- * @param {number} [options.trendDays] - 天桶保留数（超出修剪；从配置注入，
- *   让「配置改小」在下次写入时生效，而不是等一个固定的内部常数）。
+ * @param {number} [options.retentionDays] - 天桶**保留**数（超出即修剪；从配置注入，
+ *   让「配置改小」在下次写入时生效，而不是等一个固定的内部常数）。与「显示多少天」
+ *   是两件事——显示窗口由调用方传给 `trend(days)`，保留窗口恒 ≥ 它（host-config 夹）。
  * @param {number} [options.maxEvents] - 事件流上限。
  * @param {() => Date} [options.now] - 时钟源；测试注入。
  * @param {{warn?: (message: string) => void}} [options.logger] - ctx.logger。
  */
-export function createFileUsageStore({ name, profile = null, trendDays = 14, maxEvents = 50, now = () => new Date(), logger }: {
+export function createFileUsageStore({ name, profile = null, retentionDays = 90, maxEvents = 50, now = () => new Date(), logger }: {
   name: string;
   profile?: string | null;
-  trendDays?: number;
+  retentionDays?: number;
   maxEvents?: number;
   now?: () => Date;
   logger?: { warn?: (message: string) => void };
@@ -266,12 +267,12 @@ export function createFileUsageStore({ name, profile = null, trendDays = 14, max
       await persist(payload);
     });
 
-  /** 修剪：只留最近 trendDays 个天桶（按 dateKey 排序，今天不删）。 */
+  /** 修剪：只留最近 retentionDays 个天桶（按 dateKey 排序，今天不删）。 */
   const pruneDays = (payload: UsagePayload, todayKey: string) => {
     const keep = new Set(
       Object.keys(payload.days)
         .sort()
-        .slice(-Math.max(1, trendDays))
+        .slice(-Math.max(1, retentionDays))
     );
     keep.add(todayKey);
     for (const key of Object.keys(payload.days)) {
@@ -369,7 +370,7 @@ export function createFileUsageStore({ name, profile = null, trendDays = 14, max
     },
 
     /** 最近 N 天趋势（含今天；缺桶 = 该日 0 次，真实零不是数据丢失）。 */
-    async trend(days = trendDays) {
+    async trend(days = retentionDays) {
       const payload = await cache.read();
       const out: Array<{ dateKey: string; calls: number; tokens: number }> = [];
       const cursor = now();

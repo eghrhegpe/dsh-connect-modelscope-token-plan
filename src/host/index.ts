@@ -68,7 +68,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   const usageStore = createFileUsageStore({
     name,
     profile,
-    trendDays: settings.trendDays,
+    retentionDays: settings.retentionDays,
     maxEvents: settings.maxEvents,
     logger: ctx.logger
   });

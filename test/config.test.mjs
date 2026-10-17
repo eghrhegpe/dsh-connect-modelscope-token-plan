@@ -30,7 +30,7 @@ for (const key of ["dailyQuotaTotal", "dailyQuotaPerModel"]) {
     `cordis.patch.yml 不该再有 ${key} 配置项（面板不消费它）`
   );
 }
-for (const key of ["trendDays", "cacheSeconds", "pollSeconds", "inferenceTimeoutMs", "maxEvents", "apiBase", "siteBase", "drawTimeoutMs", "drawWaitMs"]) {
+for (const key of ["trendDays", "retentionDays", "cacheSeconds", "pollSeconds", "inferenceTimeoutMs", "maxEvents", "apiBase", "siteBase", "drawTimeoutMs", "drawWaitMs"]) {
   const patchValue = patch.match(new RegExp(String(key) + String.raw`:\s*([^#\n]+)`));
   assert.ok(patchValue, `cordis.patch.yml 缺少 ${key}（配置面与默认值必须同场）`);
   const literal = String(patchValue[1]).trim().replace(/^["']|["']$/g, "");
@@ -53,6 +53,20 @@ assert.ok(good.settings.allowedHosts.has("localhost"));
 const bad = resolveSettings({ trendDays: -5 });
 assert.equal(bad.settings.trendDays, CONFIG_DEFAULTS.trendDays, "非法值回退默认");
 assert.equal(bad.settings.registerProvider, false, "registerProvider 是严格布尔");
+
+// §5a 显示窗口恒被夹在保留窗口之内。
+//
+// 拆开这两个数的理由是它们曾共用一个 trendDays：想多看几天 = 改保留策略，改小还会
+// 把历史当场剪掉。拆开后仍有一条不变量必须守住——「画得比留得多」会把**已剪掉**的
+// 日子画成 0，而那与「那天真的没调用」在面板上长得一模一样（README「读不到 ≠ 0」
+// 的同一条纪律，只不过这次的「读不到」是保留策略造成的）。
+const clampedDisplay = resolveSettings({ trendDays: 200, retentionDays: 90 });
+assert.equal(clampedDisplay.settings.trendDays, 90, "显示不得超过保留");
+assert.equal(clampedDisplay.settings.retentionDays, 90, "保留本身不被显示牵连");
+assert.equal(resolveSettings({ retentionDays: 30 }).settings.trendDays, 14, "默认显示 14 天，落在保留之内不作改动");
+assert.equal(resolveSettings({ retentionDays: 1 }).settings.trendDays, 1, "保留调到 1 时显示跟着夹到 1");
+assert.equal(resolveSettings({ retentionDays: 999 }).settings.retentionDays, 365, "保留上界 365");
+assert.equal(resolveSettings({ retentionDays: -5 }).settings.retentionDays, CONFIG_DEFAULTS.retentionDays, "非法保留值回退默认");
 
 // §5b 喂给定时器与超时的三个值必须有上界。
 //
