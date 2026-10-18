@@ -75,6 +75,12 @@ npm whoami --registry=https://registry.npmjs.org   # 401 说明没登录
 `npm publish --registry=https://registry.npmjs.org --strict-ssl=false`。注意它与登录无关：
 `npm login` 修的是 401，修不了证书；whoami 能回用户名就不需要 login。
 
+**谁负责跑 `npm publish`**：账号开了两步验证时（本机 `eghrhegpe` 就是），`npm publish`
+**必须由账号持有者本人在终端执行**并输入一次性密码——OTP 不该经 AI 会话之手，而 AI 代跑
+只会撞 `EOTP`：它打印的授权链接在日志里被脱敏（`auth/cli/***`），拿不到可转发的完整 URL，
+也无法代你打开浏览器。让用户在终端跑，npm 会交互式提示输入 6 位码；`--otp <码>` 只在
+用户主动把码交给执行者时才用。
+
 ## 每次发布的完整步骤
 
 ### 1. 确认测试与代码
@@ -195,8 +201,10 @@ npm view dsh-connect-modelscope-token-plan version --registry=https://registry.n
 
 报错与对策（**这三条最容易误判**）：
 
-- `EOTP`：账号开了两步验证，**不是**登录失败。打开它打印的 auth 链接走完 2FA，把 6 位码
-  追加成 `--otp 123456`（30 秒刷一次，过期就重新取一个）。
+- `EOTP`：账号开了两步验证，**不是**登录失败。**这一步换人跑**——让账号持有者在终端
+  亲自执行 `npm publish`，npm 会提示输入 6 位一次性密码；AI 会话代跑只会撞 `EOTP`，且它
+  打印的授权链接在日志里被脱敏（`***`）、拿不到也打不开。若执行者确已拿到码，可
+  `--otp 123456`（30 秒刷一次，过期就重新取一个）。
 - `E401`：未登录或 token 失效 → `npm login --registry=https://registry.npmjs.org` 后按原版本号重发。
 - `DEPTH_ZERO_SELF_SIGNED_CERT`：TLS 被拦，与登录无关（见 §0.3）。只在**这一条**命令上加
   `--strict-ssl=false`，**不要**改全局——`npm login` 修不了它。
