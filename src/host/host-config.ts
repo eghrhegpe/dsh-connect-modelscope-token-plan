@@ -25,7 +25,7 @@ export const inject = ["webServer"];
  * 产物反而引入第二份真源；这里用常量、由 test/config.test.mjs 钉住与
  * package.json 一致。
  */
-export const PLUGIN_VERSION = "0.6.1";
+export const PLUGIN_VERSION = "0.6.2";
 
 /**
  * 默认值。刻意不含额度常数——理由见本文件头。

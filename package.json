@@ -2,13 +2,13 @@
   "name": "dsh-connect-modelscope-token-plan",
   "displayName": "DSH Connect ModelScope Token Plan",
   "icon": "./icon.svg",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "homepage": "https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan",
   "bugs": {
     "url": "https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan/issues"
   },
   "author": "eghrhegpe",
-  "description": "ModelScope (modelscope.cn) connect bundle for the Harness Web UI: the official Magicube balance plus, for calls made through this plugin, per-model counts, a daily trend, and a 429 error event list on the Plugins-page panel, plus a default-off switch that registers ModelScope models as a DSH LLM provider.",
+  "description": "ModelScope (modelscope.cn) access bundle for DSH: opt-in registration of ModelScope language models and draw tool as an OpenAI-compatible provider (vision and context windows auto-filled, usable the moment registered), plus a free-quota panel with the official Magicube balance, per-model local call counts, daily trends and 429 event list — usable without registering.",
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",
