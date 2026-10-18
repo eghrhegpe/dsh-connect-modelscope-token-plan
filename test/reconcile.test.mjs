@@ -227,4 +227,39 @@ function makeDeps({ store, fetch, logger, usageEvents } = {}) {
   }
 }
 
+// §9 串行链防毒化（2026-10-18 R8）：executor 任何一次未预料的反抗都不许把
+// `chain` 变成永久 rejected——那之后每次 reconcile() 都是 `rejected.then(cb)`，
+// cb 永不执行：收敛器静默死亡、路由永远回放那次古老的错误、轮询侧每 tick
+// 一次 unhandled rejection。实测复现（修前）：同步抛一次 →「故障恢复」后再
+// 触发，publish 调用次数恒为 0。与 publish-core.createPublishQueue /
+// state-store.createStateWriteQueue 同一范式，本文件的链曾是全仓唯一漏的。
+{
+  // ① store **同步抛**（不是返回 reject 的 promise）：readDesired 的三路降级
+  //    必须把它收住——读不到按未设置处理，收敛照常完成，更不许毒化。
+  {
+    const store = makeStore();
+    store.enabled = () => { throw new Error("sync boom"); };
+    const { deps, published } = makeDeps({ store });
+    const { reconcile } = createProviderReconciler(deps);
+    await reconcile();
+    assert.equal(published.length, 1, "store 同步抛 = 读不到 = 按未设置降级，收敛照常一遍");
+    store.enabled = async () => true; // 「故障恢复」
+    await reconcile();
+    assert.equal(published.length, 2, "同步抛之后链必须还活着：恢复再触发，publish 继续跑");
+  }
+  // ② executor 内部的意外反抗（store 降级盖不住的那类：resolveEnabledIds 的
+  //    第二个参数同步抛）：本触发**如实 reject**（调用方看得见），但链必须
+  //    surviv——下一次触发照常收敛。毒化下第二条 await 会直接把测试炸红。
+  {
+    const { deps, published } = makeDeps({});
+    const publisher = deps.publisher;
+    publisher.state = { get enabledIds() { throw new Error("state boom"); } };
+    const { reconcile } = createProviderReconciler(deps);
+    await assert.rejects(() => reconcile(), /state boom/, "executor 的意外反抗如实呈报给调用方（不吞）");
+    publisher.state = { enabledIds: [] }; // 「故障恢复」
+    await reconcile();
+    assert.equal(published.length, 1, "一次意外反抗之后链必须还活着：恢复再触发，publish 照常");
+  }
+}
+
 console.log("reconcile.test.mjs: all checks passed");

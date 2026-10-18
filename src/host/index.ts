@@ -159,7 +159,12 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     // 且**用落盘的允许清单**注册（reconciler 读 desired 时走 resolveEnabledIds，
     // 而非空清单）——见 fix A/C。读不到目录就等下一轮；开关/清单保存在
     // provider-store，provider 路由同样只触发收敛。
-    void reconcile();
+    void reconcile().catch((error) => {
+      // 收敛链已防毒化（provider-reconcile §9 的回归钉住），这里仍兜一层：
+      // executor 级的反抗 = 未预料 bug，该留档呈报；而轮询路径的 unhandled
+      // rejection 在最坏情况下会掀掉 Host 进程——一次收敛失败不该有那个代价。
+      ctx.logger?.warn?.(`${name}: mount reconcile failed (${redactSecrets(errMsg(error))})`);
+    });
 
     // 出图工具（opt-in，默认关）：与 provider 注册是**两条独立的开关**——「把魔搭
     // 当 chat provider」和「给 agent 一个出图工具」回答的是不同问题，合并没有好处。
@@ -173,7 +178,11 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     // 内按 `catalogSignature` 比对——未变则空转不重建（见 fix B）；开关翻转、
     // 清单保存由 provider 路由触发同一条收敛链，不在这里各写一遍。
     const timer = setInterval(() => {
-      void reconcile();
+      void reconcile().catch((error) => {
+        // 同挂载处：链已防毒化，这里是「未预料反抗」的呈报兜底——留档，不静默，
+        // 更不许以 unhandled rejection 的形式到达进程级。
+        ctx.logger?.warn?.(`${name}: scheduled reconcile failed (${redactSecrets(errMsg(error))})`);
+      });
     }, settings.pollSeconds * 1000);
 
     // 返回的是卸载清理：Cordis 在 fiber dispose 时跑它——提前跑会把刚注册的

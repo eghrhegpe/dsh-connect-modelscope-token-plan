@@ -483,9 +483,16 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const sign = value < 0 ? "-" : "";
 		const abs = Math.abs(value);
 		if (abs < 1e3) return `${sign}${trim(abs)}`;
-		if (abs < 1e6) return `${sign}${trim(abs / 1e3)}k`;
-		if (abs < 1e9) return `${sign}${trim(abs / 1e6)}m`;
-		return `${sign}${trim(abs / 1e9)}b`;
+		const tiers = [
+			[1e3, "k"],
+			[1e6, "m"],
+			[1e9, "b"]
+		];
+		for (const [i, [divisor, unit]] of tiers.entries()) {
+			const shown = trim(abs / divisor);
+			if (i === tiers.length - 1 || Number(shown) < 1e3) return `${sign}${shown}${unit}`;
+		}
+		return `${sign}${trim(abs)}b`;
 	}
 	/** 填 `{key}` 模板：vars 的每个键对应模板里的同名占位符。 */
 	function format(template, vars) {

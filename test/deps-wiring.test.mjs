@@ -200,7 +200,9 @@ function allSources() {
   let registered = false;
   const { buildDescriptors } = await import("../src/host/llm-models.ts");
 
-  const session = apply(
+  // 返回值（effect cleanup 收集在 makeCtx 的 cleanups 里）本块不直接用——
+  // teardown 走下方 cleanups.splice(0)，这里要的是 apply() 的副作用真的跑完。
+  apply(
     makeCtx(),
     { registerProvider: true },
     {

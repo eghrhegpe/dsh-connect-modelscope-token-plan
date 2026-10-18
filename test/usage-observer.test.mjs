@@ -167,7 +167,6 @@ async function* of(chunks) {
 }
 {
   // sinks 抛错/拒绝：绝不能打断对话（观测失败不是对话失败）。
-  const r6 = recorder();
   const hostile = {
     recordCall: () => { throw new Error("disk on fire"); },
     recordEvent: () => Promise.reject(new Error("disk on fire")),

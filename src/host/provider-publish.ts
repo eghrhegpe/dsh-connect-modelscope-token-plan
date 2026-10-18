@@ -64,8 +64,9 @@ interface ProviderPublisherDeps {
    * publisher 依赖哪些设置」变成不可枚举的，而它恰好是那条 rollback / 空转守卫
    * 逻辑最需要看清的东西。
    *
-   * `maxTokensOverrides` 与 `apiBase` 同一个理由在场：两者都是**每次 publish 现读**
-   * 的请求侧事实，改它们不该需要重启。
+   * `maxTokensOverrides` 与 `apiBase` 同一个理由在场：两者都是**构造期读入**的
+   * 请求侧事实（`index.ts` 一次性 `resolveSettings` 后交进来）——patch 改动要
+   * reload（apply 重跑）才生效，不是下一轮目录轮询。
    */
   settings?: { registerProvider?: boolean; apiBase?: string; maxTokensOverrides?: Record<string, number> };
   panelSwitch?: () => Promise<boolean | null>;
@@ -327,9 +328,9 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
         entries: state.entries,
         enabledIds: state.enabledIds,
         baseUrl: effectiveSettings.apiBase,
-        // 每次 publish 现读（与 apiBase 同理），所以改覆盖在下一轮目录轮询或开关
-        // 翻转时就生效，不用重启。`?? {}` 同时兜住「测试传了裸 {}」这种情况——
-        // 空对象 = 目录说了算，正是缺省语义。
+        // 构造期从 `effectiveSettings` 读入（apply 一次性 resolveSettings；改 patch
+        // 要 reload 才生效，与 apiBase 同理——不是下一轮目录轮询）。`?? {}` 兜住
+        // 「测试传了裸 {}」——空对象 = 目录说了算，正是缺省语义。
         maxTokensOverrides: effectiveSettings.maxTokensOverrides ?? {},
         resolveApiKey: effectiveResolveApiKey,
         get: effectiveGetLlm,

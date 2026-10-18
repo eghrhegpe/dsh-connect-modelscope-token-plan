@@ -32,10 +32,6 @@ const { __records } = await import("@earendil-works/pi-ai");
 const { createModelScopeAdapter } = await import("../src/host/llm-adapter.ts");
 
 const BASE_URL = "https://api-inference.modelscope.cn/v1";
-const NOOP_SINKS = {
-  recordCall: () => {},
-  recordEvent: () => {}
-};
 
 // ── §1 providerIds 与 createProvider 调用形状 + descriptor 契约 ─────────────
 {

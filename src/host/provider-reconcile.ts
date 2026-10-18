@@ -98,15 +98,36 @@ export function createProviderReconciler(deps: ProviderReconcilerDeps) {
   const { settings, providerStore, inference, publisher, usageEvents, logger } = deps;
 
   /**
-   * 读一次 desired。三路都 `.catch(() => null)`：读不到按「未设置」降级，
-   * 与开关/清单/覆盖各自的读侧纪律一致——一次读失败不该把收敛打掉。
+   * 把一次 store 读取收成「值或 null」——**同步抛与异步拒收都降级**。
+   *
+   * store 是外部契约：当前三个 store 方法都是 `async`（同步抛不可达），但这
+   * 不是可依赖的保证——病态实现、未来改签名、测试替身都可能同步抛。同步抛
+   * 曾在 `Promise.all([a(), b(), c()])` 的**数组构造处**逃逸，把整个 executor
+   * 变成 rejection（2026-10-18 实测的链毒化入口，见 {@link reconcile} 的防
+   * 毒化注释）。一次读失败按「未设置」降级是本文件既有纪律，同步抛与拒收
+   * 不该得到不同待遇。
+   * @template T
+   * @param {() => T | Promise<T>} read - 一次 store 读取。
+   * @returns {Promise<T | null>} 读到的值，或 null（读不到）。
+   */
+  const settle = <T>(read: () => T | Promise<T>): Promise<T | null> => {
+    try {
+      return Promise.resolve(read()).catch(() => null);
+    } catch {
+      return Promise.resolve(null);
+    }
+  };
+
+  /**
+   * 读一次 desired。三路都降级为「未设置」：读不到按未设置处理，与开关/清单/
+   * 覆盖各自的读侧纪律一致——一次读失败不该把收敛打掉。
    * @returns {Promise<Desired>}
    */
   const readDesired = async (): Promise<Desired> => {
     const [enabled, enabledIds, contextWindow] = await Promise.all([
-      providerStore.enabled().catch(() => null),
-      providerStore.enabledIds().catch(() => null),
-      providerStore.contextWindow().catch(() => null)
+      settle(() => providerStore.enabled()),
+      settle(() => providerStore.enabledIds()),
+      settle(() => providerStore.contextWindow())
     ]);
     return { enabled, enabledIds, contextWindow };
   };
@@ -197,7 +218,7 @@ export function createProviderReconciler(deps: ProviderReconcilerDeps) {
    */
   const reconcile = (): Promise<void> => {
     dirty = true;
-    const result = chain = chain.then(async () => {
+    const result = chain.then(async () => {
       let guard = 0;
       while (dirty) {
         dirty = false;
@@ -209,6 +230,16 @@ export function createProviderReconciler(deps: ProviderReconcilerDeps) {
         if (++guard > 20) break;
       }
     });
+    // **防毒化**（2026-10-18 R8 修法）：链条吞掉本环的成败，返回给调用方的
+    // 仍是 `result` 本身——该触发自己的拒绝照常呈报（路由侧 respondError），
+    // 但 `chain` 永不因此变成 rejected。没有这一行，executor 任何一次未预料
+    // 的反抗都会让之后每次 `reconcile()` 都变成 `rejected.then(cb)`：cb 永不
+    // 执行，收敛器静默死亡（实测：一次同步抛即复现，「故障恢复」后再触发，
+    // publish 调用次数恒为 0；路由则永远回放那次古老的错误，轮询侧每 tick
+    // 一次 unhandled rejection）。与 `publish-core.ts` 的 `createPublishQueue`
+    // 和 `state-store.ts` 的 `createStateWriteQueue` 是同一范式——本文件自己
+    // 的链此前是全仓唯一漏这层的。回归见 test/reconcile.test.mjs §9。
+    chain = result.then(() => undefined, () => undefined);
     return result;
   };
 

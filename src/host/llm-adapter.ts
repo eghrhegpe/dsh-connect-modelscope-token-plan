@@ -47,8 +47,9 @@ import { withUsageObserver, type UsageSinks } from "./usage-observer.ts";
  * @param {string[]} [options.unavailableModelIds] - 额度耗尽的模型 id，从 offer 里
  *   排除，避免发出注定 429 的请求。
  * @param {object} [options.maxTokensOverrides] - 逐模型输出上限覆盖（id → tokens），
- *   归一后的 `ResolvedSettings.maxTokensOverrides`。**每次 publish 现读**，与
- *   `apiBase` 同一个理由：改覆盖不该需要重启。魔搭目录从不声明该字段，所以这是
+ *   归一后的 `ResolvedSettings.maxTokensOverrides`。**构造期读入**（apply 时随
+ *   wiring 一次性 `resolveSettings`，与 `apiBase` 同理）：改 patch 要 reload
+ *   （apply 重跑）才生效，不是下一轮目录轮询。魔搭目录从不声明该字段，所以这是
  *   输出上限唯一的真值来源（见 llm-models.ts 的 `maxTokensFor`）。
  * @param {UsageSinks} [options.usage] - 本地计数的写入口（usage-store 的两条
  *   方法）。**这是面板「今日次数 / 模型分布 / 趋势 / 429 事件流」唯一的生产

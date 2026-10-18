@@ -49,9 +49,18 @@ export function compactCount(value: unknown): string {
   const sign = value < 0 ? "-" : "";
   const abs = Math.abs(value);
   if (abs < 1000) return `${sign}${trim(abs)}`;
-  if (abs < 1e6) return `${sign}${trim(abs / 1e3)}k`;
-  if (abs < 1e9) return `${sign}${trim(abs / 1e6)}m`;
-  return `${sign}${trim(abs / 1e9)}b`;
+  // 分档判定用**进位后**的量级：999_999/1e3 = 999.999，在 k 档 trim 成 "1000"
+  // 会写出非规范的 "1000k"——同一个数进 m 档才是 "1m"。整数 token 读数里
+  // 999_999 可达（2026-10-18 评审实测的旧行为，旧实现按原始量级分档、四档各写
+  // 一条 if），所以跨档进位在这里判掉，不留给显示层各自原谅。
+  const tiers: Array<[number, string]> = [[1e3, "k"], [1e6, "m"], [1e9, "b"]];
+  // entries() 而非下标：`noUncheckedIndexedAccess` 下 `tiers[i]` 带 undefined，
+  // 解构当场 TS2488。迭代器吐的元组没有这问题。
+  for (const [i, [divisor, unit]] of tiers.entries()) {
+    const shown = trim(abs / divisor);
+    if (i === tiers.length - 1 || Number(shown) < 1000) return `${sign}${shown}${unit}`;
+  }
+  return `${sign}${trim(abs)}b`; // 不可达（最高档已 return）；给 tsc 一句可返回的收尾
 }
 
 /** 填 `{key}` 模板：vars 的每个键对应模板里的同名占位符。 */

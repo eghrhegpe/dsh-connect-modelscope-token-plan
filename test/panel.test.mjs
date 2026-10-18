@@ -230,6 +230,15 @@ for (const suffix of ALL_SUFFIXES) {
   }
 }
 
+// 归类完整性：字面量清单之外的每个后缀必须**显式**登记在 DERIVED_SUFFIXES——
+// 没有这条，新增派生路由时会静默落进 else 分支的「猜家族」逻辑（它恰好兜得住
+// 就不红）。清单的意义就是逼你归类，不让兜底逻辑替你决定。
+assert.deepEqual(
+  ALL_SUFFIXES.filter((suffix) => !LITERAL_SUFFIXES.includes(suffix)),
+  DERIVED_SUFFIXES,
+  "字面量之外的每个后缀都必须显式登记进 DERIVED_SUFFIXES——新增路由要么进 LITERAL 要么进 DERIVED"
+);
+
 // 反向①：paths.ts 导出的每条字面量都必须在清单里（新增 Host 路由却忘了同步本
 // 清单时，这条会红——比漏检更早发现）。
 const hostLiterals = [...hostPaths.matchAll(/\/api\/dsh-connect-modelscope-token-plan(\/[a-z/]+)"/g)].map((m) => m[1]);
@@ -419,6 +428,10 @@ for (const suffix of new Set(clientSuffixes)) {
 // 为什么单独一节：这是 `format.ts` 新增的第二个数字格式化器，两条路径（count /
 // compactCount）互不覆盖。边界（999/1000/1000000）与「小数该留几位」是最容易被后续
 // 改动悄悄挪走的东西；异常值（NaN/null/字符串）必须原样透出，不得被画成 0。
+// **跨档进位**（999_999 → 1m，不是 "1000k"）：2026-10-18 第三轮评审实测，按原始
+// 量级分档时 999_999 会在 k 档 trim 成 "1000"——读数不是假的（1000k=1m），但
+// 「k/m/b 分级」写出非规范字面，且原实现把这个伪影当边界钉了过来。现在分档按
+// 进位后量级判，999_999/999_999_999 两个 tier 进位点都钉在这里。
 {
   const { compactCount } = await import("../src/client/format.ts");
   const cases = [
@@ -429,11 +442,14 @@ for (const suffix of new Set(clientSuffixes)) {
     [1200, "1.2k"],
     [12345, "12.3k"],
     [123456, "123k"],
-    [999999, "1000k"],
+    [999_499, "999k"],
+    [999_999, "1m"],
     [1_000_000, "1m"],
     [3_456_789, "3.46m"],
     [12_345_678, "12.3m"],
-    [-1200, "-1.2k"]
+    [999_999_999, "1b"],
+    [-1200, "-1.2k"],
+    [-999_999, "-1m"]
   ];
   for (const [input, want] of cases) {
     assert.equal(compactCount(input), want, `compactCount(${input}) 应为 ${want}`);
