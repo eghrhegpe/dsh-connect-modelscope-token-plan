@@ -68,7 +68,8 @@ npm run doctor                  # 只读盘点状态文件
 
 工作树常同时有**他人未提交改动**（多会话并行开发是常态）：
 
-- **不碰 `git stash / push / pop`**（`list`/`show` 只读可用）。
+- **`git stash` / `git pop`：建议别用**——它们作用于整棵工作树，会连带卷走他人的未提交改动；只读的 `git stash list` / `git stash show` 不受影响，随时可用。
+- **`git push`：不设禁区，改走自检**——推前过三条：① 要推的提交是不是自己的活；② 提交是否路径限定（见下条）；③ `git status --short` 复核没带走别人的东西。三条过完直接推，用户明确要求推时不必再确认。注意本仓多会话共用同一 git 身份，`git log --format=%ae` 分不出归属，别拿作者字段当归属证据。
 - 路径限定提交，比如：`git commit -m "<说明>" -- <自己的文件…>`，禁 `git add -u` / `git add -A` 全量卷入。
 - 提交后 `git status --short` 复核：没带走别人的东西。
 - 看到非自己改动的文件处于 modified，**不要**替它做对照实验，用 targeted 复跑定性。
