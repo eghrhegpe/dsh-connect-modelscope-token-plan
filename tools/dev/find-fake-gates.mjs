@@ -74,10 +74,23 @@ for (const t of tests) {
   }
 
   // D. for 循环里只有一条 assert 且不引用循环变量
-  const forRe = /for\s*\(\s*(?:const|let|var)\s+(\w+)\s+of\s+([^)]+)\)\s*\{([\s\S]*?)\n\}/g;
-  while ((m = forRe.exec(text))) {
-    const [, varName, iterable, body] = m;
+  //
+  // 原实现用非贪婪正则 `\{([\s\S]*?)\n\}` 取循环体，要求闭合括号顶格。缩进的
+  // 循环（`  }`）因此永远匹配不上，正则一路吃到函数末尾，把**循环外**的收口
+  // 断言当成「体内唯一断言」，再判它不引用循环变量——credentials.test.mjs:259
+  // 那条「循环累加 offenders、循环外一次 deepEqual」的合法写法就是这么被误报的。
+  // 修复：从 `{` 起做括号配平（`${…}` 的 `{`/`}` 成对出现，不影响配平）。
+  const forHeadRe = /for\s*\(\s*(?:const|let|var)\s+(\w+)\s+of\s+([^)]+)\)\s*\{/g;
+  while ((m = forHeadRe.exec(text))) {
+    const [, varName, iterable] = m;
     const lineNo = text.slice(0, m.index).split("\n").length;
+    let i = m.index + m[0].length, depth = 1;
+    while (i < text.length && depth > 0) {
+      if (text[i] === "{") depth++;
+      else if (text[i] === "}") depth--;
+      i++;
+    }
+    const body = text.slice(m.index + m[0].length, i - 1);
     const aCount = (body.match(/assert\./g) ?? []).length;
     if (aCount === 1) {
       const aStart = body.indexOf("assert.");

@@ -42,7 +42,6 @@ import {
   profileStateDir,
   readStateJson,
   readStateVersion,
-  stateDir,
   temporaryOf,
   writeStateFile
 } from "./state-store.ts";
@@ -254,7 +253,19 @@ export function createFileUsageStore({ name, profile = null, retentionDays = 90,
     cache.remember(payload);
   };
 
-  /** 排队执行一次读-改-写；只读闸置位时整个变更是 no-op。 */
+  /**
+   * 排队执行一次读-改-写；版本冲突时整个变更是 no-op。
+   *
+   * 闸在**临界区内部**由 diskVersionBlocksWrites 现读磁盘判定，不读内存里的
+   * readOnly——那个变量只用于日志去重与「闸已抬起」通知，删掉它不会让任何一次
+   * 写入被放行或拦住（2026-10-18 变异实证：删掉复位块后「删文件后写入必须恢复」
+   * 与「新计数落盘」两条断言仍然全绿）。
+   *
+   * 注释曾写「只读闸置位时整个变更是 no-op」——把判定归给内存闩锁。a61db2f（10-04，
+   * 首次提交）起就是这么写的，那时磁盘闸还没长出来，那句话是真的；403bfbc（10-05）
+   * 把守卫改成临界区内现读磁盘之后它就过期了，一直没被发现——因为没有任何断言
+   * 读它，它只是一句注释。
+   */
   const enqueue = (mutate: (payload: UsagePayload) => void) =>
     writeQueue.enqueue(async () => {
       // 守卫在这里**自己**读盘，而不是依赖 readThrough 的副作用——见
@@ -472,17 +483,6 @@ export function createFileUsageStore({ name, profile = null, retentionDays = 90,
       return anomaly;
     },
 
-    /** 无秘密的状态（doctor 用）。 */
-    async state() {
-      const payload = await cache.read();
-      return {
-        file: profile === null ? join(stateDir(name), "usage.json") : file,
-        hasRecord: payload !== null,
-        days: Object.keys(payload?.days ?? {}).length,
-        events: payload?.events.length ?? 0,
-        readOnly
-      };
-    }
   };
 }
 

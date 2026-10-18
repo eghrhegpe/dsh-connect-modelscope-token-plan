@@ -164,7 +164,14 @@ const future = makeStore();
 assert.equal((await future.daily()).calls, null, "未知版本读作「读不到」，不是空");
 await future.recordCall({ modelId: "m/y", tokens: null, at: t0 });
 assert.equal(JSON.parse(readFileSync(file, "utf8")).version, 2, "只读闸：新版本文件未被覆写");
-assert.equal((await future.state()).readOnly, true);
+// 闩锁的另一半职责是日志去重：读路径与写路径各探测一次同一个版本冲突，警告只该
+// 出现一次。它取代了原先对 `state().readOnly` 的断言——那个方法只有测试在调，已
+// 从 store 删除（readOnly 仍是闭包变量，去重靠它，但不再对外暴露）。
+assert.equal(
+  warnings.filter((m) => /recording disabled to avoid clobbering/.test(m)).length,
+  1,
+  "同一原因只告警一次（读一次探测 + 写一次探测，不是刷两条日志）"
+);
 
 // §7b 守卫必须在**第一次写入**之前就位，不能靠读路径的副作用。
 //
@@ -201,24 +208,37 @@ assert.equal((await future.state()).readOnly, true);
   );
 }
 
-// §7c 只读闸必须能复位：删掉文件是用户可见的恢复手段（doctor 就是这么建议的）。
+// §7c 删掉文件是用户可见的恢复手段（doctor 就是这么建议的）。
 //
-// 闩锁曾经只置位不复位，于是这条路径永久静默：文件不重建、每次写入被丢弃，面板
-// 却还在显示内存里的残留数字，用户唯一出路是重启 Host。
+// 恢复本身**不靠**闩锁复位：写路径在临界区里自己读一次盘（见 enqueue 注释），文件
+// 没了就没有版本冲突，写入自然放行。复位块的真正作用是把那条操作者看得见的
+// 「version guard lifted — recording resumed」警告发出来——没有它，恢复发生了，
+// 但日志里只剩一句「recording disabled」，面板与日志说两套话。这两条断言就是原先
+// `state().readOnly` 断言的替代（该方法只有测试在调，已删除）。
+//
+// 历史上确实存在「闩锁只置位不复位」的缺陷，但那时写路径依赖内存闩锁，所以删文件
+// 后写入永久静默；修好写路径之后，缺的只剩那条恢复日志。
 {
   writeFileSync(file, JSON.stringify({ version: 2, days: { "2026-10-01": { calls: 9, tokens: 9 } } }), "utf8");
+  warnings.length = 0;
   const latched = makeStore();
   await latched.recordCall({ modelId: "m/a", tokens: 1, at: t0 });
-  assert.equal((await latched.state()).readOnly, true, "先闩住");
+  assert.ok(
+    warnings.some((m) => /recording disabled to avoid clobbering/.test(m)),
+    "先闩住：写入被拒时要留下警告"
+  );
   rmSync(file, { force: true });
   await latched.recordCall({ modelId: "m/b", tokens: 5, at: t0 });
-  assert.ok(existsSync(file), "删文件后写入必须恢复（闩锁要复位）");
+  assert.ok(existsSync(file), "删文件后写入必须恢复");
   assert.equal(
     JSON.parse(readFileSync(file, "utf8")).models["m/b"].tokens,
     5,
     "恢复后的新计数真的落盘了"
   );
-  assert.equal((await latched.state()).readOnly, false, "闩锁已复位");
+  assert.ok(
+    warnings.some((m) => /version guard lifted/.test(m)),
+    "复位：恢复时留一条「闸已抬起」的警告，操作者才看得见记录回来了"
+  );
 }
 
 // §8 localDateKey 是本地时区日历天。

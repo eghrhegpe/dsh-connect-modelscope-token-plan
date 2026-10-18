@@ -89,17 +89,23 @@ assert.match(cfgView.guidance ?? "", /插件配置有误/);
     const r = panel.interpretSnapshot(broken);
     assert.notEqual(r.data, null, `缺 ${key} 仍应给出可渲染的 data`);
     assert.ok((r.missingKeys ?? []).includes(key), `缺 ${key} 必须被认出来`);
-    // 补出的空形状要能扛住面板那些解引用（曾经的崩点）。
+    // 补出的空形状必须与 Host 软失败时**同构**：三态块补成 null（红线 3 的
+    // 「读不到」），不得补成 []（那是「确实一次都没有」这个事实断言）。
+    //
+    // 这里曾写的是一个 `assert.doesNotThrow` 包住七条「可选链 + ?? 兜底」的
+    // 解引用——那些表达式构造上不可能抛，49 种输入组合零抛错，断言**恒真**，
+    // 护不住任何东西（正是 tools/dev/find-fake-gates.mjs 要找的假门禁形态）。
+    // 「解引用安全」的真身由渲染层承担（src/client/panel-page.ts:207 起一路
+    // `?.`），端到端在 test/dom-render.test.mjs §17 钉住；本文件钉的是决策层，
+    // 所以断言点应该是「补出来的值是 null 还是 []」这个语义区分。
     const d = r.data;
-    assert.doesNotThrow(() => {
-      void (d?.models?.sample?.[0] ?? null);
-      void (d?.trend?.days ?? 0);
-      void (d?.trend?.buckets ?? []);
-      void (d?.token?.present === true);
-      void (d?.events ?? []);
-      void (d?.balance ?? null);
-      void (Array.isArray(d?.quota?.perModel) ? d.quota.perModel : []);
-    }, `缺 ${key} 补出的空形状不该让面板解引用抛错`);
+    const triState = { events: () => d?.events, quota: () => d?.quota?.perModel, trend: () => d?.trend?.buckets };
+    if (key in triState) {
+      assert.equal(triState[key](), null, `缺 ${key} 补成 null（「读不到」），不是 []（「确实没有」）`);
+    }
+    if (key === "quota") {
+      assert.equal(d?.quota?.daily?.usedLocal, null, "缺 quota 时 usedLocal 补 null，不是 0");
+    }
   }
 
   // 缺失要冒到面板上（不静默：Host 少给键是双端漂移，用户该看见）。

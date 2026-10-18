@@ -810,4 +810,48 @@ function readCodeMap() {
   }
 }
 
+// ── §18 AGENTS.md 验证段点名的门禁行号必须落在对应 § 节区间内 ──────────────
+//
+// 事故（2026-10-18 实测）：6ef18b8 在 docs.test.mjs 里插入 readCodeMap（约 45 行）
+// 后，§14 及之后所有节整体下移，但 AGENTS.md 验证段写死的行号没跟着重数——
+// 6 个声称值里 5 个指向了**别的节的代码**（§14:554 落在 §13 块、§15:659 落在
+// §14b 块、§17:723 落在 §15 块），只有 §6:154 因为排在插入点之前而碰巧精确。
+// 「每条都能点出行号」是给 AI 会话指路的承诺，指错 = 把会话领到另一道门禁的
+// 代码上，比不带行号更糟。本门禁兜底：AGENTS.md 声称的行号必须落在它声称的
+// 那个 § 节自己的区间里（该节注释行起，到下一条 § 注释行止）。
+//
+// 判定机械：先扫本文件所有 `// ── §N` 注释行构出节区间表（§N 允许带字母后缀，
+// 如 14b），再扫 AGENTS.md 里形如「§N（:NNNN）」的引用，断言 :NNNN ∈ [该节注释行,
+// 下一条 § 注释行)。以后谁再往 docs.test.mjs 中间插大段代码，AGENTS.md 忘了重数
+// 行号就会判红——而上一轮这种漂移恰好全绿通过了。
+{
+  const ownLines = read("test/docs.test.mjs").split(/\r?\n/);
+  const sections = [];
+  for (const [i, line] of ownLines.entries()) {
+    const m = line.match(/^\/\/ ── §(\d+[a-z]?) /);
+    if (m) sections.push({ name: m[1], start: i + 1 });
+  }
+  assert.ok(sections.length >= 8, `docs.test.mjs 的 § 节注释行少于 8 个（${sections.length}）——节区间表坏了`);
+  const spanOf = (name) => {
+    const idx = sections.findIndex((s) => s.name === name);
+    if (idx < 0) return null;
+    const end = idx + 1 < sections.length ? sections[idx + 1].start : ownLines.length + 1;
+    return [sections[idx].start, end];
+  };
+  const agLines = read("AGENTS.md").split(/\r?\n/);
+  for (const [i, line] of agLines.entries()) {
+    for (const m of line.matchAll(/§(\d+[a-z]?)[（(]:(\d+)[）)]/g)) {
+      const name = m[1];
+      const claimed = Number(m[2]);
+      const span = spanOf(name);
+      assert.ok(span, `AGENTS.md:${i + 1} 引用了 docs.test.mjs 里不存在的 §${name}：\n    ${line.trim()}`);
+      assert.ok(
+        claimed >= span[0] && claimed < span[1],
+        `AGENTS.md:${i + 1} 声称 §${name} 在 docs.test.mjs:${claimed}，但 §${name} 实际在 :${span[0]}–:${span[1] - 1}——` +
+          `（上一轮事故：中间插入 readCodeMap 后所有节 +45，行号没重数，5/6 全指到别的节上。）\n    ${line.trim()}`
+      );
+    }
+  }
+}
+
 console.log("docs.test.mjs: all checks passed");
