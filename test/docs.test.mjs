@@ -485,4 +485,68 @@ const FACTS = [
   );
 }
 
+// ── §15 本地计数口径一致性：规范性表面必须同口径，且都必须带 profile 限定 ─────
+//
+// 事故（2026-10-17 评审实测）：0.5.0 把本地计数口径从「覆盖全部 DSH 魔搭调用」
+// 收窄为「本客户端（本 profile）内经本插件的调用」，改了 README「诚实声明」、
+// 面板图例（i18n）、AGENTS.md 三处，**漏了 cordis.patch.yml 与 PROVIDER-M4.md**
+// ——patch 那份尤其伤：操作者改部署配置时最先读它。同一次更正散在五个表面上，
+// 靠人记同步是防不住的，这里建成封闭集合检查，两个方向：
+//   ① 禁止无限定宣称：集合内不得出现「覆盖全部 DSH 魔搭调用」。正则容忍
+//      markdown 强调符与折行（`覆盖**全部\n   DSH 魔搭调用**` 也跑不掉）；
+//      同行带更正/历史标注的引用除外（§3/§8 同款——按行不按段，段落级窗口
+//      形同虚设是 §8 用变异证明过的教训）。
+//   ② 必须带限定：集合内每一处都要出现口径限定词（中英任一任排）——改写措辞
+//      不判红，但把「本客户端」三个字从某个表面上删干净会红。
+// 豁免逻辑为什么要显式：CHANGELOG 与 docs/archive/** 逐字保留这次更正的原文
+// （含被推翻的旧宣称），按 §6② 同款政策本就不进集合。
+{
+  const SCOPE_FILES = ["README.md", "AGENTS.md", "cordis.patch.yml", "docs/PROVIDER-M4.md", "src/client/i18n.ts"];
+  // 容忍强调符与折行的旧宣称指纹：覆盖 (**)(换行/缩进) 全部 (换行) DSH 魔搭 调用
+  const STALE_CLAIM = /覆盖[\s*]{0,4}全部[\s*]{0,8}DSH[\s*]{0,4}魔搭[\s*]{0,4}调用/i;
+  const HISTORY_MARK = /更正|~~|曾|历史|当时|推翻|证伪|收窄/;
+  const QUALIFIER = /本客户端|this client|按\s*profile|per-profile|profile\s*分段|各记各的|separate ledger/;
+  assert.ok(SCOPE_FILES.every((f) => existsSync(join(root, f))), `口径封闭集合里有文件不存在：${SCOPE_FILES.filter((f) => !existsSync(join(root, f))).join("、")}`);
+  for (const file of SCOPE_FILES) {
+    for (const [i, line] of read(file).split(/\r?\n/).entries()) {
+      if (!STALE_CLAIM.test(line)) continue;
+      assert.ok(
+        HISTORY_MARK.test(line),
+        `${file}:${i + 1} 仍称本地计数「覆盖全部 DSH 魔搭调用」——2026-10-17 起口径收窄为` +
+          `「本客户端（本 profile）内经本插件的调用」（桌面端与 Web 端各记各的、互不可见，` +
+          `npm run doctor 并排列出各 profile）。\n    ${line.trim()}\n` +
+          `（保留历史引用必须在同一行加更正/证伪标注；否则改成本口径。）`
+      );
+    }
+    assert.ok(
+      QUALIFIER.test(read(file)),
+      `${file} 通篇没有本地计数的口径限定词（本客户端 / 按 profile / separate ledger …）——` +
+        `收窄后的口径必须写在每一处规范性表面上，否则读者会把它读成跨端总量。`
+    );
+  }
+}
+
+// ── §16 ROADMAP 时效：现状版本号必须追上 package.json，Backlog 分节必须在 ────
+//
+// 事故（2026-10-17 评审实测）：ROADMAP 的「现状」停在 v0.2.0，而实际 0.5.0；
+// 两条 2026-10-15/16 已交付的门禁工作仍挂在「未做」清单里。§6② 管套件数、
+// §8 管预告词、§12 管「尚未实现」，都没有覆盖率程图的版本陈述——而它是每个
+// 会话判断「做到哪了」的入口。判据机械：ROADMAP 必须提到当前 package.json 的
+// 版本号（写法不限），且 docs.test.mjs §11 红字提示指向的「Backlog」分节必须
+// 还在（否则「明确的缺口声明」无处可去）。
+{
+  const pkg = JSON.parse(read("package.json"));
+  const roadmap = read("docs/ROADMAP.md");
+  assert.ok(
+    roadmap.includes(pkg.version),
+    `docs/ROADMAP.md 没有提到当前版本 ${pkg.version}——「现状」节停在旧版本号。\n` +
+      `版本推进时同步刷新 ROADMAP 的现状节（0.5.0 起它对 0.3–0.5 三条功能线整体缺录，` +
+      `已交付的门禁工作也仍挂在「未做」清单里）。`
+  );
+  assert.ok(
+    /^##\s*Backlog/m.test(roadmap),
+    "docs/ROADMAP.md 没有 Backlog 分节——docs.test.mjs §11 把「明确的缺口声明」指向这里，指针不能断。"
+  );
+}
+
 console.log("docs.test.mjs: all checks passed");

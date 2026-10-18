@@ -17,16 +17,25 @@
 2. **上游 OpenAI 兼容**：`apiBase`（默认 `https://api-inference.modelscope.cn/v1`）
    直接吃 `/chat/completions` 与 `/models`。这就是为什么 M4 可以复用姊妹插件的
    `PiAiAdapter` 装配——魔搭不需要 sensenova 那套 OIDC/JWE。
-3. **额度信号不存在于推理响应**：本地计数只统计**经本插件的调用**。provider
-   注册后，DSH 的全部魔搭调用都经过本插件注册的适配器，因此本地计数**覆盖全部
-   DSH 魔搭调用**（这是注册 provider 的第二个收益，第一个是把模型带进模型选择器）。
-   该结论自 `src/host/usage-observer.ts` 接上流出口后才成立，**当前以该文件为准**
-   （M4 当时不成立，见下更正块）。
+3. **额度信号不存在于推理响应**：本地计数只统计**经本插件的调用**，且按
+   **profile（客户端）分段**——桌面端与 Web 端各记各的账、互不可见。provider
+   注册后，**本 profile 内** DSH 的魔搭调用都经过本插件注册的适配器，流出口的
+   每一次调用与 429/错误事件都计入本地计数（这是注册 provider 的第二个收益，
+   第一个是把模型带进模型选择器）。该记账自 `src/host/usage-observer.ts` 接上
+   流出口后才成立，**当前以该文件为准**（M4 当时不成立，见下更正块）。
 
    > **更正（M4+，2026-10-05）**：上面这个结论**在 M4 当时是错的**——M4 的适配器
    > 路径并没有挂计数钩子，本地计数实际只反映探针用量。`usage-observer.ts` 接上
    > 流出口之后该结论才成立（见 [IMPLEMENTATION.md](IMPLEMENTATION.md)「本地计数层
    > 无生产者」与 [ROADMAP.md](ROADMAP.md) M4+）。此处保留原文是契约的历史记录。
+   >
+   > **再更正（2026-10-17，口径收窄）**：接线成立之后，「覆盖全部 DSH 魔搭调用」
+   > 仍然不是一个可以无限制宣读的结论——状态文件按 profile 分段
+   > （`$DSH_HOME/state/<profile>/<插件名>/usage.json`，裁定见 `usage-store.ts`
+   > 头注），桌面端与 Web 端是两个 Host、各记各的账、互不可见。现行口径是
+   > 「**本客户端（本 profile）内经本插件的调用**」；想并排看各 profile 的账用
+   > `npm run doctor`，那是「另一个客户端的数字去哪了」的答案（README「诚实声明」
+   > 同口径）。
 
 ## 1. Provider 身份（单一真源：`src/host/llm-models.ts`）
 
@@ -417,3 +426,41 @@ roster），失败给降级形状（`enabled:false, error, roster:[]`），**绝
 - 红线：凭据只经 `tokenStore.resolve()`；`redactSecrets` 过所有日志/错误/
   响应；`registerAdapter` 只在 `llm` 服务存在时调用（`resolveRegistrationService`
   已处理）；Host 侧改动需完全重启 DSH。
+
+## 15. 额度耗尽集合的推断规则（unavailableIds，2026-10-18 接线）
+
+M4 起 `buildDescriptors`（picker 丢弃）与 `rosterWithAvailability`（面板灰显 +
+禁勾选）就带着 `unavailableModelIds` 参数，但**生产者一直空缺**——picker 从没
+丢过模型、面板从没灰过（README「诚实声明」当时原话：「M4 阶段暂无额度耗尽
+聚合」）。本节把它补上，并钉死判定规则。
+
+**为什么只能推断**：官方只给**账户级**魔粒余额（`/openapi/v1/magicubes/balance`），
+没有 per-model 额度端点。可用的证据只有 429/错误事件流（本插件的独家数据，
+`usage-observer.ts` 生产、`llm-error-fix` 重分类之后的 kind）。
+
+**判定规则**（纯函数 `exhaustedModelIds`，`src/host/usage-store.ts`，
+单测 `test/usage-store.test.mjs` §10）：
+
+1. **只有 `kind:"quota"` 算证据**。`rate_limit` 是瞬时限频（peer 会退避重试，
+   请求打得出去），`error` 是未知。把任何 429 都当耗尽是 0.2.0 已修掉的误判
+   （QUOTA 快速失败 vs RATE_LIMIT 退避是两条不同的路）——事件流的 kind 读的是
+   **重分类后**的 code，与退避策略、面板事件流同一份口径。
+2. **只在推断窗口内有效**（`exhaustionWindowMinutes`，默认 60 分钟，配置夹
+   [5, 1440]）。窗口外的旧证据不算——免费额度按天重置，昨天的耗尽不该关掉
+   今天的模型。
+3. **不推断恢复**。成功的流不发事件，「模型已恢复」在这份数据里**不可观测**：
+   已恢复的模型最多灰显满一个窗口。方向是保守的（宁可少提供一会，不把注定
+   429 的模型放进选择器），且灰显带着原因（`provider.quotaExhausted` 徽标），
+   不是静默消失。**这是已知代价，不是待修缺陷**——要做恢复信号得给成功调用
+   也记账，那是另一本账（见 `usage-observer.ts` 头注的分工）。
+
+**接线**（单一生产者，三个消费者）：
+
+- 生产者：`provider-reconcile.ts` 每一遍收敛从 `usageStore.events()` 读事件
+  （事件读失败降级空集 + warn，不炸链），算出集合传给 `publisher.publish`，
+  落进 `state.unavailableIds`；
+- 消费者一：picker（`buildDescriptors` 丢弃集合内模型）；
+- 消费者二：面板 roster（`snapshot-aggregate.ts` 与 `routes/provider.ts` **都读
+  `state.unavailableIds`**，不自己算——自己算就会与 picker 漂移）。
+
+节奏是 `pollSeconds`（默认 30s）：窗口内新出现的耗尽最多晚一个轮询周期生效。

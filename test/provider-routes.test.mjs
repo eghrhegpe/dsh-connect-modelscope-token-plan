@@ -1,12 +1,13 @@
 // M4 provider 路由测试：开关读/写、允许清单保存、哨兵分类、信任围栏。
 // 与 routes.test.mjs 同款桩 ctx（webServer 捕获 handler、内存凭据服务、全局 fetch 顶替上游）。
 import { strict as assert } from "node:assert";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply } from "../src/host/index.ts";
 import { PROVIDER_PATH } from "../src/host/routes/paths.ts";
 import { HIDE_ALL_MODELS } from "../src/host/llm-models.ts";
+import { PLUGIN_ID } from "../src/shared/wire.ts";
 
 process.env.DSH_HOME = mkdtempSync(join(tmpdir(), "ms-provider-routes-"));
 
@@ -64,6 +65,21 @@ currentFetch = async () => new Response(JSON.stringify({
 const handlers = new Map();
 apply(makeCtx(handlers), {}, { env: {} });
 assert.ok(handlers.has(PROVIDER_PATH), "provider 路由已注册");
+
+// 磁盘上先放一份「刚发生过一次 quota」的事件流（下方端到端 section 用）。
+// **必须在第一次收敛之前落盘**：usage-store 的读缓存 TTL 是 1 秒——若等收敛跑过
+// 之后再写文件，随后一两秒内的 events() 读到的还是「文件不存在」的缓存答案，
+// 整条链会莫名哑掉（实测踩过：晚写几毫秒，publisher 的 unavailableIds 就是空）。
+{
+  const stateDir = join(process.env.DSH_HOME, "state", PLUGIN_ID);
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(join(stateDir, "usage.json"), JSON.stringify({
+    version: 1,
+    days: {},
+    models: {},
+    events: [{ at: new Date().toISOString(), modelId: "Qwen/Qwen3.5-35B-A3B", kind: "quota", message: "quota exhausted for this model" }]
+  }), "utf8");
+}
 
 // ── 信任围栏 ──
 {
@@ -194,6 +210,29 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由已注册");
     assert.equal(res.status, 400, `非法 body ${JSON.stringify(bad)} 必须 400，实际 ${res.status}`);
     assert.equal(res.body.ok, false, "400 响应体标 ok:false");
   }
+}
+
+// ── 端到端：quota 事件 → 收敛 → GET roster 灰显（从未接线过的生产者） ──
+//
+// 0.2.0 起 rosterWithAvailability / buildDescriptors 就带着 unavailableIds 参数，
+// 但**生产者一直空缺**（M4 注释原话「本插件暂无额度耗尽聚合」）——picker 从
+// 来没丢过模型，面板也从没灰过。这里用真实挂载的插件把整条链钉住：模块顶已
+// 落盘的 usage.json 事件流 → 保存开关触发收敛 → publisher.state.unavailableIds
+// → GET roster 的 quotaExhausted。规则本身（kind 分诊/窗口/不推断恢复）在
+// usage-store.test.mjs §10，接线传导在 reconcile.test.mjs §8。
+{
+  // 保存开关 → 触发一次收敛（读事件 → publish 带 unavailableIds）。
+  const saved = await call(handlers, PROVIDER_PATH, makeReq("POST", { body: { enabled: true } }));
+  assert.equal(saved.body.ok, true);
+  const res = await call(handlers, PROVIDER_PATH, makeReq("GET"));
+  const exhausted = res.body.roster.find((r) => r.id === "Qwen/Qwen3.5-35B-A3B");
+  const healthy = res.body.roster.find((r) => r.id === "Qwen/Qwen2.5-VL-32B");
+  assert.equal(exhausted.available, false, "窗口内出现过 quota 事件的模型 → 面板不可用");
+  assert.equal(exhausted.quotaExhausted, true, "且带 quotaExhausted（客户端据此灰显 + 禁勾选）");
+  assert.equal(healthy.available, true, "没有证据的模型照常可用");
+  // 收尾：清掉事件流并 reset，别把状态漏给后面的 section。
+  rmSync(join(process.env.DSH_HOME, "state", PLUGIN_ID, "usage.json"), { force: true });
+  await call(handlers, PROVIDER_PATH + "/reset", makeReq("POST", { body: {} }));
 }
 
 // ── 坏 body：400 ──

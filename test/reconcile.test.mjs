@@ -26,10 +26,10 @@ function makeStore(initial = {}) {
   };
 }
 
-function makeDeps({ store, fetch, logger } = {}) {
+function makeDeps({ store, fetch, logger, usageEvents } = {}) {
   const published = [];
   const deps = {
-    settings: { registerProvider: true },
+    settings: { registerProvider: true, exhaustionWindowMinutes: 60 },
     providerStore: store ?? makeStore(),
     inference: {
       fetchModels: fetch ?? (async (contextWindow) => ({ entries: [{ id: "a/A" }] }))
@@ -41,6 +41,8 @@ function makeDeps({ store, fetch, logger } = {}) {
         return { ok: true };
       }
     },
+    // 额度耗尽集合的读入口：默认「读过、没有证据」（M4 恒空行为的现代表述）。
+    ...(usageEvents !== undefined ? { usageEvents } : {}),
     logger: logger ?? { warn: () => {} }
   };
   return { deps, published };
@@ -60,7 +62,7 @@ function makeDeps({ store, fetch, logger } = {}) {
   assert.equal(published.length, 1, "一遍收敛一次 publish");
   assert.deepEqual(published[0].enabledIds, ["a/A"], "清单走 resolveEnabledIds：落盘值优先");
   assert.equal(published[0].entries.length, 2, "目录条目原样交给 publisher");
-  assert.deepEqual(published[0].unavailable, [], "M4 无额度聚合，unavailable 恒空");
+  assert.deepEqual(published[0].unavailable, [], "无事件证据时 unavailable 为空（picker 提供全部）");
 }
 
 // §2 fetch 失败：**不得**发布空目录，保留当前 offer，只记原因。
@@ -182,6 +184,47 @@ function makeDeps({ store, fetch, logger } = {}) {
   await p2;
   assert.deepEqual(order, ["fetch:null", "fetch:null"], "两遍收敛严格串行");
   assert.equal(published.length, 2);
+}
+
+// §8 额度耗尽集合的接线：每一遍收敛从事件流重算并交给 publisher——picker 与
+// 两个面板 roster 消费的就是这一份（state.unavailableIds）。纯函数规则在
+// usage-store.test.mjs §10 钉死，这里只钉「接线通了、方向对了」。
+{
+  const now = Date.now();
+  const ev = (modelId, kind, msAgo) => ({ at: new Date(now - msAgo).toISOString(), modelId, kind, message: "m" });
+
+  // ① 窗口内的 quota 事件 → publish 第三个参数带上该模型。
+  {
+    const { deps, published } = makeDeps({
+      usageEvents: async () => [ev("a/A", "quota", 30 * 60_000)]
+    });
+    const { reconcile } = createProviderReconciler(deps);
+    await reconcile();
+    assert.deepEqual(published[0].unavailable, ["a/A"], "quota 事件必须传导到 publish（否则 picker 照提供注定 429 的模型）");
+  }
+
+  // ② 非 quota 事件与窗口外事件都不传导。
+  {
+    const { deps, published } = makeDeps({
+      usageEvents: async () => [ev("a/A", "rate_limit", 60_000), ev("b/B", "quota", 2 * 60 * 60_000)]
+    });
+    const { reconcile } = createProviderReconciler(deps);
+    await reconcile();
+    assert.deepEqual(published[0].unavailable, [], "rate_limit（会退避重试）与窗口外的旧 quota 都不传导");
+  }
+
+  // ③ 事件读失败：不炸链，降级空集并留档（方向 = 暂时没有证据，下一轮重试）。
+  {
+    const warnings = [];
+    const { deps, published } = makeDeps({
+      usageEvents: async () => { throw new Error("usage.json unreadable"); },
+      logger: { warn: (m) => warnings.push(m) }
+    });
+    const { reconcile } = createProviderReconciler(deps);
+    await reconcile();
+    assert.deepEqual(published[0].unavailable, [], "读不到事件 = 这一遍没有证据（不抛、不堵链）");
+    assert.ok(warnings.some((w) => /usage events read failed/.test(w)), "可观测失败必须留档");
+  }
 }
 
 console.log("reconcile.test.mjs: all checks passed");

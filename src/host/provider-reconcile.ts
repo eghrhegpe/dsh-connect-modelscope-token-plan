@@ -15,7 +15,8 @@
  *   - **desired state**（操作者想要什么）= `providerStore` 里的开关 + 允许
  *     清单 + 窗口覆盖。它只有一个家，轮询和路由都只读它、不各写一份；
  *   - **reconcile 一遍** = 读 desired → 带窗口覆盖拉目录 → 复查 desired
- *     （fetch 期间被改就重跑，不等下一轮）→ 把「当前目录 + 当前清单」交给
+ *     （fetch 期间被改就重跑，不等下一轮）→ 算这一轮的额度耗尽集合（事件流 +
+ *     纯函数 `exhaustedModelIds`）→ 把「当前目录 + 当前清单 + 耗尽集合」交给
  *     publisher（它自己重读开关，single source 不变）；
  *   - **触发方全部降级为「标记 dirty」**：挂载、轮询定时器、四条写路由。
  *     谁都不用记得「别人是不是也在 publish」——队列性质由本模块的串行链保证。
@@ -35,16 +36,18 @@
  */
 
 import { resolveEnabledIds } from "./provider-store.ts";
+import { exhaustedModelIds } from "./usage-store.ts";
 import { errMsg, redactSecrets } from "./util.ts";
 import { name } from "./host-config.ts";
 import type { ResolvedSettings } from "./host-config.ts";
+import type { QuotaEvent } from "../shared/wire.ts";
 
 /** reconciler 读到的 wiring 子集（装配见 `index.ts`）。 */
 export interface ProviderReconcilerDeps {
   /**
-   * patch 配置。收敛本身不读它（开关裁决在 publisher 内，single source），留在
-   * deps 里是为了与 wiring 的其他消费者同形状，也为了将来收敛要读 patch 默认
-   * 时有处可读——删掉它只会让下一个加配置的人重新发明接线。
+   * patch 配置。收敛读它**一次**——`exhaustionWindowMinutes`（单模型额度耗尽
+   * 的推断窗口）。其余裁决仍在 publisher 内（开关 single source 不变）。
+   * 删掉它只会让下一个加配置的人重新发明接线。
    */
   settings: ResolvedSettings;
   providerStore: {
@@ -61,6 +64,16 @@ export interface ProviderReconcilerDeps {
     state: { enabledIds: string[] };
     publish: (entries: unknown[], enabledIds: string[], unavailable?: string[]) => Promise<unknown>;
   };
+  /**
+   * 429/错误事件流的读取入口（`usageStore.events`，按 profile 分段的那份）。
+   *
+   * 缺省 = 不推断耗尽集合（M4 行为：`unavailable` 恒空）。在场时**每一轮收敛**
+   * 都重算一遍——picker 与两个面板 roster（snapshot 聚合 / provider GET 路由）
+   * 消费的都是 publisher 最近一次发布的那份（`state.unavailableIds`），所以
+   * 「选择器里有什么」与「面板上灰着谁」不可能说两套话。推断规则是纯函数
+   * `exhaustedModelIds`（usage-store.ts），窗口来自 `settings`。
+   */
+  usageEvents?: () => Promise<readonly QuotaEvent[]>;
   logger?: { warn?: (message: string) => void };
 }
 
@@ -82,7 +95,7 @@ interface Desired {
  * @returns {{reconcile: () => Promise<void>}} 触发一次收敛。
  */
 export function createProviderReconciler(deps: ProviderReconcilerDeps) {
-  const { providerStore, inference, publisher, logger } = deps;
+  const { settings, providerStore, inference, publisher, usageEvents, logger } = deps;
 
   /**
    * 读一次 desired。三路都 `.catch(() => null)`：读不到按「未设置」降级，
@@ -101,6 +114,29 @@ export function createProviderReconciler(deps: ProviderReconcilerDeps) {
   /** desired 的稳定键：用于「fetch 期间被改了吗」的比对。 */
   const desiredKey = (desired: Desired): string =>
     JSON.stringify([desired.enabled, desired.enabledIds, desired.contextWindow]);
+
+  /**
+   * 读这一轮要发布的「额度耗尽集合」。
+   *
+   * 事件读失败**不抛**（收敛不能因为一条观测路径坏了就停）：降级为空集并留一条
+   * warn——与目录 fetch 失败同纪律（原因不丢、下一轮重试）。方向要说清：空集
+   * 意味着「没有证据」，picker 会提供那些模型；这是把可观测失败换算成「暂时
+   * 没有证据」的取舍，比让整个收敛链崩掉诚实。
+   * @returns {Promise<string[]>}
+   */
+  const readUnavailable = async (): Promise<string[]> => {
+    if (usageEvents === undefined) return [];
+    let events: readonly QuotaEvent[];
+    try {
+      events = await usageEvents();
+    } catch (error) {
+      logger?.warn?.(
+        `${name}: usage events read failed (${redactSecrets(errMsg(error))}) — no quota-exhaustion evidence this pass`
+      );
+      return [];
+    }
+    return exhaustedModelIds(events, new Date(), settings.exhaustionWindowMinutes);
+  };
 
   /**
    * 收敛一遍：读 desired → 拉目录 → 复查 desired → publish。
@@ -134,8 +170,12 @@ export function createProviderReconciler(deps: ProviderReconcilerDeps) {
     // 清单口径与快照/路由**共用** resolveEnabledIds：可读的落盘清单（含空清单
     // = 不过滤）优先，只有读抛错才回退内存里最近一次 publish 的那份。
     const enabledIds = resolveEnabledIds(after.enabledIds, publisher.state.enabledIds);
+    // 额度耗尽集合：每轮从事件流重算（规则 = usage-store.ts 的纯函数）。三个
+    // 消费者——picker（buildDescriptors 丢弃）、面板 roster（snapshot 聚合与
+    // provider GET 路由）——都以 publisher 最近发布的这份为准，不会各说一套。
+    const unavailable = await readUnavailable();
     try {
-      await publisher.publish(entries, enabledIds, []);
+      await publisher.publish(entries, enabledIds, unavailable);
     } catch (error) {
       // 收敛失败不影响面板：下一轮再试。原因不丢——「目录是当前的，只有注册
       // 没落地」对操作员是可处置的信息。

@@ -410,6 +410,56 @@ export function createFileUsageStore({ name, profile = null, retentionDays = 90,
 }
 
 /**
+ * 从 429/错误事件流推断「哪些模型当前额度耗尽」——**纯函数**，判定规则的唯一真源。
+ *
+ * 为什么需要它：官方只给**账户级**魔粒余额（`/openapi/v1/magicubes/balance`），
+ * 没有 per-model 额度端点；而「哪个模型刚才在限频」恰恰是面板独家能答的问题。
+ * 证据只有两类：事件流（`kind` 已按 llm-error-fix **重分类后**的口径，见
+ * `usage-observer.ts` 头注）与单模型今日计数，本函数只用前者——计数分不清
+ * 成功与失败（`recordCall` 按流计次、含失败），拿它当证据会猜。
+ *
+ * 判定规则（三条，全部可机械复现）：
+ *   1. **只有 `kind:"quota"` 算证据**。`rate_limit` 是瞬时限频（peer 会退避
+ *      重试，请求打得出去），`error` 是未知——把任何 429 都当耗尽是 0.2.0
+ *      已修掉的误判（QUOTA 快速失败 vs RATE_LIMIT 退避，两条路不同）。
+ *   2. **只在推断窗口内有效**：事件 `at` 落在 `[now - windowMinutes, +∞)`。
+ *      窗口外的旧证据不算——免费额度按天重置，昨天的耗尽不该关掉今天的模型。
+ *   3. **不推断恢复**：成功的流不发事件，所以「模型已恢复」在这份数据里
+ *      **不可观测**。已恢复的模型最多灰显满一个窗口——方向是保守的（宁可少
+ *      提供一会，不把注定 429 的模型放进选择器），且面板灰显带着原因，
+ *      不是静默消失。
+ *
+ * 总量语义：`events` 是环形缓冲（`maxEvents` 截断、Newest-first），所以「窗口
+ * 内没有证据」可能是**真没有**、也可能是**证据被截掉了**——后者只发生在
+ * 极端刷屏（50 条以内）时，方向同样是保守收敛（灰显集合收缩）。时间戳解析
+ * 不出的事件跳过，不猜。
+ *
+ * @param {readonly QuotaEvent[]|null|undefined} events - 事件流（任意顺序）。
+ * @param {Date|number} [now] - 时钟源（测试注入）。
+ * @param {number} [windowMinutes] - 推断窗口（分钟）。非正/非有限时返回空集
+ *   ——总量防御：host-config 已把配置夹到 [5, 1440]，走到这里就是编程错误，
+ *   「没有证据」比按坏窗口算出一个莫名的集合诚实。
+ * @returns {string[]} 当前应视为额度耗尽的模型 id（去重、排序，稳定快照）。
+ */
+export function exhaustedModelIds(events: readonly QuotaEvent[] | null | undefined, now: Date | number = Date.now(), windowMinutes = 60): string[] {
+  if (!Number.isFinite(windowMinutes) || windowMinutes <= 0) return [];
+  const list = Array.isArray(events) ? events : [];
+  const nowMs = now instanceof Date ? now.getTime() : Number(now);
+  if (!Number.isFinite(nowMs)) return [];
+  const since = nowMs - windowMinutes * 60_000;
+  const out = new Set<string>();
+  for (const event of list) {
+    if (event === null || typeof event !== "object") continue;
+    if (event.kind !== "quota") continue;
+    const at = Date.parse(String(event.at));
+    if (!Number.isFinite(at) || at < since) continue;
+    const modelId = typeof event.modelId === "string" ? event.modelId : "";
+    if (modelId !== "") out.add(modelId);
+  }
+  return [...out].sort();
+}
+
+/**
  * doctor 的只读速览：不构造 store、不碰缓存，直接解析一份 usage.json 载荷，
  * 回答「这份文件本构建还认不认、里面有多少天桶/事件」。整个载荷不认识时是
  * `null`；认识但版本未知时 `versionKnown:false`（doctor 据此区分「损坏」与

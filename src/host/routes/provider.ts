@@ -54,6 +54,8 @@ interface ProviderRouteWiring {
       llmAvailable: boolean;
       registered: boolean;
       error: string | null;
+      /** 最近一次收敛发布的额度耗尽集合（picker 与两个 roster 的同一份真值）。 */
+      unavailableIds: string[];
     };
   };
   /** 保存后触发一次收敛（注册态反映 desired 后 resolve）。 */
@@ -141,7 +143,10 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
       // 写已成功；回读降级但把原因说出来（空 roster 本身不解释任何事）。
       catalogError = redactedError(error);
     }
-    const roster = rosterWithAvailability(entries, []);
+    // 耗尽集合取 publisher 最近一次收敛发布的那份（provider-reconcile 每轮从
+    // 429 事件流按纯函数 exhaustedModelIds 推断，与快照聚合、picker 同一份
+    // 真值）——路由自己不算，算了就会与另外两处漂移。
+    const roster = rosterWithAvailability(entries, publisher.state.unavailableIds ?? []);
     // 联合只解析一次：`allowed` 是它的 mode 投影，`enabledCount` 走它的计数
     // （all = roster 全部；none = 0；list = roster 中真正命中的条数，过期的 id
     // 不虚增，与 snapshot-aggregate 同一份 enabledCountOf）。

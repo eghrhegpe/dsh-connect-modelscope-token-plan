@@ -150,12 +150,15 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
   // 开关（面板值优先，patch 默认兜底）+ 注册状态 + 目录 roster，整块软失败：
   // 任何一路读不到都走降级形状，绝不 ok:false。roster 用 llm-models 的
   // rosterWithAvailability——面板保留额度耗尽的模型（灰显），picker 才丢弃它们，
-  // 两处口径不同是故意的。M4 阶段 unavailableIds 传 []（本插件暂无额度耗尽聚合）。
+  // 两处口径不同是故意的。**耗尽集合的唯一生产者是 provider-reconciler**
+  // （每轮从 429 事件流按纯函数 exhaustedModelIds 推断），这里读的是
+  // publisher 最近一次发布的那份（state.unavailableIds）——面板灰显的与
+  // picker 实际丢掉的因此永远同一批；没有 reconcile 跑过时它是 []（尚无证据）。
   const provider = await soft((async () => {
     const panel = await providerStore.enabled().catch(() => null);
     const enabled = resolveSwitchEnabled(panel, settings.registerProvider);
     const source = switchSource(panel);
-    const roster = rosterWithAvailability(modelEntries, []);
+    const roster = rosterWithAvailability(modelEntries, publisher.state.unavailableIds ?? []);
     // 允许清单是落盘的（provider-store，按 profile 分段）；判据走**共用**的
     // resolveEnabledIds：可读的清单（含空清单 = 不过滤）优先，只有读抛错才回退到
     // 内存里 publisher.state 最近一次 publish 的那份。三处消费者曾各写一套，其中

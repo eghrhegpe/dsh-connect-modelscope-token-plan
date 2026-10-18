@@ -131,6 +131,11 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     providerStore,
     inference,
     publisher,
+    // 额度耗尽集合的生产入口：每轮收敛从**同一个** usage-store 读事件流（按
+    // profile 分段的那份），推给 publisher 的 state.unavailableIds——picker
+    // 与两个面板 roster 消费的都是它。推断规则是纯函数 exhaustedModelIds
+    // （usage-store.ts），窗口在 settings.exhaustionWindowMinutes。
+    usageEvents: () => usageStore.events(),
     logger: ctx.logger
   });
 

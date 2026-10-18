@@ -4,7 +4,7 @@ import { strict as assert } from "node:assert";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createFileUsageStore, localDateKey } from "../src/host/usage-store.ts";
+import { createFileUsageStore, localDateKey, exhaustedModelIds } from "../src/host/usage-store.ts";
 import { PLUGIN_ID } from "../src/shared/wire.ts";
 
 const home = mkdtempSync(join(tmpdir(), "ms-usage-"));
@@ -191,6 +191,79 @@ assert.equal(localDateKey(new Date(2026, 9, 4)), "2026-10-04");
   );
   assert.equal(sharedOnDisk.models["a/A"].calls, 2, "A 自己的计数照常累加");
   assert.equal(sharedOnDisk.models["b/B"].tokens, 7, "B 的计数保持");
+}
+
+// §10 额度耗尽集合的推断（纯函数 exhaustedModelIds）——picker 丢不丢一个模型、
+// 面板灰显谁的**唯一判定真源**。三条规则各有用例：只有 quota 算证据、窗口外
+// 不算、不推断恢复（成功不发事件，恢复不可观测）。
+//
+// 事故背景：0.2.0 曾把**任何** 429 都当额度耗尽（QUOTA 快速失败 vs RATE_LIMIT
+// 退避两条路被压成一条），这里把 kind 分诊钉死。
+{
+  const now = new Date(2026, 9, 18, 12, 0, 0);
+  const at = (msAgo) => new Date(now.getTime() - msAgo).toISOString();
+  const ev = (modelId, kind, msAgo) => ({ at: at(msAgo), modelId, kind, message: "m" });
+
+  // ① 只有 kind:"quota" 算证据——rate_limit 会退避重试、error 是未知。
+  assert.deepEqual(
+    exhaustedModelIds([ev("a/A", "quota", 60_000)], now, 60),
+    ["a/A"],
+    "窗口内的 quota 事件 → 耗尽"
+  );
+  assert.deepEqual(
+    exhaustedModelIds([ev("a/A", "rate_limit", 60_000), ev("b/B", "error", 60_000)], now, 60),
+    [],
+    "rate_limit（瞬时限频，会退避重试）与 error（未知）都不是耗尽证据"
+  );
+
+  // ② 窗口边界：window 内有效、外过期（额度按天重置，昨天的耗尽不关今天的模型）。
+  assert.deepEqual(
+    exhaustedModelIds([ev("a/A", "quota", 60 * 60_000 - 1)], now, 60),
+    ["a/A"],
+    "恰好落在窗口内（差 1ms）算"
+  );
+  assert.deepEqual(
+    exhaustedModelIds([ev("a/A", "quota", 60 * 60_000 + 1)], now, 60),
+    [],
+    "移出窗口 1ms 即恢复——没有「手动解除」这种东西，恢复是时间性的"
+  );
+
+  // ③ 不推断恢复：成功不发事件，所以「已恢复」在这份数据里不可观测；
+  //    一个模型在窗口内先耗尽后又成功过，仍然算耗尽（保守方向）。
+  assert.deepEqual(
+    exhaustedModelIds([ev("a/A", "quota", 30 * 60_000)], now, 60),
+    ["a/A"],
+    "耗尽后即便调用成功过（无事件），窗口内仍判耗尽——宁可少提供一会"
+  );
+
+  // ④ 形状防御：乱序、重复、坏时间戳、空 modelId 都不许把结果带歪。
+  assert.deepEqual(
+    exhaustedModelIds([ev("b/B", "quota", 10_000), ev("a/A", "quota", 20_000), ev("a/A", "quota", 30_000)], now, 60),
+    ["a/A", "b/B"],
+    "去重 + 排序（快照稳定，quotaSignature 才不无故漂移）"
+  );
+  assert.deepEqual(
+    exhaustedModelIds([{ at: "not-a-timestamp", modelId: "a/A", kind: "quota", message: "m" }], now, 60),
+    [],
+    "时间戳解析不了的事件跳过，不猜"
+  );
+  assert.deepEqual(
+    exhaustedModelIds([{ at: at(10_000), modelId: "", kind: "quota", message: "m" }], now, 60),
+    [],
+    "空 modelId 跳过（「某个模型耗尽但不知道是哪个」不是可用证据）"
+  );
+  assert.deepEqual(exhaustedModelIds(null, now, 60), [], "null 事件流 = 没有证据");
+  assert.deepEqual(exhaustedModelIds([], now, 60), [], "空事件流 = 没有证据");
+  assert.deepEqual(
+    exhaustedModelIds([ev("a/A", "quota", 0)], now, 0),
+    [],
+    "windowMinutes 非正 = 总量防御的空集（host-config 已夹 [5,1440]，走到这是编程错误）"
+  );
+  assert.deepEqual(
+    exhaustedModelIds([ev("a/A", "quota", 0)], now, Number.NaN),
+    [],
+    "windowMinutes 非有限 = 空集（同上）"
+  );
 }
 
 console.log("usage-store.test.mjs: all checks passed");

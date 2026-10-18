@@ -25,7 +25,7 @@ export const inject = ["webServer"];
  * 产物反而引入第二份真源；这里用常量、由 test/config.test.mjs 钉住与
  * package.json 一致。
  */
-export const PLUGIN_VERSION = "0.5.0";
+export const PLUGIN_VERSION = "0.6.0";
 
 /**
  * 默认值。刻意不含额度常数——理由见本文件头。
@@ -62,6 +62,22 @@ export const CONFIG_DEFAULTS = Object.freeze({
   inferenceTimeoutMs: 30_000,
   /** 事件流保留条数（429/错误事件的环形上限）。 */
   maxEvents: 50,
+  /**
+   * 单模型「额度耗尽」的推断窗口（分钟）。
+   *
+   * 官方只给**账户级**魔粒余额，没有 per-model 额度端点，所以「哪个模型刚才在
+   * 限频」只能从本插件的 429 事件流推断（规则是纯函数 `exhaustedModelIds`，
+   * usage-store.ts）：某模型最近在这个窗口内出现过 `kind:"quota"` 事件
+   * （重分类后的 code，见 llm-error-fix），picker 就不再提供它、面板 roster
+   * 灰显；事件移出窗口即恢复提供。
+   *
+   * 取 60 分钟：覆盖一次「耗尽 → 用户看到 → 换模型」的合理观察期，又不至于让
+   * 一次深夜的耗尽事件把模型关一整天。**恢复不可观测是这条规则已知的代价**：
+   * 成功的流不发事件，所以额度若在窗口内恢复（按天重置恰好在窗口内发生），
+   * 模型最多灰显满一个窗口——方向是保守的（宁可少提供一会，不提供注定 429
+   * 的模型），且面板灰显上写着原因，不是静默消失。
+   */
+  exhaustionWindowMinutes: 60,
   /** provider 注册的 patch 默认值（面板保存值优先于它）。 */
   registerProvider: false,
   /**
@@ -158,6 +174,12 @@ export interface ResolvedSettings {
   pollSeconds: number;
   inferenceTimeoutMs: number;
   maxEvents: number;
+  /**
+   * 单模型额度耗尽推断窗口（分钟）：窗口内出现过 quota 事件的模型不提供给
+   * picker（面板 roster 灰显）。规则见 CONFIG_DEFAULTS 同名键的注释与
+   * `usage-store.ts` 的 `exhaustedModelIds`。
+   */
+  exhaustionWindowMinutes: number;
   registerProvider: boolean;
   /** 出图工具开关（面板保存值优先于它）。 */
   drawEnabled: boolean;
@@ -210,6 +232,10 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         pollSeconds: clampInt(source.pollSeconds, CONFIG_DEFAULTS.pollSeconds, 5, 3_600),
         inferenceTimeoutMs: clampInt(source.inferenceTimeoutMs, CONFIG_DEFAULTS.inferenceTimeoutMs, 1_000, 600_000),
         maxEvents: clampInt(source.maxEvents, CONFIG_DEFAULTS.maxEvents, 1, 1_000),
+        // 耗尽推断窗口：下界 5 分钟（再短则事件刚从环形缓冲露出就被判过期，
+        // 规则形同虚设），上界 1440（一天——额度按天重置，超过一天的窗口没有
+        // 对应任何真实的恢复语义）。
+        exhaustionWindowMinutes: clampInt(source.exhaustionWindowMinutes, CONFIG_DEFAULTS.exhaustionWindowMinutes, 5, 1440),
         registerProvider: source.registerProvider === true,
         // 出图三件套。超时同样夹上界：它直接喂给轮询截止，3e9 会让每一次出图
         // 立刻超时（与 pollSeconds / inferenceTimeoutMs 同一类坑）。下界 30s——
@@ -239,6 +265,7 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         pollSeconds: CONFIG_DEFAULTS.pollSeconds,
         inferenceTimeoutMs: CONFIG_DEFAULTS.inferenceTimeoutMs,
         maxEvents: CONFIG_DEFAULTS.maxEvents,
+        exhaustionWindowMinutes: CONFIG_DEFAULTS.exhaustionWindowMinutes,
         registerProvider: false,
         drawEnabled: false,
         drawModelId: CONFIG_DEFAULTS.drawModelId,

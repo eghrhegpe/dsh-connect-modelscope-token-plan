@@ -614,6 +614,36 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   );
 }
 
+// ── roster 的额度耗尽来自 publisher 最近一次收敛发布的那份 ──
+//
+// picker 丢不丢一个模型、面板灰显谁，两端必须同一批：耗尽集合的唯一生产者是
+// provider-reconciler（每轮从 429 事件流按纯函数 exhaustedModelIds 推断，见
+// reconcile.test.mjs §8 的接线用例），聚合器与 provider GET 路由只读
+// state.unavailableIds——自己再算一遍就会与另外两端漂移。
+{
+  const body = await buildSnapshotBody({
+    settings: resolveSettings({}).settings,
+    tokenStore: { state: async () => ({ present: true, source: "env", valid: null, checkedAt: null, ephemeral: true }) },
+    usageStore: {
+      daily: async () => ({ calls: 0 }), perModelToday: async () => [], trend: async () => [], events: async () => [], anomaly: () => null
+    },
+    inference: {
+      fetchModels: async () => ({ ids: ["a/A", "b/B"], entries: [{ id: "a/A" }, { id: "b/B" }] }),
+      fetchBalance: async () => ({ available: 10, total: 10, frozen: 0, fetchedAt: "2026-10-18T00:00:00.000Z" })
+    },
+    providerStore: { enabled: async () => true, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
+    drawStore: { enabled: async () => null, modelId: async () => null, versionNote: async () => null },
+    usagePrefsStore: { windowDays: async () => null, versionNote: async () => null },
+    // 本轮的「事实」：b/B 在推断窗口内出现过 quota 事件。
+    publisher: { state: { enabledIds: [], llmAvailable: true, registered: true, error: null, unavailableIds: ["b/B"] } },
+    logger: { warn: () => {} }
+  });
+  const rows = new Map((body.provider?.roster ?? []).map((r) => [r.id, r]));
+  assert.equal(rows.get("a/A")?.available, true, "没有证据的模型可用");
+  assert.equal(rows.get("b/B")?.available, false, "publisher 发布过的耗尽模型 → 面板不可用");
+  assert.equal(rows.get("b/B")?.quotaExhausted, true, "且带 quotaExhausted 标记（客户端据此灰显 + 禁勾选）");
+}
+
 // ── 同一条语义，用**真实挂载的插件**再钉一次 ──
 //
 // 上面那节的注释原话是「挂载的真实 store 造不出『读的时候抛』」——它用一个会抛错
