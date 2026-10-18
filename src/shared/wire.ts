@@ -273,11 +273,26 @@ export interface Snapshot {
   balance: BalanceData;
   quota: {
     daily: DailyUsage;
-    perModel: PerModelUsage[];
+    /**
+     * 今天的单模型用量（只含有记录的模型）。
+     *
+     * `null` = **没读到**（本地计数文件读失败/损坏被拒），`[]` = 读到了但今天
+     * 一次都没有。两者必须分开，理由与 {@link DailyUsage.usedLocal} 逐字相同：
+     * 把「读不到」画成空排行会让操作者以为今天没有模型被调用过，而真相是他
+     * 不知道。面板对 null 渲染「—」，与今日计数同一种处理。
+     */
+    perModel: PerModelUsage[] | null;
     /** 固定文案键：面板渲染「本地推算」说明用，i18n 在 client 侧做。 */
     countingNote: "local-counting";
   };
-  events: QuotaEvent[];
+  /**
+   * 事件流（Newest-first，已截断）。
+   *
+   * `null` = **没读到**（本地计数文件读失败/损坏被拒），`[]` = 读到了但确实
+   * 没有事件。与 {@link DailyUsage.usedLocal} 同一条红线：把「读不到」画成
+   * 「暂无事件」是伪造了一个答案。
+   */
+  events: QuotaEvent[] | null;
   trend: {
     /** 画多少天——**生效值**（面板覆盖优先，否则配置默认，恒 ≤ `maxDays`）。 */
     days: number;

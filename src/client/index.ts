@@ -3,7 +3,10 @@
  *
  * 在 Plugins 页注册 `plugins.bundle.config` 卡（三 tab：额度 / 模型 / 接入），并在
  * 输入框工具栏注册对话框用量胶囊（`conversation.input.right`，见
- * composer-usage-pill.ts）。两者读同一份 Host 只读快照，只在自己挂载期间轮询。
+ * composer-usage-pill.ts）。两者读同一份 Host 只读快照，且**各自**调用
+ * `useSnapshotPolling()`——是两条独立的 ~30s 轮询，不是共享一条 loop
+ * （`test/dom-render-react.test.mjs` 断言两者同时挂载时有两个定时器）。共享的是
+ * Host 侧那条快照路由与它的 coalesced 缓存，不是客户端的轮询实例。
  * 源码经 tsdown 打成根 client.js（IIFE）；测试加载**产物**，浏览器跑什么测试就跑什么。
  * @module dsh-connect-modelscope-token-plan/client
  */

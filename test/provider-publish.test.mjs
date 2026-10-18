@@ -487,6 +487,71 @@ function makePublisher({ llm, panel = true, gate } = {}) {
   assert.equal(adapters.size, 0, "Host 里不得留下任何适配器（面板口径与 Host 事实必须一致）");
 }
 
+// §14 maxTokensOverrides 的**端到端透传**：settings → 适配器工厂入参 → descriptor。
+//
+// 为什么要这一节：`maxTokensFor`（provider.test.mjs §3 那段）钉的是解析规则本身，
+// 而真正会被改坏的是中间那一段**接线**——`provider-publish.ts` 要把
+// `effectiveSettings.maxTokensOverrides` 交给 `createModelScopeAdapter`，漏了它
+// descriptor 就退回目录声明（魔搭目录从不给这个字段，于是恒为「不声明」），
+// 表现是「操作者在 patch 里写了 131072，面板也显示 131072，但实际请求不带上限」。
+// 上一轮评审时这条链是通的，**但没有东西阻止未来改错**——这正是 AGENTS.md 点名的
+// 「轮询签名空转」同型风险：当前没错 ≠ 有守卫。
+//
+// 断言打在工厂**实际收到的入参**上（而不是再算一遍 maxTokensFor）：算一遍只能证明
+// 规则对，证明不了 publisher 把值送到了。
+{
+  const seen = [];
+  const llm = {
+    service: {
+      registerAdapter() {
+        return () => {};
+      },
+      registerConfigurableProviders() {
+        return () => {};
+      }
+    }
+  };
+  const mk = (settings) => {
+    seen.length = 0;
+    const publisher = createProviderPublisher({
+      settings,
+      panelSwitch: async () => true,
+      getLlm: () => llm.service,
+      loadAdapterModule: async () => ({
+        createModelScopeAdapter: async (opts) => {
+          seen.push(opts);
+          return { adapter: { tag: "x" }, providerIds: ["modelscope-token-plan"] };
+        }
+      }),
+      resolveApiKey: async () => "ms-3f2a1b8c1111222233334444555566"
+    });
+    return publisher;
+  };
+
+  // ① 给了覆盖 → 原样穿过 publisher 进工厂入参。
+  {
+    const p = mk({ registerProvider: true, maxTokensOverrides: { "org/M": 131_072 } });
+    const r = await p.publish([{ id: "org/M", name: "M", max_output_length: 8192 }], [], []);
+    assert.equal(r.ok, true, "publish 成功");
+    assert.equal(seen.length, 1, "工厂被调用一次");
+    assert.deepEqual(
+      seen[0].maxTokensOverrides,
+      { "org/M": 131_072 },
+      "settings.maxTokensOverrides 必须原样透传给适配器工厂（漏了它 → 请求不带上限，而面板还显示覆盖值）"
+    );
+    p.release();
+  }
+
+  // ② 没给覆盖（测试传裸 settings 的常见形态）→ 空对象，不是 undefined。
+  //    缺省语义就是「目录说了算」，`?? {}` 那道兜底正是为它存在的。
+  {
+    const p = mk({ registerProvider: true });
+    await p.publish(ENTRIES, [], []);
+    assert.deepEqual(seen[0].maxTokensOverrides, {}, "未配置时必须是空对象（= 目录说了算），不能是 undefined");
+    p.release();
+  }
+}
+
 // §13 相位推导：`registered` / `error` 的编码状态被命名化，且 disposed 压过一切。
 //
 // 两道空转守卫的条件（关侧 = idle、开侧 = serving）以前是散在注释里的裸布尔

@@ -623,6 +623,51 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   assert.deepEqual(trulyEmpty.trend.buckets, [], "store 返回 []（读到了、确实没有）→ 原样透传空数组");
 }
 
+// ── 单模型排行 / 事件流读不到：透传 null，不是空数组 ──
+//
+// 2026-10-18 补的最后一块拼图（§6d 的聚合层姊妹篇）：trend 有专属断言，perModel /
+// events 却没有——`perModel.ok ? perModel.value : []` 曾把「读不到」画成空排行，
+// 同一份坏文件在今日头条画「—」、在排行画「还没有本地调用记录。」。这里钉死三条
+// 路（抛错 / store 自报 null / 真实空数组）汇聚到同一个 wire 值，与 trend 逐字对齐。
+{
+  const base = {
+    settings: resolveSettings({}).settings,
+    tokenStore: { state: async () => ({ present: false, source: "none", valid: null, checkedAt: null, ephemeral: true }) },
+    inference: {
+      fetchModels: async () => ({ ids: [], entries: [] }),
+      fetchBalance: async () => { throw new Error("balance endpoint refused"); }
+    },
+    providerStore: { enabled: async () => null, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
+    drawStore: { enabled: async () => null, modelId: async () => null, versionNote: async () => null },
+    usagePrefsStore: { windowDays: async () => null, versionNote: async () => null },
+    publisher: { state: { enabledIds: [], llmAvailable: false, registered: false, error: null } },
+    logger: { warn: () => {} }
+  };
+  const common = {
+    daily: async () => ({ calls: 0 }),
+    trend: async () => [],
+    anomaly: () => null
+  };
+
+  const threw = await buildSnapshotBody({
+    ...base,
+    usageStore: { ...common, perModelToday: async () => { throw new Error("usage.json unreadable"); }, events: async () => { throw new Error("usage.json unreadable"); } }
+  });
+  assert.equal(threw.quota.perModel, null, "perModelToday 抛错 → perModel 为 null（读不到 ≠ 空排行）");
+  assert.equal(threw.events, null, "events 抛错 → events 为 null（读不到 ≠ 「暂无事件」）");
+
+  // store 自己的第二态（文件在、读不出 → null）走的是另一条代码路径（ok === true，
+  // value === null），两条路必须在 wire 上汇合成同一个值。
+  const storedNull = await buildSnapshotBody({ ...base, usageStore: { ...common, perModelToday: async () => null, events: async () => null } });
+  assert.equal(storedNull.quota.perModel, null, "store 返回 null（文件在、读不出）→ 原样透传 null");
+  assert.equal(storedNull.events, null, "store 返回 null（文件在、读不出）→ 原样透传 null");
+
+  // 对照：真实空数组不得被升级成 null（否则「确实没有」这个可信日常值也会消失）。
+  const trulyEmpty = await buildSnapshotBody({ ...base, usageStore: { ...common, perModelToday: async () => [], events: async () => [] } });
+  assert.deepEqual(trulyEmpty.quota.perModel, [], "store 返回 []（读到了、确实没有）→ 原样透传空数组");
+  assert.deepEqual(trulyEmpty.events, [], "store 返回 []（读到了、确实没有）→ 原样透传空数组");
+}
+
 // ── provider 块聚合失败：**省略**整个块，不塞填满默认值的「降级块」 ──
 //
 // 旧实现失败时塞 `{ enabled:false, allowed:"all", roster:[], … }`。那个形状**看起来

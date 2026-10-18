@@ -120,6 +120,40 @@ assert.equal(fresh.anomaly(), null, "真实零不该带任何痕迹");
   assert.deepEqual(await fresh2.trend(3), [], "文件不存在 = 从未记录过 = 空趋势（真实零）");
 }
 
+// §6d perModelToday() / events() 与 daily()/trend() 同一条红线（读不到 ≠ 0），三态
+// 逐字对齐。这是 2026-10-18 补的最后一块拼图：daily()/trend() 都有了三态，单模型
+// 排行与事件流还停在 `payload?.models ?? {}` / `payload?.events ?? []`——**同一份坏
+// 文件**在今日头条画「—」、在单模型排行画「还没有本地调用记录。」、在事件卡假装
+// 岁月静好。这里钉死三种答案：读到 = 数组（空 = 确实没有，真实零）；载荷读不出 +
+// 文件在 = null；文件不在 = 空数组（从未记录过）。
+{
+  writeFileSync(file, "{not json", "utf8");
+  const corrupted = makeStore();
+  assert.equal(await corrupted.perModelToday(), null, "损坏：perModelToday 给 null，不是空排行");
+  assert.equal(await corrupted.events(), null, "损坏：events 给 null，不是「暂无事件」");
+  assert.equal((await corrupted.daily()).calls, null, "同一次读，daily 与排行答案一致");
+
+  writeFileSync(file, JSON.stringify({ version: 2, days: { "2099-01-01": { calls: 9, tokens: 9 } } }), "utf8");
+  const future2 = makeStore();
+  assert.equal(await future2.perModelToday(), null, "未知版本：排行读作「读不到」，不是空");
+  assert.equal(await future2.events(), null, "未知版本：事件流读作「读不到」，不是空");
+
+  rmSync(file, { force: true });
+  const fresh2 = makeStore();
+  assert.deepEqual(await fresh2.perModelToday(), [], "文件不存在 = 从未记录过 = 空排行（真实零）");
+  assert.deepEqual(await fresh2.events(), [], "文件不存在 = 从未记录过 = 空事件流（真实零）");
+
+  // 读到了但今天确实没有记录 = 空数组（真实零），与「读不到」不同形。
+  writeFileSync(
+    file,
+    JSON.stringify({ version: 1, days: {}, models: {}, events: [] }),
+    "utf8",
+  );
+  const empty = makeStore();
+  assert.deepEqual(await empty.perModelToday(), [], "今天没有模型记录 = 空排行（真实零）");
+  assert.deepEqual(await empty.events(), [], "没有事件 = 空事件流（真实零）");
+}
+
 // §7 版本只读闸：磁盘 version 2 → 读作空且写入被拒绝（不 clobber）。
 mkdirSync(dir, { recursive: true });
 writeFileSync(file, JSON.stringify({ version: 2, days: { "2099-01-01": { calls: 9, tokens: 9 } } }), "utf8");

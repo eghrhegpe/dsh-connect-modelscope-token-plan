@@ -163,6 +163,7 @@ export const zh = {
   "trend.windowHint": "只决定画多少天；能回看多久另有一个保留窗口（留得比画得多才画得出更远）。",
 
   "events.none": "暂无事件。",
+  "events.unreadable": "本地计数读不到，事件流无法显示（不是没有事件）。",
   "events.quota": "额度",
   "events.rate_limit": "限频",
   "events.error": "错误",
@@ -344,6 +345,7 @@ export const en: typeof zh = {
   "trend.windowHint": "Only sets how many days are drawn; how far back history is kept is a separate retention window.",
 
   "events.none": "No events.",
+  "events.unreadable": "Local counters unreadable; event stream cannot be shown (not \"no events\").",
   "events.quota": "Quota",
   "events.rate_limit": "Rate limit",
   "events.error": "Error",

@@ -66,9 +66,11 @@ function emptyBlock(key: string): unknown {
     case "quota":
       // 缺键 = **未知**，不是「零次」：usedLocal 用 null，面板渲染「—」，与 Host
       // 软失败时的形状同构（wire.ts DailyUsage：null = 没读到，0 = 确实为零）。
-      return { daily: { usedLocal: null }, perModel: [], countingNote: "local-counting" };
+      // perModel/events 同理：缺键 = 没读到 = null，不是「今天没有模型调用 /
+      // 没有事件」的空数组——把「读不到」画成空会伪造一个答案。
+      return { daily: { usedLocal: null }, perModel: null, countingNote: "local-counting" };
     case "events":
-      return [];
+      return null;
     case "trend":
       // 缺键 = **未知**，不是「读到了、都是零」：buckets 给 null，TrendBars 画
       // 「—」，与 Host 软失败时的形状同构（wire.ts trend.buckets：null = 没读到，

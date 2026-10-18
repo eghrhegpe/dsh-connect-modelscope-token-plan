@@ -42,6 +42,11 @@ export function count(value: unknown): string {
  *
  * 单位用小写 k/m：视觉上与 SI 前缀一致，也避开「兆」的歧义（`M` 在中文语境里常被读成
  * 万亿）。负值与 NaN 分别返回 `-1.2k` 与 `NaN`——不做掩饰，异常值该在面板上现形。
+ *
+ * **与 `const.ts` 的 `formatWindow()` 刻意不同，不是漏统一**：那个印的是**上下文窗口
+ * 规格**（`128K` / `256K` / `1M`，按上游与市场的叫法、K=1024 口径），回答「大概能放
+ * 多少上下文」；这里印的是**实测用量读数**（`1.2k` / `3.4m`，十进制、小写），回答
+ * 「实际用了多少」。同一数字在两处印法不同，是因为它们量纲不同（规格 vs 读数）。
  */
 export function compactCount(value: unknown): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return String(value);

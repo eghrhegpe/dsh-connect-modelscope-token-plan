@@ -18,7 +18,8 @@
 import type { zh } from "./i18n.ts";
 
 /** Minimal structural view of the React API the client actually uses. */
-export interface ReactApi {  createElement: H;
+export interface ReactApi {
+  createElement: H;
   useState: <S>(initial: S | (() => S)) => [S, (value: S | ((prev: S) => S)) => void];
   useEffect: (effect: () => void | (() => void), deps?: unknown[]) => void;
   useCallback: <F extends (...args: never[]) => unknown>(callback: F, deps: unknown[]) => F;

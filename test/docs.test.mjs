@@ -10,6 +10,7 @@
 
 import { strict as assert } from "node:assert";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -175,6 +176,64 @@ const isVendoredSpec = (rel) => rel.startsWith("docs/modelscope.cn-openapi/");
     "test/run-all.mjs 必须显式跑 build-gate.mjs（glob 不含它，丢了就没人比产物）"
   );
 
+  // ①b runner 的裁剪 flag 必须真的在裁剪。
+  //
+  // 事故：run-all.mjs 只认 `--only <值>` 空格式，而 AGENTS.md 验证段写的正是
+  // `--only=<子串>` 等号式——等号式取不到值 → only=null → **静默跑全量**，并且
+  // build-gate 当时挂在 `!only` 分支里，那些「裁剪」调用连唯一的产物门禁一起跳过。
+  // 开发者以为自己在跑一个域、实际跑了 39 个套件。这里用真实子进程钉住三件事：
+  // 两种写法都认、解析不出值以非零码报错、裁剪时 build-gate 照跑。
+  //
+  // 用 spawnSync 而不是 import：runner 在模块顶层就 process.exit，import 会把
+  // 本套件一起带走。
+  {
+    const runner = join(root, "test", "run-all.mjs");
+    const run = (args) => spawnSync(process.execPath, [runner, ...args], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, MODELSCOPE_API_KEY: "" }
+    });
+    // 挑一个名字足够独特的套件做探针：它必须只匹配自己。
+    const probe = "wire";
+    const matched = readdirSync(join(root, "test"))
+      .filter((f) => f.endsWith(".test.mjs") && f.includes(probe))
+      .sort();
+    assert.deepEqual(matched, ["wire.test.mjs"], `--only 探针 "${probe}" 必须只匹配 wire.test.mjs，实际 ${JSON.stringify(matched)}`);
+
+    for (const args of [[`--only=${probe}`], ["--only", probe]]) {
+      const r = run(args);
+      const picked = (r.stdout.match(/\[\d+\/\d+\]\s+(\S+\.mjs)/g) ?? []).map((s) => s.split(/\s+/).pop());
+      assert.equal(r.status, 0, `node test/run-all.mjs ${args.join(" ")} 应当成功，实际退出码 ${r.status}\n${r.stderr ?? ""}`);
+      assert.deepEqual(
+        picked,
+        ["wire.test.mjs", "build-gate.mjs"],
+        `node test/run-all.mjs ${args.join(" ")} 应当只跑 wire + build-gate，实际跑了 ${JSON.stringify(picked)}\n` +
+          `（等号式曾被静默忽略 → 退化成全量，见文件头那次事故。）`
+      );
+      // build-gate 必须在：裁剪时它恰恰最容易被「只改了一个域」蒙混过去。
+      assert.ok(
+        picked.includes("build-gate.mjs"),
+        `裁剪调用也必须跑 build-gate.mjs（产物新鲜度门禁）：node test/run-all.mjs ${args.join(" ")}`
+      );
+    }
+
+    // 给了 flag 却没给值：必须报错，绝不能悄悄跑全量。
+    for (const args of [["--only"], ["--only="], ["--skip"], ["--jobs"]]) {
+      const r = run(args);
+      assert.notEqual(r.status, 0, `node test/run-all.mjs ${args.join(" ")} 应当以非零码报错，实际退出码 ${r.status}`);
+      assert.ok(
+        !/全部通过/.test(r.stdout),
+        `node test/run-all.mjs ${args.join(" ")} 不该跑出「全部通过」——flag 没给值必须报错而不是跑全量`
+      );
+    }
+    // 连字符形式（`--only-wire`）是常见手误，同样不许被静默忽略。
+    {
+      const r = run(["--only-wire"]);
+      assert.notEqual(r.status, 0, `\`--only-wire\` 应当以非零码报错，实际退出码 ${r.status}`);
+      assert.ok(!/全部通过/.test(r.stdout), "`--only-wire` 不该被静默忽略（跑全量）");
+    }
+  }
+
   // ② 文档里凡出现「N 套件」都必须等于当前真实数量。
   //
   // **归档豁免**（与 §2 同款，依据见文件头那条政策）：归档是冻结的历史记录，
@@ -199,7 +258,52 @@ const isVendoredSpec = (rel) => rel.startsWith("docs/modelscope.cn-openapi/");
     }
   }
 
-  // ③ 谁都不许声称 CI / .github 不存在。
+  // ③ AGENTS.md「测试策略」那棵目录树：每个 test/*.test.mjs 都必须在树里被点名。
+  //
+  // 事故（2026-10-18 清点实测）：树里漏了 `switch-precedence.test.mjs` 与
+  // `usage-prefs-store.test.mjs` 两个套件，而 ①（glob 门禁）只保证「磁盘上的套件
+  // 都被跑到」，② 只保证「文档里写的 N 套件数是对的」——**没有一条管这棵树本身**。
+  // 树是 AI 会话挑「读哪个测试」的第一入口，漏登记的套件等于不存在。
+  //
+  // 判据机械：树里出现的每个 `*.test.mjs` 名字（含 `draw*.test.mjs` 这类通配，
+  // 通配按 glob 展开匹配）与磁盘套件集合双向一致。`run-all.mjs`、`build-gate.mjs`
+  // 与 helpers 下的 `peer-stub-loader.mjs` 不是 `.test.mjs`，不在射程内。
+  {
+    const lines = read("AGENTS.md").split(/\r?\n/);
+    // 定位「测试策略」节里那个以 `test/` 开头的 fenced block。
+    const headerAt = lines.findIndex((l) => /^##\s+测试策略/.test(l));
+    assert.ok(headerAt >= 0, "AGENTS.md 应当有「测试策略」节");
+    const openAt = lines.findIndex((l, i) => i > headerAt && l.trim() === "```");
+    assert.ok(openAt > headerAt, "「测试策略」节里应当有 ``` 围栏");
+    const closeAt = lines.findIndex((l, i) => i > openAt && l.trim() === "```");
+    assert.ok(closeAt > openAt, "「测试策略」节的 ``` 围栏应当闭合");
+
+    const tokens = [];
+    for (const line of lines.slice(openAt + 1, closeAt)) {
+      const m = line.match(/([A-Za-z0-9_*.-]+\.mjs)\b/);
+      if (m) tokens.push(m[1]);
+    }
+    const suites = readdirSync(join(root, "test")).filter((f) => f.endsWith(".test.mjs"));
+    const globRe = (g) => new RegExp("^" + g.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
+
+    const missing = suites.filter((s) => !tokens.some((t) => (t.includes("*") ? globRe(t).test(s) : t === s)));
+    assert.deepEqual(
+      missing,
+      [],
+      `AGENTS.md「测试策略」树里漏登记了 ${missing.join("、")}——树是挑测试的第一入口，` +
+        `漏掉的套件对会话等于不存在。新增套件时把它补进这棵树（通配行如 \`draw*.test.mjs\` ` +
+        `要在括号里列全实际成员）。`
+    );
+
+    const ghosts = tokens.filter((t) => !t.includes("*") && t.endsWith(".test.mjs") && !suites.includes(t));
+    assert.deepEqual(
+      ghosts,
+      [],
+      `AGENTS.md「测试策略」树里写了不存在（或已删）的套件：${ghosts.join("、")}。`
+    );
+  }
+
+  // ④ 谁都不许声称 CI / .github 不存在。
   assert.ok(existsSync(join(root, ".github", "workflows", "gate.yml")), ".github/workflows/gate.yml 应当存在");
   for (const file of ["RELEASING.md", "README.md"]) {
     for (const [i, line] of read(file).split(/\r?\n/).entries()) {
@@ -449,6 +553,49 @@ const FACTS = [
   );
 }
 
+// ── 代码地图解析：按**表头**归属目录，返回每行的完整仓库相对路径 ──────────────
+//
+// 为什么必须按表头（而不是 basename）：`index.ts`（Host 表 / Client 表各一行）与
+// `codes.ts`（Host 表 / 共享表各一行）这类 basename 在多个表里各有一行。旧实现把第一列
+// 当裸 basename 在四个根里 `find(existsSync)` 取**第一个命中**，于是两行都落到同一个
+// 文件上——`index.ts` 两行都解析到 `src/host/index.ts`，`codes.ts` 两行都解析到
+// `src/host/codes.ts`。§14①（幽灵行）与 §14②（漏登记）因此同时漏掉
+// `src/client/index.ts` 与 `src/shared/codes.ts` 的归属，§14b 更是**核错对象**
+// （2026-10-18 评审第二轮的变异实证：把共享行改成只在 host/codes.ts 存在的
+// `classifyStatus()`，本套件仍然全绿）。
+//
+// 表头是 AGENTS.md 自己写的「这个表属于哪个目录」的声明，比 basename 猜可靠：
+//   ### Host 侧（`src/host/`）  → 行内 `routes/x.ts` 拼成 `src/host/routes/x.ts`
+//   ### Client 侧（`src/client/`）
+//   ### 共享（`src/shared/`）
+function readCodeMap() {
+  const agents = read("AGENTS.md");
+  const SECTIONS = [
+    [/^###\s+Host 侧/, "src/host"],
+    [/^###\s+Client 侧/, "src/client"],
+    [/^###\s+共享/, "src/shared"]
+  ];
+  const rows = [];
+  let sectionRoot = null;
+  for (const line of agents.split("\n")) {
+    const section = SECTIONS.find(([re]) => re.test(line));
+    if (section) { sectionRoot = section[1]; continue; }
+    if (/^###\s/.test(line)) { sectionRoot = null; continue; } // 出了代码地图区
+    const m = line.match(/^\|\s*`([^`]+\.ts)`\s*\|/);
+    if (!m || sectionRoot === null) continue;
+    // 表行形如：| `routes/snapshot.ts` | 一句话职责 | `导出1`, `导出2` |
+    const cells = line.split("|").map((c) => c.trim()).filter((c) => c !== "");
+    rows.push({ rel: `${sectionRoot}/${m[1]}`, exportsCell: cells[2] });
+  }
+  const onDisk = [];
+  for (const dir of ["src/host", "src/host/routes", "src/client", "src/shared"]) {
+    for (const e of readdirSync(join(root, dir), { withFileTypes: true })) {
+      if (e.isFile() && e.name.endsWith(".ts")) onDisk.push(`${dir}/${e.name}`);
+    }
+  }
+  return { rows, onDisk };
+}
+
 // ── §14 AGENTS.md 代码地图：登记必须与磁盘一致（每个 src 文件都在，且不写幽灵行） ──
 //
 // 事故形态（2026-10-17 审计）：AGENTS.md 的代码地图 / 数据流 / 关键决策速查三张手维护的
@@ -456,32 +603,101 @@ const FACTS = [
 // 文件，烂掉的代价比任何 docs 都高：错的地图会把下一轮会话指到不存在的文件上。同一天
 // 刚废掉的「每版手册」也正是从「干净」开始、靠复制传播的。
 //
-// 判据机械（两向都要）：
-//   ① 表行第一列登记的 `xxx.ts` 必须在磁盘上有对应文件（幽灵行 = 地图指向不存在的东西）；
+// 判据机械（两个方向都要）：
+//   ① 表行第一列登记的 `xxx.ts` 必须在**该表所属目录**下有对应文件（幽灵行 = 地图指向
+//      不存在的东西）；
 //   ② 磁盘上每个 src/**/*.ts 必须在表里登记（漏登记 = 新模块没人会读到）。
-// 第三列「关键导出」是散文，**无法机械核**（试过：正则当场误报 72/72），只能靠人——
-// 不在这条里装样子。
+// 第三列「关键导出」同样机械可核（2026-10-18 推翻本条原先的「无法机械核」结论，
+// 见 §14b）——当初误报 72/72 的判据是**按行匹配函数声明**，而实际导出还有
+// const / class / re-export / async-generator 四种形状，形状枚举不全才全灭。
 {
-  const agents = read("AGENTS.md");
-  // 表行形如：| `routes/snapshot.ts` | 一句话职责 | `导出1`, `导出2` |
-  const rowFiles = [...agents.matchAll(/^\|\s*`([^`]+\.ts)`\s*\|/gm)].map((m) => m[1]);
-  assert.ok(rowFiles.length > 30, `AGENTS.md 代码地图只解析到 ${rowFiles.length} 行——表被改写/换格式了？`);
-  const roots = ["src/host", "src/client", "src/shared", "src/host/routes"];
-  const ghosts = rowFiles.filter((f) => !roots.some((r) => existsSync(join(root, r, f))));
-  assert.deepEqual(ghosts, [], `AGENTS.md 代码地图里这些文件磁盘上没有（幽灵行）：${ghosts.join("、")}`);
-  const onDisk = [];
-  for (const dir of ["src/host", "src/client", "src/shared", "src/host/routes"]) {
-    for (const e of readdirSync(join(root, dir), { withFileTypes: true })) {
-      if (e.isFile() && e.name.endsWith(".ts")) onDisk.push(e.name);
-    }
-  }
-  const registered = new Set(rowFiles.map((f) => f.split("/").pop()));
+  const { rows, onDisk } = readCodeMap();
+  assert.ok(rows.length > 30, `AGENTS.md 代码地图只解析到 ${rows.length} 行——表被改写/换格式了？`);
+  const ghosts = rows.filter((row) => !existsSync(join(root, row.rel)));
+  assert.deepEqual(ghosts, [], `AGENTS.md 代码地图里这些文件磁盘上没有（幽灵行）：${ghosts.map((r) => r.rel).join("、")}`);
+  const registered = new Set(rows.map((row) => row.rel));
   const missing = onDisk.filter((f) => !registered.has(f));
   assert.deepEqual(
     missing,
     [],
     `这些 src 文件没进 AGENTS.md 的代码地图（新模块没人会读到）：${missing.join("、")}\n` +
       "把它加进对应的表（Host 侧 / Client 侧 / 共享），一句话职责 + 关键导出。"
+  );
+}
+
+// ── §14b AGENTS.md 代码地图第三列「关键导出」：写下的名字必须真的导得出 ────────
+//
+// 事故（2026-10-18 评审实测）：0.5.0 两次改名（submitDrawJob→submitDrawTask、
+// pollDrawJob→awaitDrawTask）之后，AGENTS.md:140 的「关键导出」列**从未同步**——
+// `git log -L` 证实那两行自 8483d32 创建起一字未动。同类失效共 6 处（72 个登记
+// 符号里）：5/66 在 Host/Client 表，另 1 个（resolveRetryPolicy）其实是 peer
+// @deepseek-ai/dsh-llm 的导出、本仓只导 buildRetryPolicyConfig。地图把会话指向
+// 不存在的函数名，比指向不存在的文件更隐蔽：文件缺失 §14① 抓得到，符号缺失
+// 连 grep 都要人想到去 grep。
+//
+// §14 原判据对第三列写着「无法机械核（试过：正则当场误报 72/72）」。那次试错
+// 的根因是**形状枚举不全**：只按 `export function NAME(` 匹配，于是 const
+// （`export const S = {`）、class、re-export（`export { X } from "..."`）、
+// async-generator（`export async function*`）全被判「不存在」→ 72/72 全灭。
+// 六种形状枚举齐后实测 66/66 通过（零误报），这条判据是可机械的。
+//
+// 判据（两个方向，2026-10-18 补反向）：
+//   ① 反向——第三列整列为空 = 地图放弃了这一栏（「导出了但没写」的极端形态：
+//      文件在表里、却连一个入口都没给）。曾是 `if (!fileCell || !exportsCell)
+//      continue;` 静默跳过，于是共享表（wire/codes/allow-list）整列空白没人管。
+//      要么列一个真实导出，要么显式写「—」声明无关键导出。
+//   ② 正向——第三列每个反引号名字（去掉 `()` 后缀）必须出现在该文件的实际导出集合里。
+// 反引号外的东西（`被上面四个 store 共用`、`...`、`—`）不判——那些是散文省略。
+{
+  // 行 → 文件的归属由**表头**决定（见 readCodeMap 头注）：basename 在多个表里重复时，
+  // 旧实现一律落到第一个命中的根，于是 client/index.ts 与 shared/codes.ts 从未被真正核过。
+  const { rows } = readCodeMap();
+  assert.ok(rows.length > 30, `AGENTS.md 代码地图只解析到 ${rows.length} 行——表被改写/换格式了？`);
+  // 实际导出集合：六种形状（function / async function / async function* / const / class
+  // / interface）+ 两种 re-export（`export { A, B } from "..."` 与本地 `export { A, B };`，
+  // 后者 name 在花括号里，前者还要处理 `X as Y` 的改名）。
+  const exportsOf = (file) => {
+    const src = read(file);
+    const names = new Set();
+    const decl =
+      /\bexport\s+(?:async\s+)?(?:function\s*\*?|const|let|var|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/g;
+    for (const m of src.matchAll(decl)) names.add(m[1]);
+    const reExport = /\bexport\s+(?:type\s+)?\{([^}]*)\}\s*(?:from\s*["'][^"']+["'])?\s*;?/g;
+    for (const m of src.matchAll(reExport)) {
+      for (const part of m[1].split(",")) {
+        const as = part.match(/\bas\s+([A-Za-z_$][\w$]*)/);
+        const bare = part.trim().match(/^([A-Za-z_$][\w$]*)$/);
+        if (as) names.add(as[1]);
+        else if (bare) names.add(bare[1]);
+      }
+    }
+    return names;
+  };
+  const bad = [];
+  for (const { rel, exportsCell } of rows) {
+    if (!existsSync(join(root, rel))) continue; // 幽灵行由 §14① 判红，这里不重复报
+    const actual = exportsOf(rel);
+    // 反向判据：整列空白 = 放弃登记（见本条注释 ①）。
+    if (exportsCell === undefined || exportsCell.trim() === "") {
+      bad.push(`${rel}：地图第三列整列为空——列一个真实导出，或显式写「—」声明无关键导出`);
+      continue;
+    }
+    // 正向判据：第三列里每个反引号名字。`...` 与散文（无反引号）不判。
+    for (const name of [...exportsCell.matchAll(/`([^`]+)`/g)].map((x) => x[1])) {
+      if (name === "...") continue;
+      const bare = name.replace(/\(\).*$/, "");
+      if (!/^[A-Za-z_$][\w$]*$/.test(bare)) continue;
+      if (!actual.has(bare)) {
+        bad.push(`${rel}：地图写 \`${name}\`，实际导出里没有（共 ${actual.size} 个导出）`);
+      }
+    }
+  }
+  assert.deepEqual(
+    bad,
+    [],
+    `AGENTS.md 代码地图「关键导出」列问题：\n  ${bad.join("\n  ")}\n` +
+      `（改名后忘了同步地图。两种修法：把地图改成实际导出的名字，或该符号确实是别处\n` +
+      `（如 peer 包）的导出时改指向真正的归属。判据见本条注释：六种导出形状都枚举了。）`
   );
 }
 

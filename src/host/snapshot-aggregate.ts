@@ -259,10 +259,16 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
       // 只有本地次数，没有「上限」也没有「剩余」：官方改魔粒计费后，次数口径的
       // 推算是误导（README「三条事实」第 2 条）。头条数字是上面的 balance。
       daily: { usedLocal },
-      perModel: perModel.ok ? perModel.value : [],
+      // 读不到 = null（读不到 ≠ 0，wire.ts quota.perModel 的语义）：perModelToday()
+      // 自身的三态透上来，面板画「—」。曾经这里 `perModel.ok ? perModel.value : []`——
+      // soft() 失败时降级成空数组，与「读到了、今天确实没有模型调用」同形，于是坏
+      // 文件在今日计数上画「—」、在单模型排行上画「还没有本地调用记录。」（同一份坏
+      // 数据两个答案，与 trend.buckets 同款）。
+      perModel: perModel.ok ? perModel.value : null,
       countingNote: "local-counting"
     },
-    events: events.ok ? events.value : [],
+    // 同一红线：events() 三态透传，读不到 = null 而不是 []（wire.ts events 语义）。
+    events: events.ok ? events.value : null,
     trend: {
       // 生效天数（已裁决 + 夹取）；面板标题与图上柱数都用它。
       days: windowDays,

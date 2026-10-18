@@ -204,6 +204,40 @@ const BASE_URL = "https://api-inference.modelscope.cn/v1";
   });
   const [pc2] = __records.createProviderCalls.slice(base2);
   assert.equal(pc2.models.length, 0, "生图模型先排除、额度耗尽的再排除——注定 429 的请求干脆不发");
+
+  // maxTokensOverrides 的**端到端透传**（§5b）：本套件前几节的工厂桩全都不看入参，
+  // 于是「settings → publisher → 工厂入参 → descriptor.maxTokens」这条链的最后一
+  // 跳此前没有任何断言。provider.test.mjs 钉的是 `maxTokensFor` 规则本身，
+  // `provider-publish.test.mjs` §14 钉的是 publisher 把值送到工厂；这一节钉的是
+  // 工厂**真的把它用上**——漏了这一跳的表现是：操作者在 patch 里写了 131072、
+  // 面板也显示 131072，而实际请求不带 max_tokens（魔搭目录从不给这个字段，于是
+  // 恒退回「不声明」）。当前实现没错，这里补的是「未来改错会红」。
+  const base3 = __records.createProviderCalls.length;
+  createModelScopeAdapter({
+    entries: [
+      { id: "org/Capped", name: "Capped", max_output_length: 4096 },  // 目录声明了
+      { id: "org/Silent", name: "Silent" },                            // 目录没声明
+      { id: "org/Untouched", name: "Untouched", max_output_length: 8192 }
+    ],
+    baseUrl: BASE_URL,
+    resolveApiKey: async () => "ms-secret",
+    maxTokensOverrides: { "org/Capped": 131_072, "org/Silent": 65_536 }
+  });
+  const [pc3] = __records.createProviderCalls.slice(base3);
+  const byId = Object.fromEntries(pc3.models.map((m) => [m.id, m]));
+  assert.equal(byId["org/Capped"].maxTokens, 131_072, "覆盖赢过目录声明，且真的进到 descriptor.maxTokens");
+  assert.equal(byId["org/Silent"].maxTokens, 65_536, "目录沉默的模型也能被覆盖写下限");
+  assert.equal(byId["org/Untouched"].maxTokens, 8192, "没被点名的模型继续读目录——覆盖只认精确 id");
+
+  // 对照：不传覆盖时同一个目录的取值必须退回目录声明（证明上面的数字确由覆盖而来）。
+  const base4 = __records.createProviderCalls.length;
+  createModelScopeAdapter({
+    entries: [{ id: "org/Capped", name: "Capped", max_output_length: 4096 }],
+    baseUrl: BASE_URL,
+    resolveApiKey: async () => "ms-secret"
+  });
+  const [pc4] = __records.createProviderCalls.slice(base4);
+  assert.equal(pc4.models[0].maxTokens, 4096, "不传覆盖 → descriptor 读目录声明");
 }
 
 console.log("llm-adapter.test.mjs: all checks passed");

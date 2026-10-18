@@ -271,7 +271,7 @@ export function PanelPage({ tt, localeSubscribe }: {
       h(
         SectionCard,
         { title: tt("section.events"), open: openSections.events, onToggle: () => toggleSection("events"), tt },
-        h(EventsList, { events: snap.events ?? [], tt })
+        h(EventsList, { events: snap.events ?? null, tt })
       )
     );
   };

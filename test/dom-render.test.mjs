@@ -1058,6 +1058,45 @@ assert.ok(!bodyText().includes(tt("trend.unreadable")), "真实空数组不得�
 renderer.unmount();
 await settle();
 
+// ── §17d 单模型排行 / 事件流同一条红线：perModel:null / events:null 端到端 ──
+//
+// §17b 钉的是今日计数 + 趋势；2026-10-18 补的最后一块拼图是排行与事件流——它们也曾
+// 各自把 null 抹成 []（cards 的 `Array.isArray ? : []` / `snap.events ?? []`），同一份
+// 坏文件在头条画「—」、在排行画「还没有本地调用记录。」。null 必须一路走到「—」，
+// 不许退化成「没有记录」。
+const badBoth = {
+  ...SNAPSHOT,
+  quota: { ...SNAPSHOT.quota, perModel: null },
+  events: null
+};
+snapshotResponses = [{ body: badBoth }];
+renderer.mount(PanelPage, { tt, localeSubscribe: null });
+await settle();
+assert.ok(bodyText().includes(tt("quota.unavailable")), "perModel:null → 面板说本地计数读不到（不是没记录）");
+assert.ok(!bodyText().includes(tt("trend.none")), "perModel:null 时排行不得退化成「还没有本地调用记录」");
+assert.ok(bodyText().includes("—"), "排行读数用「—」表达（与头条/趋势同一答案）");
+// 事件 section 默认折叠（panel-page 的 openSections 初值），先展开再断言——
+// 折叠时 children 不在 DOM 里，断言会假阴性（§6 已钉过这个语义）。
+buttons().find((el) => el.getAttribute("aria-label") === `${tt("section.expand")}: ${tt("section.events")}`).click();
+await settle();
+assert.ok(bodyText().includes(tt("events.unreadable")), "events:null → 事件流说读不到");
+assert.ok(!bodyText().includes(tt("events.none")), "events:null 时事件流不得退化成「暂无事件」");
+renderer.unmount();
+await settle();
+
+// ── §17e 对照组：真实空数组仍然说「没有记录」/「暂无事件」──
+const emptyBoth = { ...SNAPSHOT, quota: { ...SNAPSHOT.quota, perModel: [] }, events: [] };
+snapshotResponses = [{ body: emptyBoth }];
+renderer.mount(PanelPage, { tt, localeSubscribe: null });
+await settle();
+assert.ok(bodyText().includes(tt("trend.none")), "perModel:[] → 「还没有本地调用记录」（可信日常值）");
+buttons().find((el) => el.getAttribute("aria-label") === `${tt("section.expand")}: ${tt("section.events")}`).click();
+await settle();
+assert.ok(bodyText().includes(tt("events.none")), "events:[] → 「暂无事件」（可信日常值）");
+assert.ok(!bodyText().includes(tt("events.unreadable")), "真实空事件不得被画成「读不到」");
+renderer.unmount();
+await settle();
+
 globalThis.setInterval = realSetInterval;
 globalThis.clearInterval = realClearInterval;
 console.log(`dom-render.test.mjs: all checks passed（${calls.length} 次真实请求，${renderer.renders()} 次重渲染）`);

@@ -73,7 +73,7 @@ export interface ProviderReconcilerDeps {
    * 「选择器里有什么」与「面板上灰着谁」不可能说两套话。推断规则是纯函数
    * `exhaustedModelIds`（usage-store.ts），窗口来自 `settings`。
    */
-  usageEvents?: () => Promise<readonly QuotaEvent[]>;
+  usageEvents?: () => Promise<readonly QuotaEvent[] | null>;
   logger?: { warn?: (message: string) => void };
 }
 
@@ -147,7 +147,7 @@ export function createProviderReconciler(deps: ProviderReconcilerDeps) {
    */
   const readUnavailable = async (): Promise<string[]> => {
     if (usageEvents === undefined) return [];
-    let events: readonly QuotaEvent[];
+    let events: readonly QuotaEvent[] | null;
     try {
       events = await usageEvents();
     } catch (error) {

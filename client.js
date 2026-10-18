@@ -258,6 +258,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"trend.windowDays": "{days} 天",
 			"trend.windowHint": "只决定画多少天；能回看多久另有一个保留窗口（留得比画得多才画得出更远）。",
 			"events.none": "暂无事件。",
+			"events.unreadable": "本地计数读不到，事件流无法显示（不是没有事件）。",
 			"events.quota": "额度",
 			"events.rate_limit": "限频",
 			"events.error": "错误",
@@ -409,6 +410,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"trend.windowDays": "{days} days",
 			"trend.windowHint": "Only sets how many days are drawn; how far back history is kept is a separate retention window.",
 			"events.none": "No events.",
+			"events.unreadable": "Local counters unreadable; event stream cannot be shown (not \"no events\").",
 			"events.quota": "Quota",
 			"events.rate_limit": "Rate limit",
 			"events.error": "Error",
@@ -480,6 +482,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	*
 	* 单位用小写 k/m：视觉上与 SI 前缀一致，也避开「兆」的歧义（`M` 在中文语境里常被读成
 	* 万亿）。负值与 NaN 分别返回 `-1.2k` 与 `NaN`——不做掩饰，异常值该在面板上现形。
+	*
+	* **与 `const.ts` 的 `formatWindow()` 刻意不同，不是漏统一**：那个印的是**上下文窗口
+	* 规格**（`128K` / `256K` / `1M`，按上游与市场的叫法、K=1024 口径），回答「大概能放
+	* 多少上下文」；这里印的是**实测用量读数**（`1.2k` / `3.4m`，十进制、小写），回答
+	* 「实际用了多少」。同一数字在两处印法不同，是因为它们量纲不同（规格 vs 读数）。
 	*/
 	function compactCount(value) {
 		if (typeof value !== "number" || !Number.isFinite(value)) return String(value);
@@ -1086,10 +1093,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			};
 			case "quota": return {
 				daily: { usedLocal: null },
-				perModel: [],
+				perModel: null,
 				countingNote: "local-counting"
 			};
-			case "events": return [];
+			case "events": return null;
 			case "trend": return {
 				days: 0,
 				windowDays: null,
@@ -1526,17 +1533,19 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	function LocalDailyCard({ snapshot, tt }) {
 		const quota = snapshot.quota;
 		const daily = quota?.daily ?? { usedLocal: null };
-		const perModel = Array.isArray(quota?.perModel) ? quota.perModel : [];
+		const perModel = quota?.perModel;
+		const perModelRows = Array.isArray(perModel) ? perModel : perModel === null ? null : [];
 		const unknownUsed = !(typeof daily.usedLocal === "number" && Number.isFinite(daily.usedLocal));
 		const usedText = unknownUsed ? "—" : count(daily.usedLocal);
+		const perModelUnknown = perModelRows === null;
 		return h("div", { style: S.card }, h("div", { style: S.poolName }, format(tt("quota.headline"), {
 			calls: usedText,
-			models: count(perModel.length)
-		})), unknownUsed ? h("div", { style: {
+			models: perModelUnknown ? "—" : count(perModelRows.length)
+		})), unknownUsed || perModelUnknown ? h("div", { style: {
 			...S.formNote,
 			color: "var(--dsw-alias-state-warn-primary)"
-		} }, tt("quota.unavailable")) : null, h(ModelUsageTable, {
-			rows: perModel,
+		} }, tt("quota.unavailable")) : null, perModelUnknown ? null : h(ModelUsageTable, {
+			rows: perModelRows,
 			tt
 		}), h("div", { style: S.trendLegend }, tt("quota.note")));
 	}
@@ -1725,8 +1734,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			role: "alert"
 		}, error) : null);
 	}
-	/** 事件流（429/错误），Newest-first。 */
+	/** 事件流（429/错误），Newest-first。`events` 为 null = 读不到，渲染「—」（读不到 ≠ 0）。 */
 	function EventsList({ events, tt }) {
+		if (events === null) return h("div", { style: S.trendLegend }, tt("events.unreadable"));
 		if (!Array.isArray(events) || events.length === 0) return h("div", { style: S.trendLegend }, tt("events.none"));
 		return h("div", null, events.map((event, index) => h("div", {
 			key: `${event.at}-${index}`,
@@ -2783,7 +2793,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				onToggle: () => toggleSection("events"),
 				tt
 			}, h(EventsList, {
-				events: snap.events ?? [],
+				events: snap.events ?? null,
 				tt
 			})));
 		};

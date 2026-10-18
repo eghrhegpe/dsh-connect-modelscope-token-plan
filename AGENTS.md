@@ -31,7 +31,9 @@ npm run doctor                  # 只读盘点状态文件
 
 - **改了契约/接缝文件，跑全量**。`src/shared/*`、`client.js`、`lib/index.js` 以及被多个模块消费的文件，消费者不可枚举——按域裁剪会漏掉跨域契约。判断标准：这个文件的消费者我数得清吗？数不清就全量。
 - **全量现在是安全的**：跑完所有套件再汇总，失败项逐个点名。别因为怕卡机器而只跑自己那一个域。
-- **撞了封闭集合检查，别绕过，按它的修法补进去**。仓库的高 ROI 门禁多是闭合清单（panel 的 tt 白名单、degrade marker grep、聚合器纯度断言）。被它拦住 = 你动了未登记成员，正确动作是把新成员补进清单（连代码带测试），不是放宽或删掉这条检查。
+- **`--only` / `--skip` 给了值才算数**：从前 runner 只认 `--only <值>` 空格式，而本文件写的正是 `--only=<子串>` 等号式——等号式取不到值就**静默退化成全量**（你以为在裁剪，实际跑了 39 个套件），还因为 build-gate 当时挂在「未裁剪」分支里，连唯一的产物门禁一起跳过。现在两种写法都认，解析不出值或以 `--only-wire` 这种连字符形式出现就直接以退出码 2 报错；裁剪时 build-gate 照跑（「只跑一个域」恰恰是「改了 src 没重建」最容易蒙混的场景）。
+- **撞了封闭集合检查，别绕过，按它的修法补进去**。仓库的高 ROI 门禁都是闭合清单，每条都能在 `test/docs.test.mjs` 里点出行号：**§14（:554）**`src/` 四目录文件登记表（每个 `.ts` 都得在地图里，且不许写幽灵行）、**§14b（:583）**地图第三列的关键导出名必须真的导得出、**§15（:659）**口径表面集合 `SCOPE_FILES`（新增规范性表面必须补进这个数组）、**§17（:723）**状态 store 头注裁定集合、**§13（:478）**根目录手册禁令、**§6（:154）**套件数与 runner 契约。被它拦住 = 你动了未登记成员，正确动作是把新成员补进清单（连代码带测试），不是放宽或删掉这条检查。
+  - 判断「这条检查到底在哪」时**先跑命令再写进文档**：本文件曾把三条门禁写成「panel 的 tt 白名单 / degrade marker grep / 聚合器纯度断言」，2026-10-18 清点发现前两条在代码里查无此物（`test/panel.test.mjs` 只有 zh/en 键集一致 + 值域断言，没有白名单；degrade 留痕只有 `test/draw-store.test.mjs:211` 一处 warn 日志断言），第三条同样不存在。指导文档点名门禁时必须带**文件:行**。
 - **测试期望要对齐实现语义**：改测试前先读被测模块的注释——很多「看起来怪」的行为（如 `valid: null` 不是 `false`）是刻意的语义区分。
 
 ---
@@ -56,6 +58,9 @@ npm run doctor                  # 只读盘点状态文件
 - **先读裁定，再读代码**：本仓多数「看起来怪」的写法在 README「三条事实」、`docs/PROVIDER-M4.md`、`docs/IMPLEMENTATION.md` 有明文出处。定罪前先搜出处，有出处的是设计，不是缺陷。
 - **每条问题先做一次无罪搜索**：判「吞错误」前先读 catch 上方注释是否在解释故意降级；判「缺某能力」前先搜有没有「不引入」的裁定。
 - **结论分四级**：实测属实 / 部分属实（标注数字或归因修正）/ 设计取舍（附文档行号）/ 无法证实。后两类不得包装成缺陷。
+- **门禁全绿不等于没事**：本仓有两类缺陷**跑测试永远挖不到**——① 语法合法、语义不变、类型也对，只是折行/排版被挤坏（`typecheck` 与全部套件都抓不到）；② 门禁本身在**核错对象**（判据绿着，因为它检查的是另一个文件）。两类都是「绿灯撒谎」。这类只能靠**读代码 + 变异实证**：故意把文档写错、跑一次门禁，看它到底点不点得中。变异实证用一次性脚本改文件 → `spawnSync(process.execPath, ["test/run-all.mjs", "--only=<域>"])` 读退出码与点名 → 按原字节还原（不要用 `git checkout`，会带走并行会话的未提交改动）。
+- **先划轴，再读文件**：评审是读密集型活。开读前先定 2–3 条高价值轴（例如「新提交改了什么契约」「门禁的判据指向谁」），只读这几条轴涉及的文件，其余交给 subagent 出结论。逐文件通读 50 个 src 会把上下文烧光，且挖不到上面那两类问题。
+- **排版损伤用机械扫描兜底**：折行损伤靠肉眼扫不出来。全仓扫 `;\s{3,}\S` / `\}\s{3,}\S` / `\{\s{3,}\S` 并排除 `//` 行尾注释，命中即人工看一眼——本次两处真损伤（`provider-reconcile.ts` 的两条接口声明挤一行、`runtime.ts:21` 的 `export interface ReactApi {  createElement: H;`）都是这么捞出来的，而当时 39/39 全绿。
 
 ---
 
@@ -91,7 +96,7 @@ npm run doctor                  # 只读盘点状态文件
 
 ## 进入代码库的读取顺序（AI 会话）
 
-约 50 个 src 文件 + 约 35 个测试文件，乱序读会把时间花在「重新验证文档已写明的事实」上。
+约 59 个 src 文件（`.ts`）+ 38 个测试套件（`test/*.test.mjs`；连同 helpers 共 41 个 `.mjs`），乱序读会把时间花在「重新验证文档已写明的事实」上。
 
 1. **先文档，后代码**：本文件 → `README.md`（功能全貌 + 三条事实）→ `docs/PROVIDER-M4.md`（设计契约）。这些是判断「代码对不对」的坐标系。
 2. **git 先行**：`git log --oneline -15` + `git status --short`。并行会话常驻，优先读新鲜改动。
@@ -132,14 +137,15 @@ npm run doctor                  # 只读盘点状态文件
 | **── 观测与纠正 ──** | | |
 | `usage-observer.ts` | **流出口观测**：真实对话→本地计数/事件 | `withUsageObserver()`, `observeStream()` |
 | `llm-error-fix.ts` | 429 误判纠正（QUOTA→RATE_LIMIT） | `reclassifyStream()`, `shouldReclassifyQuotaToRate()` |
-| `llm-retry.ts` | 重试策略（按 code 决定退避） | `resolveRetryPolicy()` |
+| `llm-retry.ts` | 重试策略（按 code 决定退避） | `buildRetryPolicyConfig()`, `retryableCodes()` |
 | `coalesced-fetch.ts` | 有界并发缓存（目录/余额/标签共用） | `createCoalescedFetch()` |
 | **── 出图工具 ──** | | |
+| `draw.ts` | **出图协议纯逻辑半边**（endpoint/请求体/响应解析/状态判定/失败分诊，peer-free） | `parseDrawResult()`, `readTaskStatus()`, `buildDrawBody()`, `describeDrawFailure()` |
 | `draw-register.ts` | 出图工具注册（挂载时一次性） | `registerDrawTool()` |
 | `draw-store.ts` | 出图开关 + 模型偏好的持久化 | `createFileDrawStore()` |
-| `draw-runtime.ts` | 出图运行时（两段式：提交→轮询） | `submitDrawJob()`, `pollDrawJob()` |
-| `draw-jobs.ts` | 出图任务状态管理 | `createDrawJobStore()` |
-| `draw-tool-state.ts` | 出图缺席原因（内存） | `drawToolNote()` |
+| `draw-runtime.ts` | 出图运行时（两段式：提交→轮询） | `submitDrawTask()`, `awaitDrawTask()` |
+| `draw-jobs.ts` | 出图任务状态管理 | `createDrawJobs()` |
+| `draw-tool-state.ts` | 出图缺席原因 + 本次挂载注册位（内存） | `setDrawToolNote()`, `drawToolNote()`, `setDrawToolMounted()`, `drawToolMounted()` |
 | **── 路由 ──** | | |
 | `routes/snapshot.ts` | 面板轮询的唯一只读路由 | `registerSnapshotRoute()` |
 | `routes/models.ts` | 模型目录路由 | `registerModelsRoute()` |
@@ -152,7 +158,7 @@ npm run doctor                  # 只读盘点状态文件
 | `routes/http.ts` | HTTP 辅助（CORS/JSON/错误脱敏） | `withOrigin()`, `writeJson()` |
 | **── 聚合与工具 ──** | | |
 | `snapshot-aggregate.ts` | 快照聚合（软失败，绝不白屏） | `buildSnapshotBody()` |
-| `doctor.ts` | 只读盘点工具（排查用） | `createDoctor()` |
+| `doctor.ts` | 只读盘点工具（排查用） | `diagnose()`, `renderReport()` |
 | `codes.ts` | 错误分类单一真源 | `classifyRateLimit()`, `parseRetryAfterMs()` |
 | `util.ts` | 通用工具（脱敏/错误消息/类型守卫） | `redactSecrets()`, `pluginError()` |
 | `types.ts` | Host 侧类型定义 | `Wiring`, `HostDeps` |
@@ -161,7 +167,7 @@ npm run doctor                  # 只读盘点状态文件
 
 | 文件 | 一句话职责 | 关键导出 |
 |---|---|---|
-| `index.ts` | Client 入口（Cordis client 插件） | `apply()` |
+| `index.ts` | Client 入口（IIFE 注册物：id + 工厂，三模块世界共用） | `—`（无 ESM 导出；注册物经 __ModuleLoader__ 与 module.exports 交出） |
 | `panel-page.ts` | **面板主页面**：三 tab 布局 + 全部状态管理 | `PanelPage` |
 | `cards.ts` | 展示组件（余额/计数/趋势/事件/令牌/Provider/出图） | `BalanceCard`, `ProviderCard`, ... |
 | `snapshot.ts` | 快照解读（降级形状 + 兜底路由） | `viewOf()`, `providerOf()` |
@@ -171,19 +177,19 @@ npm run doctor                  # 只读盘点状态文件
 | `styles.ts` | 样式 token | `S` |
 | `runtime.ts` | React 运行时桥接（h/useState/useEffect） | `h`, `useState`, `useEffect` |
 | `i18n.ts` | 国际化字典 | — |
-| `composer-usage-pill.ts` | 对话框胶囊（魔粒余额 + 本地计数） | `UsagePill` |
+| `composer-usage-pill.ts` | 对话框胶囊（魔粒余额 + 本地计数） | `ComposerUsagePill()`, `ModelscopePill()` |
 | `toggle-switch.ts` | 开关组件 | `ToggleSwitch` |
 | `use-snapshot-polling.ts` | 快照轮询 hook（退避/后台暂停/慢响应保护） | `useSnapshotPolling()` |
 | `use-polling-interval.ts` | 轮询间隔计算 hook | `usePollingInterval()` |
-| `apply.ts` | Client apply 入口 | — |
+| `apply.ts` | Client apply 入口（inject 声明 + ctx 装配） | `apply()`, `inject`, `ClientCtx` |
 
 ### 共享（`src/shared/`）
 
-| 文件 | 职责 |
-|---|---|
-| `wire.ts` | **契约类型**：Snapshot/TokenStatus/ProviderStatus/... 的 wire 形状 |
-| `codes.ts` | 共享错误码 |
-| `allow-list.ts` | 允许清单解析（哨兵/空/列表三态） |
+| 文件 | 职责 | 关键导出 |
+|---|---|---|
+| `wire.ts` | **契约类型**：Snapshot/TokenStatus/ProviderStatus/... 的 wire 形状 | `Snapshot`, `SnapshotResponse`, `SNAPSHOT_REQUIRED_KEYS` |
+| `codes.ts` | 共享错误码 | `CODE`, `CodeValue` |
+| `allow-list.ts` | 允许清单解析（哨兵/空/列表三态） | `parseAllowedList()`, `isIdAllowed()` |
 
 ---
 
@@ -248,6 +254,8 @@ npm run doctor                  # 只读盘点状态文件
 | 为什么目录取数不阻塞在余额取数之后？ | `src/host/snapshot-aggregate.ts` 注释 |
 | 为什么开关值写不进磁盘？（已修） | `docs/IMPLEMENTATION.md`「开关值写不进磁盘」 |
 | 为什么面板收敛删了目录表？（已决） | `docs/IMPLEMENTATION.md`「面板收敛」 |
+| 为什么同一个 256000 在面板上有三种印法？ | `src/client/format.ts` `compactCount()` 头注（规格 `256K` vs 读数 `256k` vs 千分位 `256,000`，量纲不同） |
+| 为什么胶囊和面板是两条轮询？ | `src/client/index.ts` 头注（各调一次 `useSnapshotPolling()`；共享的是 Host 路由，不是客户端实例） |
 
 ---
 
@@ -320,12 +328,16 @@ test/
 ├── reconcile.test.mjs       # 收敛器
 ├── retry.test.mjs           # 重试策略
 ├── usage-store.test.mjs     # 本地计数持久化
+├── usage-prefs-store.test.mjs # 趋势显示窗口偏好持久化
 ├── state-store.test.mjs     # 文件状态原语
 ├── panel.test.mjs           # 面板路由契约
 ├── routes.test.mjs          # 路由族
 ├── composer-pill.test.mjs   # 对话框胶囊
+├── switch-precedence.test.mjs # 开关优先级：面板值 > patch 默认
 ├── family-kernel.test.mjs   # 同族同源**宣称**的核对（数值重叠只报告，不判红）
 ├── env-hermetic.test.mjs    # 环境隔离
 ├── inference-vision.test.mjs # 视觉判定
-└── draw*.test.mjs           # 出图工具全套
+└── draw*.test.mjs           # 出图工具全套（draw.test.mjs / -jobs / -register / -routes / -runtime / -store）
 ```
+
+> 这棵树由 §6③（`test/docs.test.mjs`）门禁守着：每个 `test/*.test.mjs` 都必须在这里被点名（`draw*.test.mjs` 那条通配算一条，但括号里要列全实际成员）。新增套件忘了登记会判红——本次清点就抓出 `switch-precedence.test.mjs` 与 `usage-prefs-store.test.mjs` 两个漏登记。

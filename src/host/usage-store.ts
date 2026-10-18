@@ -364,12 +364,35 @@ export function createFileUsageStore({ name, profile = null, retentionDays = 90,
       return day === null ? { dateKey, calls: 0, tokens: 0 } : { ...day, dateKey };
     },
 
-    /** 今天的单模型计数（只含有记录的模型，dayCalls/dayTokens 口径，均跨日清零）。 */
-    async perModelToday() {
+    /**
+     * 今天的单模型计数（只含有记录的模型，dayCalls/dayTokens 口径，均跨日清零）。
+     *
+     * 三种答案，与 {@link daily} / {@link trend} 同一条红线（wire.ts：读不到 ≠ 0）：
+     *   - 数组 —— 今天的单模型记录（只含有记录的模型；空数组 = 今天确实没有记录，
+     *     是**真实零**）；
+     *   - `null` —— **读不到**：载荷读不出来（损坏 / 形状不对 / 更新构建写的版本 /
+     *     存在却不可读）。面板渲染「—」，不是空排行。
+     *
+     * 这是 2026-10-18 补上的最后一块拼图：daily() 三态在 2026-10-16、trend() 在
+     * 本轮都补上了，perModelToday() 一直停在 `payload?.models ?? {}`——同一个坏文件
+     * 在头条画「—」、在单模型排行却画「还没有本地调用记录。」，同一份坏数据在
+     * 同一个卡片里给出两种答案。判据与 daily() 逐字一致：文件不存在才是真实的零，
+     * 文件在却读成空是信息丢失。
+     *
+     * @returns {Array<{modelId: string, calls: number, tokens: number|null, lastAt: string|null}> | null}
+     */
+    async perModelToday(): Promise<Array<{ modelId: string; calls: number; tokens: number | null; lastAt: string | null }> | null> {
       const payload = await cache.read();
+      if (payload === null) {
+        // 与 daily() 同一发 stat：只发生在「载荷读不出来」的异常路径上（正常循环
+        // 由读缓存命中短路，零额外 IO）。文件不在 = 从未记录过 = 真实零；
+        // 文件在 = 我们失去了那些信息 = 不知道。
+        const stored = await pathExists(file);
+        return stored ? null : [];
+      }
       const todayKey = localDateKey(now());
       const out: Array<{ modelId: string; calls: number; tokens: number | null; lastAt: string | null }> = [];
-      for (const [modelId, counter] of Object.entries(payload?.models ?? {})) {
+      for (const [modelId, counter] of Object.entries(payload.models ?? {})) {
         if (counter.day !== todayKey) continue;
         out.push({ modelId, calls: counter.dayCalls, tokens: counter.dayTokens, lastAt: counter.lastAt });
       }
@@ -419,10 +442,29 @@ export function createFileUsageStore({ name, profile = null, retentionDays = 90,
       return out;
     },
 
-    /** 事件流（Newest-first，已截断）。 */
-    async events() {
+    /**
+     * 事件流（Newest-first，已截断）。
+     *
+     * 三种答案，与 {@link daily} / {@link trend} 同一条红线（wire.ts：读不到 ≠ 0）：
+     *   - 数组 —— 读到的事件（空数组 = 确实没有事件，是**真实零**）；
+     *   - `null` —— **读不到**：载荷读不出来（损坏 / 形状不对 / 更新构建写的版本 /
+     *     存在却不可读）。面板渲染「—」，不是「暂无事件」。
+     *
+     * 与 perModelToday() 同一块拼图（2026-10-18）：`payload?.events ?? []` 把
+     * 「读不到」和「确实没有」合成同一种答案，坏文件在事件卡上假装岁月静好。
+     *
+     * @returns {QuotaEvent[] | null}
+     */
+    async events(): Promise<QuotaEvent[] | null> {
       const payload = await cache.read();
-      return [...(payload?.events ?? [])];
+      if (payload === null) {
+        // 与 daily() 同一发 stat：只发生在「载荷读不出来」的异常路径上（正常循环
+        // 由读缓存命中短路，零额外 IO）。文件不在 = 从未记录过 = 真实零；
+        // 文件在 = 我们失去了那些信息 = 不知道。
+        const stored = await pathExists(file);
+        return stored ? null : [];
+      }
+      return [...(payload.events ?? [])];
     },
 
     /** 最近一次解析异常（无异常为 null）——快照转 shapeWarnings。 */

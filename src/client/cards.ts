@@ -95,18 +95,25 @@ export function LocalDailyCard({ snapshot, tt }: { snapshot: Snapshot; tt: Tt })
   // 「形状不对的数据渲染『空』，绝不抛」，自己没做到。
   const quota = snapshot.quota;
   const daily = quota?.daily ?? { usedLocal: null };
-  const perModel = Array.isArray(quota?.perModel) ? quota.perModel : [];
+  // 三态透传：null = 读不到（Host 那一路软失败 / 缺键），数组 = 读到的记录
+  // （空数组 = 今天确实没有，真实零），其它形状 = 不该出现，渲染「空」不抛。
+  const perModel = quota?.perModel;
+  const perModelRows = Array.isArray(perModel) ? perModel : perModel === null ? null : [];
   // 读不到 ≠ 0：null（Host 那一路软失败）渲染「—」并附一行提示，原因在面板上方的
   // shapeWarnings 里（「daily source failed (…)」）。把「读不到」画成 0 会让操作者
   // 以为今天没调用过——真相是他不知道。
   const unknownUsed = !(typeof daily.usedLocal === "number" && Number.isFinite(daily.usedLocal));
   const usedText = unknownUsed ? "—" : count(daily.usedLocal as number);
+  // 单模型排行同一条红线：null = 读不到 → 标题里的模型数画「—」，排行整段不画——
+  // 曾经 `Array.isArray(...) ? perModel : []` 把 null 合进「确实没有记录」，坏文件
+  // 在头条画「—」、在排行画「还没有本地调用记录。」（同一份坏数据两个答案）。
+  const perModelUnknown = perModelRows === null;
   return h(
     "div",
     { style: S.card },
-    h("div", { style: S.poolName }, format(tt("quota.headline"), { calls: usedText, models: count(perModel.length) })),
-    unknownUsed ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("quota.unavailable")) : null,
-    h(ModelUsageTable, { rows: perModel, tt }),
+    h("div", { style: S.poolName }, format(tt("quota.headline"), { calls: usedText, models: perModelUnknown ? "—" : count(perModelRows.length) })),
+    unknownUsed || perModelUnknown ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("quota.unavailable")) : null,
+    perModelUnknown ? null : h(ModelUsageTable, { rows: perModelRows, tt }),
     h("div", { style: S.trendLegend }, tt("quota.note"))
   );
 }
@@ -343,8 +350,11 @@ export function TrendWindowPicker({ trend, busy, error, onChange, tt }: {
 // 逼着调用点写 `as Parameters<Tt>[0]`，把类型系统的最后一道防线让掉了）。
 const EVENT_KIND_KEY: Record<string, DictionaryKey> = { quota: "events.quota", rate_limit: "events.rate_limit", error: "events.error" };
 
-/** 事件流（429/错误），Newest-first。 */
-export function EventsList({ events, tt }: { events: QuotaEvent[]; tt: Tt }): unknown {
+/** 事件流（429/错误），Newest-first。`events` 为 null = 读不到，渲染「—」（读不到 ≠ 0）。 */
+export function EventsList({ events, tt }: { events: QuotaEvent[] | null; tt: Tt }): unknown {
+  // 读不到 ≠ 0（红线 3，wire.ts events 语义）：null 渲染「—」，[] 才是「确实没有
+  // 事件」。曾经 `events ?? []` 把 null 抹平成空，于是坏文件在事件卡上假装岁月静好。
+  if (events === null) return h("div", { style: S.trendLegend }, tt("events.unreadable"));
   if (!Array.isArray(events) || events.length === 0) return h("div", { style: S.trendLegend }, tt("events.none"));
   return h(
     "div",
