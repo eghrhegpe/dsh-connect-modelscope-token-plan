@@ -513,6 +513,11 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
     // normalizeRosterSave，序列化规则只有一处）。
     setDraft(normalizeRosterSave(hostIds));
     // 刻意只依赖 hostKey：hostIds 每次轮询都是新数组，列它会在每帧覆盖在编辑的勾选。
+    // 已知残余竞态（裁定：接受，不防护）：用户还在编辑勾选时，轮询带回「不同」
+    // 的 Host 值（另一会话/标签页在同一 30s 窗口保存了不同清单）→ hostKey 变化
+    // → draft 重置、未保存的编辑丢失。不防护的原因：脏 draft 压过外部值需要
+    // 「最后写者胜」+「陈旧 id 残留」两个新语义决策，属 owner 裁量；代价上界
+    // 只是重勾几格。自己保存引发的 hostKey 变化无害（draft 收敛到刚保存的值）。
   }, [hostKey]);
 
   const roster = status.roster;

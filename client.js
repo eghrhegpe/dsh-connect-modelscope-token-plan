@@ -136,7 +136,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	var zh, en;
 	var init_i18n = __esmMin((() => {
 		zh = {
-			"panel.title": "魔搭接入 · 额度面板",
+			"panel.title": "魔搭模型接入",
 			"panel.refresh": "刷新",
 			"panel.updated": "更新于 {time}",
 			"panel.loading": "加载中…",
@@ -288,7 +288,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"composer.stale": "上次数据"
 		};
 		en = {
-			"panel.title": "ModelScope Access · Quota",
+			"panel.title": "ModelScope Model Access",
 			"panel.refresh": "Refresh",
 			"panel.updated": "Updated {time}",
 			"panel.loading": "Loading…",

@@ -6,7 +6,7 @@ import type { Tt } from "./runtime.ts";
 
 /** 简体中文（键集的真源）。 */
 export const zh = {
-  "panel.title": "魔搭接入 · 额度面板",
+  "panel.title": "魔搭模型接入",
   "panel.refresh": "刷新",
   "panel.updated": "更新于 {time}",
   "panel.loading": "加载中…",
@@ -201,7 +201,7 @@ export const zh = {
 
 /** English dictionary, key-parity pinned by the type. */
 export const en: typeof zh = {
-  "panel.title": "ModelScope Access · Quota",
+  "panel.title": "ModelScope Model Access",
   "panel.refresh": "Refresh",
   "panel.updated": "Updated {time}",
   "panel.loading": "Loading…",
