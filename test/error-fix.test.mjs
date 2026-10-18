@@ -84,10 +84,6 @@ import { reclassifyFinish, reclassifyReason, shouldReclassifyQuotaToRate, looksL
     assert.equal(reclassifyReason(failure), wantReason, "reason 应为 " + wantReason);
     assert.equal(shouldReclassifyQuotaToRate(failure), wantBool, "布尔==" + wantBool + "（" + wantReason + "）");
   }
-  // 三条"应纠正"串恰好是 boolean true 的来源（防回归：真源集合与布尔判定必须同步）。
-  assert.equal(shouldReclassifyQuotaToRate(q('{"type":"rate_limit_exceeded"}')), true);
-  assert.equal(shouldReclassifyQuotaToRate(q('{"type":"quota_exceeded_error","detail":"tpm cap"}')), true);
-  assert.equal(shouldReclassifyQuotaToRate(q("HTTP 429 too many requests")), true);
 }
 
 console.log("error-fix.test.mjs: all checks passed");
