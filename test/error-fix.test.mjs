@@ -7,7 +7,7 @@
 // （docs/ROADMAP.md Backlog）。本套件证明的是「给定 peer 那样的行为，我们的
 // 纠正是对的」，证明不了 peer 的行为本身没有漂移。
 import { strict as assert } from "node:assert";
-import { reclassifyFinish, looksLikeRateLimit, CODE } from "../src/host/llm-error-fix.ts";
+import { reclassifyFinish, reclassifyReason, shouldReclassifyQuotaToRate, looksLikeRateLimit, CODE } from "../src/host/llm-error-fix.ts";
 
 // looksLikeRateLimit 纯判据（v1 文本启发）：出现显式限频信号（RATE_SIGNAL 任一）
 // 且不命中硬额度措辞（HARD_QUOTA_WORDING）才判为限频。
@@ -61,6 +61,33 @@ import { reclassifyFinish, looksLikeRateLimit, CODE } from "../src/host/llm-erro
     reason: { kind: "error", failure: { code: CODE.RATE_LIMIT, message: "throttled" } }
   };
   assert.equal(reclassifyFinish(alreadyRate), alreadyRate, "已是 RATE_LIMIT 不重复改写");
+}
+
+// reclassifyReason（429 重分类的可观测理由）：纯函数，把 shouldReclassifyQuotaToRate
+// 的判定路径翻译成稳定短串，复用同一批词表（不引入第二份）。钉死 8 条路径 + 布尔
+// 等价（boolean true 仅出现在三条"应纠正"串上）。
+{
+  const q = (message) => ({ code: CODE.QUOTA, message });
+  const cases = [
+    // [failure, 期望 reason, 期望 shouldReclassifyQuotaToRate]
+    [null, "not_quota_code", false],
+    [{ code: CODE.RATE_LIMIT, message: "throttled" }, "not_quota_code", false],
+    [q('{"type":"rate_limit_exceeded"}'), "structured:rate_limit_type", true],
+    [q('{"type":"quota_exceeded_error","detail":"tpm cap"}'), "structured:quota_rate_cap", true],
+    [q('{"type":"quota_exceeded_error","detail":"all used up"}'), "structured:quota_no_cap", false],
+    [q('{"type":"server_overloaded"}'), "structured:other_type", false],
+    [q("HTTP 429 too many requests"), "text:rate_signal", true],
+    [q("requests per minute exceeded, quota exceeded"), "text:hard_quota", false],
+    [q("service temporarily unavailable"), "text:no_rate_signal", false]
+  ];
+  for (const [failure, wantReason, wantBool] of cases) {
+    assert.equal(reclassifyReason(failure), wantReason, "reason 应为 " + wantReason);
+    assert.equal(shouldReclassifyQuotaToRate(failure), wantBool, "布尔==" + wantBool + "（" + wantReason + "）");
+  }
+  // 三条"应纠正"串恰好是 boolean true 的来源（防回归：真源集合与布尔判定必须同步）。
+  assert.equal(shouldReclassifyQuotaToRate(q('{"type":"rate_limit_exceeded"}')), true);
+  assert.equal(shouldReclassifyQuotaToRate(q('{"type":"quota_exceeded_error","detail":"tpm cap"}')), true);
+  assert.equal(shouldReclassifyQuotaToRate(q("HTTP 429 too many requests")), true);
 }
 
 console.log("error-fix.test.mjs: all checks passed");

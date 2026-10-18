@@ -262,4 +262,25 @@ function makeDeps({ store, fetch, logger, usageEvents } = {}) {
   }
 }
 
+// §10 观测面（2026-10-18 补）：executor 层意外反抗若走**轮询路径**（不 await），
+// 调用方丢掉 result、链的防毒化又把 result 的拒绝吞成 0 痕迹——「这一遍没收敛成」
+// 对操作员/测试彻底不可见。补 `health().lastError` + 一条 warn，让漏网反抗可观测；
+// 成功即清空。毒化防护本身见 §9，这里只钉「不静默 + 复位」。
+{
+  const warnings = [];
+  const { deps, published } = makeDeps({
+    logger: { warn: (m) => warnings.push(m) }
+  });
+  deps.publisher.state = { get enabledIds() { throw new Error("state boom"); } };
+  const { reconcile, health } = createProviderReconciler(deps);
+  void reconcile(); // 轮询路径：不 await（index.ts 的 setInterval 就是这样）
+  await new Promise((resolve) => setImmediate(resolve)); // 拒绝已传播
+  assert.match(String(health().lastError), /state boom/, "意外反抗必须落在 health().lastError（轮询侧唯一可观测面）");
+  assert.ok(warnings.some((w) => /reconcile pass failed/.test(w)), "漏网反抗必须留档一条 warn");
+  deps.publisher.state = { enabledIds: [] }; // 「故障恢复」
+  await reconcile();
+  assert.equal(health().lastError, null, "成功收敛即复位 lastError（健康信号回 null）");
+  assert.equal(published.length, 1, "恢复后收敛照常发布");
+}
+
 console.log("reconcile.test.mjs: all checks passed");

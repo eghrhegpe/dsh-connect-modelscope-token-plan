@@ -137,7 +137,7 @@ npm run doctor                  # 只读盘点状态文件
 | `switch-precedence.ts` | 开关优先级：面板值 > patch 默认 | `resolveSwitchEnabled()`, `resolveSwitchNumber()` |
 | **── 观测与纠正 ──** | | |
 | `usage-observer.ts` | **流出口观测**：真实对话→本地计数/事件 | `withUsageObserver()`, `observeStream()` |
-| `llm-error-fix.ts` | 429 误判纠正（QUOTA→RATE_LIMIT） | `reclassifyStream()`, `shouldReclassifyQuotaToRate()` |
+| `llm-error-fix.ts` | 429 误判纠正（QUOTA→RATE_LIMIT） | `reclassifyStream()`, `shouldReclassifyQuotaToRate()`, `reclassifyReason()`（可观测判定路径） |
 | `llm-retry.ts` | 重试策略（按 code 决定退避） | `buildRetryPolicyConfig()`, `retryableCodes()` |
 | `coalesced-fetch.ts` | 有界并发缓存（目录/余额/标签共用） | `createCoalescedFetch()` |
 | **── 出图工具 ──** | | |

@@ -92,7 +92,7 @@ interface Desired {
  * 最多收敛成两遍 reconcile，不会排 N 遍。调用方 await 返回的 promise，即
  * 「我的触发已被消费」。
  * @param {ProviderReconcilerDeps} deps - wiring 子集。
- * @returns {{reconcile: () => Promise<void>}} 触发一次收敛。
+ * @returns {{reconcile: () => Promise<void>; health: () => {{ lastError: unknown }} }}
  */
 export function createProviderReconciler(deps: ProviderReconcilerDeps) {
   const { settings, providerStore, inference, publisher, usageEvents, logger } = deps;
@@ -210,6 +210,14 @@ export function createProviderReconciler(deps: ProviderReconcilerDeps) {
   let chain: Promise<void> = Promise.resolve();
   /** 有新触发待消费。闭包状态，不暴露——触发方只看得见 {@link reconcile}。 */
   let dirty = false;
+  /**
+   * 最近一次「未被 runOnce 自行记档」的意外反抗（executor 层面漏网的抛，如
+   * `publisher.state` 的 getter 同步抛），下一遍成功即清空。路由侧 await 拿到
+   * `result` 会自行 respondError；但**轮询侧 `void reconcile()` 会把它丢掉**——
+   * 这份 lastError + 一条 warn 是「这一遍没收敛成」对操作员/测试唯一可观测的
+   * 记档（否则链的防毒化会把它连同结果一起吞成 0 痕迹，见 {@link reconcile} 注释）。
+   */
+  let lastError: unknown = null;
 
   /**
    * 触发一次收敛。幂等且可重入：在途时只置 dirty，由在途那一轮替本调用消费
@@ -239,9 +247,26 @@ export function createProviderReconciler(deps: ProviderReconcilerDeps) {
     // 一次 unhandled rejection）。与 `publish-core.ts` 的 `createPublishQueue`
     // 和 `state-store.ts` 的 `createStateWriteQueue` 是同一范式——本文件自己
     // 的链此前是全仓唯一漏这层的。回归见 test/reconcile.test.mjs §9。
+    // 观测（与下方防毒化并行的第二个 result handler，不影响 `return result`）：
+    // runOnce 已自行记档的已知失败（fetch/publish）不会传到 result，这里只抓
+    // 漏网的 executor 层意外反抗——路由侧靠 result 自行处理，轮询侧丢 result，
+    // 这份 lastError + warn 是唯一让「这一遍没收敛成」可观测的记档。
+    result.then(
+      () => { lastError = null; },
+      (error) => {
+        lastError = error;
+        logger?.warn?.(
+          `${name}: reconcile pass failed (${redactSecrets(errMsg(error))}); state will be reconciled on the next trigger`
+        );
+      }
+    );
     chain = result.then(() => undefined, () => undefined);
     return result;
   };
 
-  return { reconcile };
+  return {
+    reconcile,
+    /** 最近一次未被记档的意外反抗（成功即清空）；null = 当前健康。 */
+    health: () => ({ lastError })
+  };
 }

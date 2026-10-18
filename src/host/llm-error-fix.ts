@@ -149,43 +149,72 @@ export function extractStructuredType(message: string): string | null {
 }
 
 /**
- * 一个被 peer 判为 QUOTA 的失败，是否其实是限频、应纠正为 RATE_LIMIT。
+ * 一个被 peer 判为 QUOTA 的失败，按哪条判据路径处理——429 重分类的**可观测
+ * 理由**。纯函数，复用同一批判据（模块私有的 {@link RATE_SIGNAL} /
+ * {@link RATE_CAP_WORDING}、{@link hasHardQuotaWordingIn}、结构化 type），不
+ * 引入第二份词表；返回稳定短串（非自由文本），供面板/日志/测试引用“为什么
+ * 这么判”。
  *
  * 这是修正 v1（纯文本启发）漏判的核心：`{"message":"rpm exhausted",
  * "type":"quota_exceeded_error","code":"8"}` 这种体——魔搭把**请求速率上限**
- * 复用 `quota_exceeded_error` 这个名字，纯文本里没有 “rate limit” 字样，v1 的
+ * 复用 `quota_exceeded_error` 这个名字，纯文本里没有 rate limit 字样，v1 的
  * `looksLikeRateLimit` 既没命中限频信号也没命中硬额度，于是留在 QUOTA、不重试、
- * 直接失败。本函数改读结构化 `type`，逐层收窄：
+ * 直接失败。本函数改读结构化 `type` 逐层收窄，每个返回串对应一条路径：
  *
- *   1. `type` 含 `rate_limit` → 本就是限频（peer 多数已判 RATE_LIMIT，这里是防御）。
- *   2. `type` 含 `quota` 但仍带 {@link RATE_CAP_WORDING}（rpm/tpm/每分钟/限流…）
- *      → 是“被错命名为 quota 的速率上限”，纠正为 RATE_LIMIT。
- *   3. `type` 含 `quota` 且无任何速率信号（token/credit/balance 真耗尽）→ 保留 QUOTA。
- *   4. `type` 是其它非 quota 值 → 保守不纠正。
- *   5. 无结构化 `type` → 退回 v1 的 {@link looksLikeRateLimit}。
+ *   - `"not_quota_code"`             失败为空或 code≠QUOTA，纠正层不适用。
+ *   - `"structured:rate_limit_type"`  结构化 type 含 rate_limit，本就是限频（防御，纠正）。
+ *   - `"structured:quota_rate_cap"`   结构化 type 含 quota 且命中 {@link RATE_CAP_WORDING}
+ *                                     （rpm/tpm/每分钟/限流…）→ 错命名，纠正。
+ *   - `"structured:quota_no_cap"`     结构化 type 含 quota 且无速率信号（token/credit/
+ *                                     balance 真耗尽）→ 保留 QUOTA。
+ *   - `"structured:other_type"`       结构化 type 是其它非 quota 值 → 保守不纠正。
+ *   - `"text:rate_signal"`            无结构化 type，纯文本命中 {@link RATE_SIGNAL} 且
+ *                                     无硬额度字样 → 纠正。
+ *   - `"text:hard_quota"`             无结构化 type，命中硬额度字样 → 保留 QUOTA。
+ *   - `"text:no_rate_signal"`         无结构化 type 也无限频信号 → 保留 QUOTA。
  *
  * 不纠正真配额耗尽：那是共享 Token Plan 池的硬耗尽，重试只会延长冷却窗口
  * （ROADMAP §1 纪律），所以宁可快失败。
  * @param {{code?: string, message?: string}} failure
- * @returns {boolean} true 表示应纠正为 RATE_LIMIT。
+ * @returns {string} 标记处理路径的稳定短串。
  */
-export function shouldReclassifyQuotaToRate(failure: { code?: unknown; message?: unknown }): boolean {
-  if (!failure || failure.code !== CODE.QUOTA) return false;
+export function reclassifyReason(failure: { code?: unknown; message?: unknown }): string {
+  if (!failure || failure.code !== CODE.QUOTA) return "not_quota_code";
   const message = typeof failure.message === "string" ? failure.message : "";
   const type = extractStructuredType(message);
 
   if (type !== null) {
     const t = type.toLowerCase();
-    if (/rate[_\s-]?limit/.test(t)) return true; // 分支 1：已是限频类型（防御）。
+    if (/rate[_\s-]?limit/.test(t)) return "structured:rate_limit_type"; // 分支 1（防御）
     if (/quota/.test(t)) {
-      // 分支 2 vs 3：quota_exceeded_error 但带速率上限字样 → 错命名，纠正。
-      return RATE_CAP_WORDING.test(message);
+      // 分支 2 vs 3：quota_exceeded_error 但带速率上限字样 → 错命名。
+      return RATE_CAP_WORDING.test(message) ? "structured:quota_rate_cap" : "structured:quota_no_cap";
     }
-    return false; // 分支 4：其它非 quota 类型，保守不纠正。
+    return "structured:other_type"; // 分支 4
   }
 
   // 分支 5：无结构化 type，退回纯文本启发。
-  return looksLikeRateLimit(message);
+  const hasRateSignal = RATE_SIGNAL.some((re) => re.test(message.toLowerCase()));
+  if (!hasRateSignal) return "text:no_rate_signal";
+  return hasHardQuotaWordingIn(message) ? "text:hard_quota" : "text:rate_signal";
+}
+
+/** 判为「应纠正为 RATE_LIMIT」的理由集合——{@link shouldReclassifyQuotaToRate} 的唯一真源。 */
+const RECLASSIFY_TRUE_REASONS = new Set([
+  "structured:rate_limit_type",
+  "structured:quota_rate_cap",
+  "text:rate_signal"
+]);
+
+/**
+ * 一个被 peer 判为 QUOTA 的失败，是否其实是限频、应纠正为 RATE_LIMIT。
+ * 布尔判定单一真源：读 {@link reclassifyReason} 是否落在「应纠正」集合里，分支
+ * 逻辑不再写第二遍；可观测“为什么这么判”见 {@link reclassifyReason} 的返回串。
+ * @param {{code?: string, message?: string}} failure
+ * @returns {boolean} true 表示应纠正为 RATE_LIMIT。
+ */
+export function shouldReclassifyQuotaToRate(failure: { code?: unknown; message?: unknown }): boolean {
+  return RECLASSIFY_TRUE_REASONS.has(reclassifyReason(failure));
 }
 
 /** The stream chunk shape the reclassification layer reads off a finish. */
