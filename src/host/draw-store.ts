@@ -31,8 +31,14 @@
  *     值被忽略」呈现成「从未保存过」。
  *
  * 与 provider-store 的一处**有意差异**：没有 legacy（pre-profile 共享目录）继承。
- * draw.json 随出图工具一起诞生，晚于按 profile 分段，市面上不存在共享布局里的
- * 旧 draw.json；provider.json 则需要（§23 之前它一直在共享目录）。
+ * draw.json 随出图工具一起诞生，晚于按 profile 分段（git 史上成立），且宿主一直提供
+ * profileContext 的机器上不存在共享布局里的旧 draw.json；provider.json 则需要
+ * （§23 之前它一直在共享目录）。
+ * 前提修正（2026-10-18）：「市面上不存在」只对宿主一直提供 profileContext 的机器成立。
+ * 宿主不提供时 profile 恒为 null，draw.json 今至仍写共享目录；宿主升级后提供该服务
+ * 时，同一个迁移窗口在 draw.json 上一模一样——那种窗口里旧 draw.json 不继承不搬，
+ * doctor 以 shared (legacy) 作用域报出，出图开关与模型偏好回 patch 默认（与 usage.json 同侧：
+ * 诊断可见 > 静默搬运）。
  *
  * doctor 覆盖：`describeDrawPayload` 给只读速览，`doctor.ts` 据此把 draw.json
  * 的「损坏 / 未知版本」报进症状表——写侧守卫挡覆盖，doctor 报静默降级。

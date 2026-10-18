@@ -15,6 +15,14 @@
  * + rename）、损坏即忽略、版本守卫拒覆写未知版本。进程内 1s 读缓存让一次
  * 快照聚合的多次问询自洽。
  *
+ * 旧共享布局**不继承**（2026-10-18 补记的裱定）：profile 分段前写在共享目录里的
+ * usage.json 不做一次性迁移——它回答「这个 profile 的调用吃了多少额度」，而无
+ * profile 时期（宿主不提供 profileContext）的账不属于任何一个 profile，整段搬
+ * 过来是把那段账算成这个 profile 的。宿主升级后开始提供该服务时，旧文件原地
+ * 保留，由 `npm run doctor` 以 shared (legacy) 作用域报出——面板不搬历史，但操作者看得见
+ * 它（诊断诚实性，见 doctor.ts）。（usage-prefs 的单值偏好反而继承，裱定见
+ * usage-prefs-store.ts 头注）。
+ *
  * 语义基线（wire.ts）：
  * - 天桶缺失 = 该日本插件没有记录到调用 = 真实的 0，不是数据丢失；
  * - models 的 `tokens` 可为 null（上游没给 usage 时），绝不把 null 写成 0；

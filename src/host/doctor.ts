@@ -194,9 +194,15 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /**
- * 与 sensenova 同款的布局裁定：有 profile 目录就逐 profile 报；一个都没有时，
- * 共享布局目录**在场**才作为唯一作用域（目录不存在 = null，干净机器与
- * 「有目录但还没记录」因此可区分）。
+ * 布局裁定：profile 作用域逐个报；**共享布局在场就一并报**（label 打
+ * `shared (legacy)`）。
+ *
+ * 曾经是「一个 profile 都没有时才报共享」——那在**迁移窗口期**把旧数据整份藏了：
+ * 宿主从「不提供 profileContext」升级为「提供」后，同一台机器上
+ * `state/<name>/`（无 profile 时期写的）与 `state/<profile>/<name>/`（新）并存，
+ * 而报告里只有后者，操作者看到的「干净机器」与磁盘事实不符——而 doctor 的
+ * 全部职责就是「数据在哪、坏了没有」（2026-10-18 修正）。
+ * 目录不存在仍是 `null`——干净机器与「有目录但还没记录」因此可区分。
  */
 export async function diagnose(options: { dshHome?: string } = {}): Promise<DoctorReport> {
   const home = typeof options.dshHome === "string" && options.dshHome !== "" ? options.dshHome : defaultDshHome();
@@ -204,7 +210,7 @@ export async function diagnose(options: { dshHome?: string } = {}): Promise<Doct
   const profiles = await listProfiles(stateRoot);
   const scopes = await Promise.all(profiles.map((profile) => readScope(join(stateRoot, profile, name), profile)));
   const sharedDir = join(stateRoot, name);
-  const shared = profiles.length === 0 && (await exists(sharedDir)) ? await readScope(sharedDir, null) : null;
+  const shared = (await exists(sharedDir)) ? await readScope(sharedDir, null) : null;
   const allScopes = shared === null ? scopes : [shared, ...scopes];
   return {
     dshHome: home,
@@ -240,7 +246,7 @@ export function renderReport(report: DoctorReport): string {
     lines.push(`no state under ${join(report.dshHome, "state")} (a clean machine, or the panel has not saved anything yet)`);
   }
   for (const scope of scopes) {
-    const label = scope.profile === null ? "shared" : scope.profile;
+    const label = scope.profile === null ? "shared (legacy)" : scope.profile;
     if (scope.usage === null && scope.provider === null && scope.draw === null && scope.usagePrefs === null && scope.unreadable.length === 0) {
       lines.push(`${label}: no usage.json, no provider.json, no draw.json, no usage-prefs.json (not recorded yet)`);
       continue;

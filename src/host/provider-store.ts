@@ -38,6 +38,16 @@
  * filter", which is the only safe default for a fresh install. A foreign file
  * reads the same way, which is precisely why `versionNote()` exists.
  *
+ * Legacy adoption (ruling 2026-10-18): pre-§23 machines kept this state in
+ * the SHARED directory; a profile-scoped store inherits it ONCE, when its own
+ * file is missing. The seam lives in the read-through closure below, NOT in a
+ * cache option, and the write-back rides this store's write chain; an explicit
+ * `dir` (the tests) never inherits, and an explicit `forget()` is never
+ * resurrected. The mirror rulings for the other three state stores live in
+ * their own file headers: usage-prefs inherits the same way, usage / draw do
+ * NOT adopt — the old shared files stay put, and `npm run doctor` reports them
+ * as a `shared (legacy)` scope instead.
+ *
  * @module dsh-connect-modelscope-token-plan/provider-store
  */
 import { obj } from "./util.ts";
@@ -252,9 +262,12 @@ export function createFileProviderStore(options: StoreOptions = {}) {
   };
 
   // Pre-§23 machines kept this state in the SHARED directory. A profile-scoped
-  // store inherits it once, when its own file is missing — see the note on
-  // `createStateReadCache` (`state-store.ts`). An explicit `dir` (the tests)
-  // never inherits: it was never part of the shared layout.
+  // store inherits it once, when its own file is missing — implemented HERE in
+  // the read-through closure (NOT via a cache option: `createStateReadCache`
+  // deliberately owns no adoption, see its header note "这个原语为什么不负责
+  // legacy 继承"), with the write-back queued onto THIS store's write chain.
+  // An explicit `dir` (the tests) never inherits: it was never part of the
+  // shared layout.
   const legacyFile = dir === undefined && profile ? join(sharedStateDir(name), "provider.json") : null;
 
   /**

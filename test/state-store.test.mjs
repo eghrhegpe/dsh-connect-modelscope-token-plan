@@ -3,10 +3,11 @@
 // ## 为什么这个文件存在
 //
 // `writeStateFile` 是**四个 store 共同的唯一写入口**（usage / provider / catalog /
-// throttle），所以它的失败模式会被放大到所有状态文件上。此前它只有一句
-// `writeFile → rename`，而 `rename` 失败时（Windows 上目标文件被占用最常见）
-// 临时文件**留在原地**：名字是 `<base>.<pid>.<ts>.<uuid>.tmp`，每次失败多一个，
-// 而全仓原本无任何 unlink——`state/<profile>/<name>/` 会慢慢堆满垃圾。
+// throttle），所以它的失败模式会被放大到所有状态文件上。它的临时文件
+// 名字是 `<base>.<pid>.<ts>.<uuid>.tmp`，而全仓原本无任何 unlink——任何一步失败后留在原地，
+// `state/<profile>/<name>/` 就会慢慢堆满垃圾。第一次修只补了 rename 失败那条路
+// （Windows 上目标文件被占用最常见）；2026-10-18 统一成为：**try 覆盖到 rename
+// 成功为止，catch 里删临时文件再重抛**——writeFile / open / fsync / rename 四条路都覆盖。
 //
 // fsync 那一条是**崩溃一致性**（rename 本身只保证并发原子性，不保证断电安全）：
 // 没有它，断电/内核崩溃时 rename 可能把一个空或半截文件立到目标路径上，而
@@ -69,6 +70,34 @@ const file = join(dir, "state.json");
   );
 }
 
+// §2c open/fsync 失败路径同样清掉临时文件（2026-10-18：清理从「rename 失败」一条路扩大到
+// **任何**失败路径）。造一个真实的 open 失败：临时路径先落一个只读文件，
+// `open(tmp, "r+")` 在 Windows 上抛 EPERM、POSIX 上抛 EACCES——两种平台都稳定（实测）。
+// 只读属性不影响 unlink（POSIX 看目录权限；Windows 实测放行）。
+// 根用户跳过：root 绕过权限位，注入点不成立——不跳就会假绿/假红。
+{
+  const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+  if (isRoot) {
+    console.log("state-store.test.mjs: §2c skipped (running as root: open on a read-only file would succeed)");
+  } else {
+    const roDir = join(dir, "readonly-tmp");
+    mkdirSync(roDir);
+    const tmp = join(roDir, "state.json.fake.tmp");
+    writeFileSync(tmp, "half-written", { mode: 0o600 });
+    chmodSync(tmp, 0o444);
+    const target = join(roDir, "state.json");
+    let threw = null;
+    try {
+      await writeStateFile(target, '{"c":3}', { temporary: tmp });
+    } catch (error) {
+      threw = error;
+    }
+    assert.notEqual(threw, null, "open/fsync 失败必须向上传播（调用方自己决定要不要吞）");
+    assert.equal(existsSync(target), false, "目标文件未被创建");
+    assert.equal(existsSync(tmp), false, "半截临时文件被清掉（不留在 state 目录里堆垃圾）");
+  }
+}
+
 // §3 覆盖写：rename 是原子的，目标内容永远是某一次完整写入的产物。
 {
   const f = join(dir, "overwrite.json");
@@ -89,10 +118,12 @@ const file = join(dir, "state.json");
   assert.equal(JSON.parse(readFileSync(nestedFile, "utf8")).deep, true, "深层目录里的写入成功");
 }
 
-// §5 读缓存的 adopt 语义：「从未读过」与「读过但没有」是两个不同值。
+// §5 读缓存的 null 语义：「从未读过」与「读过但没有」是两个不同值。
 //
-// 这是 store 的地基：legacy 继承靠它只尝试一次，而把两者混成一个会让继承在每个
-// TTL 周期都重跑（读一个不存在的旧文件）。
+// 这是 store 的地基：null 是合法缓存值，TTL 内不许每个 tick 都重读一遍盘。
+// （`inheritFrom` 迁移缝 2026-10-18 已从本原语删除——它从未被任何 store 使用，
+// 且写回绕过写队列；继承现在是 provider / usage-prefs 各自手写、回填排进自己
+// 的写队列，见 state-store.ts 头注「这个原语为什么不负责 legacy 继承」。）
 {
   let reads = 0;
   let now = 0;
@@ -114,15 +145,19 @@ const file = join(dir, "state.json");
   assert.equal(reads, 2, "TTL 到期后重读盘");
   assert.notDeepEqual(c, a, "重读拿到新值，不是旧缓存");
 
-  // 恒返回 null 的读源：null 是「读过、没有」，而 adopt 只发生一次。
+  // 恒返回 null 的读源：null 是「读过、没有」，**同样是缓存值**。
   let nullReads = 0;
   const nullCache = createStateReadCache(async () => {
     nullReads += 1;
     return null;
-  }, { ttlMs: 0, inheritFrom: { read: async () => null, write: async () => {} } });
+  }, { ttlMs: 100, now: () => now });
   assert.equal(await nullCache.read(), null, "读不到时返回 null");
+  now += 50;
   assert.equal(await nullCache.read(), null, "再次读仍是 null");
-  assert.ok(nullReads >= 1, "至少读过一次");
+  assert.equal(nullReads, 1, "null 被缓存：TTL 内不重读盘");
+  now += 100;
+  assert.equal(await nullCache.read(), null, "TTL 过期后重读，仍是 null");
+  assert.equal(nullReads, 2, "过期后重读了一次");
   assert.ok(STATE_READ_TTL_MS >= 1, "默认 TTL 是正数（0 会让每次都重读盘）");
 }
 

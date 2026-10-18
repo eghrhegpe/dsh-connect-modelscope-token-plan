@@ -13,6 +13,12 @@
  * （无 profile 时落共享目录）。分段的意思是「这个 profile 想看多长」，两个 profile
  * 不互相覆盖。
  *
+ * legacy 继承（2026-10-18 裁定）：pre-profile 共享目录里的 usage-prefs.json 在
+ * 本 profile 自己的文件**不在场**时一次性继承——与 provider-store 同款手写缝
+ *（读路径内触发、回填排进**本 store 的写队列**、显式清除不复活）。为什么这个
+ * 搬而 usage.json 不搬：单值显示偏好回填无害，而历史计数是「本 profile 的账」，
+ * 搬过来是把无 profile 时期的账算成这个 profile 的（usage-store.ts 头注的裁定）。
+ *
  * 优先级与所有 opt-in 开关同一份裁决（`switch-precedence.ts`）：面板保存值赢，
  * 否则 `cordis.patch.yml` 的 `trendDays` 说了算；两者都会在 host-config 里被夹进
  * 保留窗口之内（`retentionDays`）——**画得比留得多**会把已剪的日子画成 0。
@@ -151,18 +157,54 @@ export function createFileUsagePrefsStore(options: StoreOptions = {}) {
   const writeQueue = createStateWriteQueue();
 
   /**
-   * 解析一份 payload；认不出的版本读作「没设过」但**记住**版本号——读侧宽容、
-   * versionNote 负责把宽容说出口（写侧守卫已挡住覆盖，两半合起来才是 ADR-006）。
+   * 解析一份路径上的 payload；认不出的版本读作「没设过」但**记住**版本号——读侧
+   * 宽容、versionNote 负责把宽容说出口（写侧守卫已挡住覆盖，两半合起来才是
+   * ADR-006）。
    */
-  const parsePayload = async (): Promise<UsagePrefsPayload> => {
-    const source = obj(await readStateJson(filePath));
+  const parseAt = async (path: string): Promise<UsagePrefsPayload> => {
+    const source = obj(await readStateJson(path));
     const version = typeof source.version === "number" ? source.version : null;
     if (!isKnownUsagePrefsVersion(version)) return { windowDays: null, version };
     return { windowDays: normalizeWindowDays(source.windowDays), version };
   };
 
+  /** 读本 profile 自己的文件。 */
+  const parsePayload = async (): Promise<UsagePrefsPayload> => parseAt(filePath);
+
+  // Pre-profile 机器把这个偏好写在**共享**目录里；profile 作用域的 store 在自己
+  // 的文件不在场时一次性继承（与 provider-store 同款裁定：读路径内触发、回填过
+  // **本 store 的写队列**、显式清除不复活）。显式 `dir`（测试）从不继承——它
+  // 从来不是共享布局的一部分。
+  //
+  // 与 usage.json 的差异是有意的：单值显示偏好回填无害，而历史计数是「本
+  // profile 的账」，整段搬过来是把无 profile 时期的账算成这个 profile 的
+  // （裁定见 usage-store.ts 头注）。
+  const legacyFile = dir === undefined && profile ? join(sharedStateDir(name), "usage-prefs.json") : null;
+
   // 短 TTL 读缓存：另一个进程改了要在一个 tick 内可见，但一次快照聚合不该重读多次。
-  const cache = createStateReadCache<UsagePrefsPayload>(parsePayload, { ttlMs });
+  //
+  // legacy 回填是**读路径内**触发的写，所以它也走 `writeQueue`：否则它与并发的
+  // save 竞争——用户刚点的「90 天」会被旧布局的继承值盖掉（而继承只发生一次，
+  // 所以那次覆盖是永久的）。判据与 provider-store 同款：自己的文件带版本号时
+  // 不继承（foreign 版本写了也被 ADR-006 守卫拒，省掉注定失败的尝试；本构建
+  // 写的空文件 = `saveWindowDays(null)` 的显式清除，不该被复活）。
+  const cache = createStateReadCache<UsagePrefsPayload>(async () => {
+    const own = await parsePayload();
+    if (own.windowDays !== null || legacyFile === null || own.version !== null) return own;
+    const legacy = await parseAt(legacyFile);
+    if (legacy.windowDays === null) return own;
+    await writeQueue.enqueue(() =>
+      writePayload({
+        version: USAGE_PREFS_VERSION,
+        windowDays: legacy.windowDays,
+        updatedAt: new Date().toISOString()
+      }).then(
+        () => undefined,
+        () => undefined
+      )
+    );
+    return legacy;
+  }, { ttlMs });
 
   /**
    * 读当前 payload。

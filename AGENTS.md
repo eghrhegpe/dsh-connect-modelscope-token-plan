@@ -80,6 +80,7 @@ npm run doctor                  # 只读盘点状态文件
 | provider 怎么接入（写代码前） | `docs/PROVIDER-M4.md`（实现契约） |
 | 这版是怎么做出来的、踩过什么坑 | `docs/IMPLEMENTATION.md`（0.1.0 / M4 实施过程档案） |
 | v0.2.0 的十二轮修复细节（已冻结） | `docs/archive/2026-10-05-closeout.md` |
+| 各版修复过程档案（0.3.0–0.6.1，按版本命名，已冻结） | `docs/archive/`（本轮 0.6.1：迁移窗口期状态可见性 + inheritFrom 死参数删除） |
 | 上游端点全景 / 第三方方案对比 | `docs/REFERENCES.md`、`docs/REFERENCE-modelsdev.md` |
 | v1 要做什么、做到哪了 | `docs/ROADMAP.md` |
 | 魔搭 OpenAPI 契约全文 | `docs/modelscope.cn-openapi/modelscope.cn-openapi.md` |
@@ -277,6 +278,14 @@ npm run doctor                  # 只读盘点状态文件
 - **`usage.json` 版本守卫曾只置位不复位**：旧构建用空载荷把新构建的 usage.json 降级覆写（version 2 → 1，110 次历史归零），而日志还在说 "recording disabled"。写路径必须在 mutate 之前**自己**读盘。
 - **观察层与重分类层顺序不可反**：反了事件流会把纠正后的 RATE_LIMIT 又记成 QUOTA——面板说「额度耗尽」而退避策略按限频处理。
 - **允许清单的空 vs 缺失是两件事**：`[]` = 不过滤（全部提供），`null` = 没保存过。读侧必须能区分两者，否则「保存了空清单」会被读成「从未保存」。
+
+---
+
+## 会话工具踩坑（2026-10-18 记账，编辑文档/跑门禁前看）
+
+- **含中文的字符串替换，先用 Python `repr()` 核对磁盘原文**：Read 输出带行号前缀，全角标点（——/、/「」/节线 U+2500）在眼里极易看串。0.6.1 修文档时三次 mismatch 全是这么来的（「读过但没有」看丢「、」、节线 U+2500 看成 U+2014、README 锚点看串）。命令：`python -c "print(repr(open('f',encoding='utf-8').read()))"` 打出真身再抄。
+- **Git Bash 的 `/tmp` 与 Windows Python 不通用**：bash heredoc 写 `/tmp/x`，Windows 的 python 打开 `/tmp/x` 是 FileNotFoundError（两边看到的不是同一个目录）。跨 shell 传临时文件用品仓内相对路径（如 `.x.tmp`），用完即删、别提交。
+- **`npm run build` 必须排在跑全量门禁之前**：build-gate（`run-all.mjs` 末尾那道）按设计抓「改了 src 未重建」。把 build 串在 `node test/run-all.mjs` 后面，等于让门禁先红一次再绿——不是 flaky，是顺序错了。改 `src/` 后的正确顺序：build → 全量 → typecheck。
 
 ---
 

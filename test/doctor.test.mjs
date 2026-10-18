@@ -78,6 +78,48 @@ writeFileSync(join(dir, "usage.json"), JSON.stringify({ version: 99, days: { "20
   assert.equal(report.shared.usage.days, 0);
 }
 
+// ── §5b 迁移窗口期：profile 作用域与共享布局并存 → 两者都报 ──
+//
+// 曾经的裱定是「一个 profile 都没有时才报共享」——那在这个窗口期把旧数据整份藏
+// 了：宿主从「不提供 profileContext」升级为「提供」后，state/<name>/（旧）与
+// state/<profile>/<name>/（新）并存，而报告里只有后者。doctor 的全部职责就是
+// 「数据在哪」，所以共享布局在场就报（2026-10-18 修正）。
+{
+  const local = mkdtempSync(join(tmpdir(), "ms-doctor-migrate-"));
+  const sharedDir = join(local, "state", PLUGIN_ID);
+  mkdirSync(sharedDir, { recursive: true });
+  writeFileSync(join(sharedDir, "usage.json"), JSON.stringify({
+    version: 1,
+    days: { "2026-09-01": { calls: 4 }, "2026-09-02": { calls: 5 } },
+    models: {},
+    events: []
+  }));
+  const profileDir = join(local, "state", "desktop", PLUGIN_ID);
+  mkdirSync(profileDir, { recursive: true });
+  writeFileSync(join(profileDir, "usage.json"), JSON.stringify({
+    version: 1,
+    days: { "2026-10-02": { calls: 7 } },
+    models: {},
+    events: []
+  }));
+  const report = await diagnose({ dshHome: local });
+  assert.equal(report.profiled, true);
+  assert.equal(report.scopes.length, 1, "profile 作用域照常报");
+  assert.equal(report.scopes[0].usage.days, 1, "profile 自己的天桶数");
+  assert.equal(report.shared === null, false, "迁移窗口期共享布局不再被藏");
+  assert.equal(report.shared.usage.days, 2, "共享旧文件的天桶数可读（与 profile 不同，证明读的是两份文件）");
+  assert.equal(report.shared.profile, null, "共享作用域的 profile 是 null（label 靠它区分）");
+  const rendered = renderReport(report);
+  assert.ok(rendered.includes("shared (legacy)"), "人读行标出这是旧共享布局");
+  assert.ok(rendered.includes("desktop"), "profile 作用域也在渲染里");
+  // 共享目录里的损坏文件同样进病状（allScopes 含 shared——修之前它被整份丢掉）。
+  writeFileSync(join(sharedDir, "provider.json"), "{broken");
+  const broken = await diagnose({ dshHome: local });
+  assert.equal(broken.symptoms.length, 1, "共享布局的损坏文件进病状表");
+  assert.equal(broken.symptoms[0].id, SYMPTOM.STATE_UNREADABLE);
+  assert.match(broken.shared.unreadable[0] ?? "", /provider\.json/);
+}
+
 // ── §6 env 令牌在场性：只报布尔，裸值绝不进输出（红线 1）。 ──
 process.env.MODELSCOPE_API_KEY = "ms-00000000-0000-0000-0000-000000000000";
 {

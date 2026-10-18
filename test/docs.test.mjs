@@ -549,4 +549,49 @@ const FACTS = [
   );
 }
 
+// ── §17 四个状态 store 的 legacy 继承裁定必须写在头注里 ──────────────────────
+//
+// 事故（2026-10-18 修复 0.6.1 时实测）：profile 分段前写在共享目录里的状态文件
+// （provider.json / usage.json / usage-prefs.json / draw.json）在迁移窗口期怎么
+// 处置，四个 store 曾三套口径、两套没写在明面上——usage.json 没有任何裁定注释，
+// draw.json 的头注写着「不存在共享旧文件」而这个前提只对一部分宿主成立（git 史
+// 核实）。裁定住在**注释**里，不进任何判据：下一个人重写某个 store 的头注时删掉
+// 那段裁定，没有任何测试会红，R3 原样复发。
+//
+// 判据机械，两个方向：
+//   ① 集合按**结构**枚举（src/host 下 *-store.ts 且 import state-store 原语的），
+//      新 store 自动入列，不靠人手登记；四个已知成员必须在射程内（过滤条件被改坏
+//      时不许悄悄缩水）；
+//   ② 裁定必须写在**头注**（首个 import 之前的文档块）里，且按裁定侧给指纹：
+//      继承侧必须出现 legacy 字样，不搬侧必须出现「不继承/不搬」字样。写在中段
+//      注释里不算——provider-store 的裁定 2026-10-18 前就在中段，评审照样看漏。
+{
+  const stores = tsFiles("src/host").filter((f) => /-store\.ts$/.test(f) && read(f).includes('from "./state-store.ts"'));
+  // 继承侧 vs 不搬侧的指纹。新成员没有先验时落 GENERIC（提到 legacy 主题即可）。
+  const SIDE = {
+    "src/host/provider-store.ts": /legacy/i, // 继承缝：一次性继承旧共享 provider.json
+    "src/host/usage-prefs-store.ts": /legacy|继承/, // 继承缝：单值显示偏好一次性继承
+    "src/host/usage-store.ts": /不继承|不搬/, // 裁定：无 profile 时期的账不属于任何 profile，不搬
+    "src/host/draw-store.ts": /不继承|没有 legacy|不搬/ // 裁定：不继承不搬，doctor 以 shared (legacy) 报出
+  };
+  const GENERIC = /legacy|继承|不搬/;
+  const headerOf = (text) => text.slice(0, text.indexOf("*/") + 2);
+  for (const known of Object.keys(SIDE)) {
+    assert.ok(
+      stores.includes(known),
+      `state-store 门禁的结构集合漏掉了 ${known}——import 形式变了还是文件被改名？` +
+        `（集合按「*-store.ts 且 import state-store」枚举，四个裁定侧指纹在 SIDE 里，改集合同步改指纹。）`
+    );
+  }
+  for (const store of stores) {
+    const needle = SIDE[store] ?? GENERIC;
+    assert.ok(
+      needle.test(headerOf(read(store))),
+      `${store} 的头注（首个 import 之前的文档块）没有写明 legacy（pre-profile 共享目录）继承裁定——\n` +
+        `      四个状态 store 各记各的账，共享旧文件搬不搬必须有明文：provider / usage-prefs 继承（一次性、显式清除不复活），\n` +
+        `      usage / draw 不搬（doctor 以 shared (legacy) 作用域报出）。删掉或改写头注时把裁定留着——本门禁盯着它。`
+    );
+  }
+}
+
 console.log("docs.test.mjs: all checks passed");

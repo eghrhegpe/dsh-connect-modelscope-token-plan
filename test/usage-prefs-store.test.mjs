@@ -9,9 +9,10 @@
 // 断言一律打在**磁盘**上：内存断言会被 cache.remember 喂成假的（provider §8d 的
 // 教训——写后回读走 TTL 缓存，拿到的是写入前的值）。
 import { strict as assert } from "node:assert";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { name } from "../src/host/host-config.ts";
 import {
   createFileUsagePrefsStore,
   describeUsagePrefsPayload,
@@ -136,6 +137,62 @@ const diskOf = (dir) => JSON.parse(readFileSync(join(dir, "usage-prefs.json"), "
   assert.deepEqual(describeUsagePrefsPayload({ version: 1, windowDays: 30 }), { versionKnown: true, windowDays: 30 });
   assert.deepEqual(describeUsagePrefsPayload({ version: 1 }), { versionKnown: true, windowDays: null });
   assert.deepEqual(describeUsagePrefsPayload({ version: 99, windowDays: 30 }), { versionKnown: false, windowDays: 30 });
+}
+
+// —— §9 legacy 继承（pre-profile 共享目录）：一次性、过写队列、显式清除不复活 ——
+//
+// 与 provider §8e 同款：继承只在 profile 自己的文件**根本不在场**时发生，显式
+// `dir` 从不继承（它从来不是共享布局的一部分）——所以必须用真
+// profile + $DSH_HOME，不能用 dir。usage-prefs 是单值偏好，回填无害
+// （裱定见文件头注）；对照 usage.json 的历史计数**不搬**。
+{
+  const home = mkdtempSync(join(tmpdir(), "ms-usage-prefs-adopt-"));
+  const shared = join(home, "state", name);
+  mkdirSync(shared, { recursive: true });
+  writeFileSync(join(shared, "usage-prefs.json"), JSON.stringify({ version: 1, windowDays: 90 }));
+  const previousHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  try {
+    const adopted = createFileUsagePrefsStore({ profile: "p-adopt" });
+    assert.equal(await adopted.windowDays(), 90, "自己的文件不在场 → 从共享布局继承");
+    assert.equal(
+      JSON.parse(readFileSync(join(home, "state", "p-adopt", name, "usage-prefs.json"), "utf8")).windowDays,
+      90,
+      "继承值回写到 profile 自己的目录（下次读不再穿旧路径）"
+    );
+    // 显式清除之后，旧布局的遗留值**不该**在下一次读时复活：一次明确的
+    // 重置不能被共享目录里的旧值撤销。冷读（新 store = 空缓存）是必须的。
+    await adopted.saveWindowDays(null);
+    const cold = createFileUsagePrefsStore({ profile: "p-adopt" });
+    assert.equal(await cold.windowDays(), null, "显式清除后不被旧布局复活");
+    // foreign 版本躺在自己的目录上时不继承（写了也被 ADR-006 拒，省掉注定失败的尝试）。
+    const futureDir = join(home, "state", "p-future", name);
+    mkdirSync(futureDir, { recursive: true });
+    writeFileSync(join(futureDir, "usage-prefs.json"), JSON.stringify({ version: 99, windowDays: 30 }));
+    const foreign = createFileUsagePrefsStore({ profile: "p-future" });
+    assert.equal(await foreign.windowDays(), null, "foreign 宽容读作未设置");
+    assert.equal(
+      JSON.parse(readFileSync(join(futureDir, "usage-prefs.json"), "utf8")).version,
+      99,
+      "foreign 文件未被继承写覆盖"
+    );
+    // 共享目录里没有可继承的值时，不写自己的文件（干净机器不该被继承写造出文件）。
+    const emptyHome = mkdtempSync(join(tmpdir(), "ms-usage-prefs-nolegacy-"));
+    mkdirSync(join(emptyHome, "state", name), { recursive: true });
+    process.env.DSH_HOME = emptyHome;
+    const noLegacy = createFileUsagePrefsStore({ profile: "p-empty" });
+    assert.equal(await noLegacy.windowDays(), null, "共享目录无值 → 仍是未设置");
+    assert.equal(
+      existsSync(join(emptyHome, "state", "p-empty", name, "usage-prefs.json")),
+      false,
+      "无可继承值时不回写造文件"
+    );
+    rmSync(emptyHome, { recursive: true, force: true });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    if (previousHome === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = previousHome;
+  }
 }
 
 console.log("usage-prefs-store.test.mjs: all checks passed");

@@ -35,6 +35,10 @@
  *    现在三件套各有一份公共实现：串行化是{@link createStateWriteQueue}、写守卫是
  *    {@link guardStateWrite}、读侧说明是{@link stateVersionNote}；provider /
  *    usage / draw 三个 store 都是调用方，不再各写一遍。
+ * 4. 第四步删掉了{@link createStateReadCache} 的 `inheritFrom`——一个从未被
+ *    任何 store 使用、且写回路径绕过写队列的迁移缝（死代码 + 有害形状 +
+ *    文档误导三合一，裁定见该函数的说明）；同时把{@link writeStateFile} 的
+ *    临时文件清理从「rename 失败」一条路扩大到**任何**失败路径。
  *
  * @module dsh-connect-modelscope-token-plan/state-store
  */
@@ -237,14 +241,17 @@ export function temporaryOf(dir: string, base: string, now = Date.now) {
  * 载荷串以换行结尾，与本模块存在前每个 store 的写法一致。失败**向上传播** ——
  * 调用方自己决定只读 Home 要不要吞（throttle/catalog 吞，provider 开关不吞）。
  *
- * ## rename 失败时的临时文件清理
+ * ## 任何一步失败都要清掉临时文件
  *
  * `rename` 会失败，而最常见的原因是 Windows 上目标文件正被另一个进程/编辑器
  * 占着（EACCES/EPERM）。临时文件此前**留在原地**：名字是
  * `<base>.<pid>.<ts>.<uuid>.tmp`，每次失败多一个，于是
  * `state/<profile>/<name>/` 慢慢堆满垃圾，而没有任何代码会去清它们（全仓原本
- * 无任何 unlink）。现在失败时删掉自己的临时文件再重抛——清理失败不掩盖原始错误
- * （那才是调用方要处理的），所以只 `catch {}`。
+ * 无任何 unlink）。第一次修只补了 rename 失败那一条路；`writeFile` 本身失败
+ * （磁盘满）、`open` 失败、`handle.sync()` 失败（EIO）留下的半截临时文件照样
+ * 堆——2026-10-18 改为：**try 覆盖到 rename 成功为止，catch 里删掉自己的临时
+ * 文件再重抛**。清理失败不掩盖原始错误（那才是调用方要处理的），所以只
+ * `catch {}`。
  *
  * @param {string} file - 最终文件路径。
  * @param {string} payload - 序列化后的正文（JSON 文本）。
@@ -252,25 +259,25 @@ export function temporaryOf(dir: string, base: string, now = Date.now) {
  * @returns {Promise<void>}
  */
 export async function writeStateFile(file: string, payload: string, { temporary }: { temporary: string }) {
-  await writeFile(temporary, `${payload}\n`, { encoding: "utf8", mode: 0o600 });
-  // 先把内容 fsync 到盘，再 rename。这是**崩溃一致性**（不是并发原子性，后者由
-  // rename 本身保证）：没有它，断电/内核崩溃时 rename 可能把一个**空或半截**的
-  // 文件立到目标路径上——而 parsePayload 对损坏文件是「读作未设置」静默降级的，
-  // 于是用户看到的是「模型清单/历史计数全没了」而没有任何错误。
-  //
-  // 代价是真机上每次几毫秒（实测 tmpfs 上 0.07ms，机械盘/容器 overlay 上更贵）。
-  // 这值得：`usage.json` 每次对话都写、`provider.json` 每次点开关都写——**都不是
-  // 低频操作**，而丢一次用户的允许清单意味着要重勾一遍。
-  const handle = await open(temporary, "r+");
   try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  try {
+    await writeFile(temporary, `${payload}\n`, { encoding: "utf8", mode: 0o600 });
+    // 先把内容 fsync 到盘，再 rename。这是**崩溃一致性**（不是并发原子性，后者由
+    // rename 本身保证）：没有它，断电/内核崩溃时 rename 可能把一个**空或半截**的
+    // 文件立到目标路径上——而 parsePayload 对损坏文件是「读作未设置」静默降级的，
+    // 于是用户看到的是「模型清单/历史计数全没了」而没有任何错误。
+    //
+    // 代价是真机上每次几毫秒（实测 tmpfs 上 0.07ms，机械盘/容器 overlay 上更贵）。
+    // 这值得：`usage.json` 每次对话都写、`provider.json` 每次点开关都写——**都不是
+    // 低频操作**，而丢一次用户的允许清单意味着要重勾一遍。
+    const handle = await open(temporary, "r+");
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
     await rename(temporary, file);
   } catch (error) {
-    // 自己的临时文件，不留垃圾。unlink 失败（权限/并发）不该盖掉 rename 的原因。
+    // 自己的临时文件，不留垃圾。unlink 失败（权限/并发）不该盖掉真实原因。
     try {
       await unlink(temporary);
     } catch {
@@ -307,64 +314,43 @@ export const STATE_READ_TTL_MS = 1000;
  * peer-free，与其余原语同纪律（不 import Host peer、离线可测）。时钟与 TTL
  * 都可注入，便于测试把缓存推进过期。
  *
- * `inheritFrom` 是一次性迁移缝：按 profile 分段后，本 profile 的新文件
- * 一开始并不存在，而旧版把值放在**所有 profile 共享**的目录里。给了它以后，
- * 读穿透发现自己的记录缺失时会去旧路径取一次、回填、再返回——**只尝试一次**
- * （`adopted` 标志），所以它不会变成每个 TTL 周期都多读一个文件。
+ * ## 这个原语为什么不负责 legacy 继承
  *
- * 为什么让缓存原语承担这件事，而不是在外面先跑一遍迁移脚本：迁移就有了时序，
- * 而"先迁移、再 seed"在 `apply()` 的同步构造里排不出确定顺序。挂在读穿透上
- * 则天然正确——任何读到"空"的地方都会自动拿到旧值，且与并发进程无关（读到
- * 同一份旧值、写同一份结果）。
+ * 一次性迁移缝（profile 分段前写在**共享**目录里的状态 → 本 profile 目录）曾经
+ * 作为 `inheritFrom` 选项住在这里，2026-10-18 删除，三个原因叠在一起：
+ *   - **死代码**：四个 store 无一带它（`grep -rn inheritFrom src/` 只命中本文件
+ *     自己的声明；实际继承是 provider-store 在读穿透闭包里手写的）；
+ *   - **有害形状**：它的写回是**读路径内直接触发的写**，不经本 store 的写队列
+ *     ——那正是 provider-store 注释里记着「咬过三次」的竞态形状：继承写与并发
+ *     的用户保存竞争，而继承只发生一次，被盖掉的那次保存是**永久**丢失的；
+ *   - **文档误导**：本文件与 provider-store 的注释都把继承描述成走这个缝，
+ *     实为两处手写，读者会以为它是共享基础设施。
+ * 现在 provider / usage-prefs 各自在读穿透闭包里手写继承，并把回填排进**自己
+ * 的写队列**（裁定在各自头注）。新 store 要继承时照那个形状写，**不要**复活
+ * 这个参数。
  *
  * @template T
  * @param {() => Promise<T|null>} readThrough - 真正的读盘 + 解析；返回 `null` 表示无可用记录。
  * @param {object} [options]
  * @param {number} [options.ttlMs] - 缓存有效期，默认 {@link STATE_READ_TTL_MS}。
  * @param {() => number} [options.now] - 时钟源；测试注入。
- * @param {{read: () => Promise<T|null>, write: (value: T) => Promise<void>}|null} [options.inheritFrom]
- *   - 旧版共享布局（`read`）与把它回填到本 profile（`write`）；`null` = 不迁移。
  * @returns {{read: () => Promise<T|null>, remember: (value: T|null) => void}}
  */
-export function createStateReadCache<T>(readThrough: () => Promise<T | null>, options: { ttlMs?: number; now?: () => number; inheritFrom?: { read: () => Promise<T | null>; write: (value: T) => Promise<void> } | null } = {}) {
-  const { ttlMs = STATE_READ_TTL_MS, now = Date.now, inheritFrom = null } = options;
+export function createStateReadCache<T>(readThrough: () => Promise<T | null>, options: { ttlMs?: number; now?: () => number } = {}) {
+  const { ttlMs = STATE_READ_TTL_MS, now = Date.now } = options;
   // "never read" is `undefined` and "read, nothing stored" is `null` — the two
   // must not collapse into one type, so the annotation carries both.
   let cached: T | null | undefined = undefined;
   let cachedAt = 0;
-  /** Whether the one-shot legacy adoption has already been attempted. */
-  let adopted = false;
-
-  /**
-   * 读穿透：自己的记录优先；缺失且还有旧布局可继承时，取一次旧值并回填。
-   * @returns {Promise<T|null>}
-   */
-  const load = async () => {
-    const own = await readThrough();
-    if (own !== null || inheritFrom === null || adopted) return own;
-    // One shot, whatever the outcome: a machine with no legacy file should not
-    // re-read it every TTL, and a value that reached memory has served its
-    // purpose even if writing it back failed (a read-only Home).
-    adopted = true;
-    const inherited = await inheritFrom.read();
-    if (inherited === null) return null;
-    try {
-      await inheritFrom.write(inherited);
-    } catch {
-      // Read-only Home, or another process won the race. The value still
-      // serves this process for the rest of its life.
-    }
-    return inherited;
-  };
 
   return {
     /**
-     * 读值：TTL 内返回缓存，过期则穿透到 `load()`。
+     * 读值：TTL 内返回缓存，过期则穿透到 `readThrough()`。
      * @returns {Promise<T|null>}
      */
     async read() {
       if (cached !== undefined && now() - cachedAt < ttlMs) return cached;
-      cached = await load();
+      cached = await readThrough();
       cachedAt = now();
       return cached;
     },
