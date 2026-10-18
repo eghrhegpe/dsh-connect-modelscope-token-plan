@@ -35,6 +35,25 @@ export function count(value: unknown): string {
   return String(Math.round(number * 100) / 100);
 }
 
+/**
+ * 大数字的紧凑文本：`< 1000` 原样，`< 1e6` 用 `k`，`≥ 1e6` 用 `m`（各留 1~2 位小数，
+ * 去尾零）。**只给 token 这类会自然到百万级的读数用**——调用次数一天几十上百，千分位
+ * 逗号反而更好读，那条路径继续走 `count()`。
+ *
+ * 单位用小写 k/m：视觉上与 SI 前缀一致，也避开「兆」的歧义（`M` 在中文语境里常被读成
+ * 万亿）。负值与 NaN 分别返回 `-1.2k` 与 `NaN`——不做掩饰，异常值该在面板上现形。
+ */
+export function compactCount(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return String(value);
+  const trim = (number: number) => String(Number(number.toFixed(number >= 100 ? 0 : number >= 10 ? 1 : 2)));
+  const sign = value < 0 ? "-" : "";
+  const abs = Math.abs(value);
+  if (abs < 1000) return `${sign}${trim(abs)}`;
+  if (abs < 1e6) return `${sign}${trim(abs / 1e3)}k`;
+  if (abs < 1e9) return `${sign}${trim(abs / 1e6)}m`;
+  return `${sign}${trim(abs / 1e9)}b`;
+}
+
 /** 填 `{key}` 模板：vars 的每个键对应模板里的同名占位符。 */
 export function format(template: string, vars?: Record<string, unknown> | null): string {
   let text = template;

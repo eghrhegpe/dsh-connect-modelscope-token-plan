@@ -158,7 +158,11 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     const panel = await providerStore.enabled().catch(() => null);
     const enabled = resolveSwitchEnabled(panel, settings.registerProvider);
     const source = switchSource(panel);
-    const roster = rosterWithAvailability(modelEntries, publisher.state.unavailableIds ?? []);
+    // 第三个参数是输出上限覆盖：面板 roster 与 picker 必须用**同一个**解析器
+    // （llm-models.maxTokensFor），否则面板显示的 `maxOutputLength` 与线上真正发
+    // 的 `max_tokens` 会各说一套——那正是这次要修的毛病（面板此前连这个字段都
+    // 没投影给客户端）。
+    const roster = rosterWithAvailability(modelEntries, publisher.state.unavailableIds ?? [], settings.maxTokensOverrides);
     // 允许清单是落盘的（provider-store，按 profile 分段）；判据走**共用**的
     // resolveEnabledIds：可读的清单（含空清单 = 不过滤）优先，只有读抛错才回退到
     // 内存里 publisher.state 最近一次 publish 的那份。三处消费者曾各写一套，其中

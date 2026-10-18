@@ -90,6 +90,12 @@ export const S = {
   // 骑在柱顶的次数标签：9px、单行高、不吃指针事件（悬停仍归柱自己的 title）。
   trendChartValue: { position: "absolute", left: 0, right: 0, fontSize: 9, lineHeight: 1, textAlign: "center", color: "var(--dsw-alias-label-secondary)", fontVariantNumeric: "tabular-nums", pointerEvents: "none" },
   trendChartAxis: { display: "flex", justifyContent: "space-between", gap: 12, marginTop: 6, fontSize: 11, color: "var(--dsw-alias-label-secondary)" },
+  // 趋势指标切换（次数 / token）。与 tab 同一套视觉语言，但**不共用 `S.tab`**：
+  // 那条样式带 8px 下内边距与负 outlineOffset，是为页面级 tabBar 调的；用在这里
+  // 会把图例顶开一截。这里做一份更紧凑的：下边框 2px 换成 1px。
+  trendMetricBar: { display: "flex", gap: 2, marginBottom: 6, alignItems: "center" },
+  trendMetricBtn: { appearance: "none", background: "none", border: "none", borderBottom: "1px solid transparent", padding: "2px 8px", fontSize: 11, color: "var(--dsw-alias-label-secondary)", cursor: "pointer", outlineOffset: -2 },
+  trendMetricBtnActive: { color: "var(--dsw-alias-label-primary)", fontWeight: 600, borderBottom: `1px solid ${BRAND}` },
   muted: { color: "var(--dsw-alias-label-secondary)" },
   error: { color: "var(--dsw-alias-state-error-primary)" },
   empty: { color: "var(--dsw-alias-label-secondary)", padding: "18px 0" },

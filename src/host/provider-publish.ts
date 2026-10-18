@@ -59,7 +59,15 @@ import type { PublisherStateBase } from "./publish-core.ts";
  * 「多个模块都要念的名字」，这一条是 publisher 自己读的接缝）。
  */
 interface ProviderPublisherDeps {
-  settings?: { registerProvider?: boolean; apiBase?: string };
+  /**
+   * 归一后的有效设置。这里只列 publisher **真正读**的字段——宽类型会把「这个
+   * publisher 依赖哪些设置」变成不可枚举的，而它恰好是那条 rollback / 空转守卫
+   * 逻辑最需要看清的东西。
+   *
+   * `maxTokensOverrides` 与 `apiBase` 同一个理由在场：两者都是**每次 publish 现读**
+   * 的请求侧事实，改它们不该需要重启。
+   */
+  settings?: { registerProvider?: boolean; apiBase?: string; maxTokensOverrides?: Record<string, number> };
   panelSwitch?: () => Promise<boolean | null>;
   loadAdapterModule?: () => Promise<object>;
   getLlm?: (service: string) => object | null;
@@ -319,6 +327,10 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
         entries: state.entries,
         enabledIds: state.enabledIds,
         baseUrl: effectiveSettings.apiBase,
+        // 每次 publish 现读（与 apiBase 同理），所以改覆盖在下一轮目录轮询或开关
+        // 翻转时就生效，不用重启。`?? {}` 同时兜住「测试传了裸 {}」这种情况——
+        // 空对象 = 目录说了算，正是缺省语义。
+        maxTokensOverrides: effectiveSettings.maxTokensOverrides ?? {},
         resolveApiKey: effectiveResolveApiKey,
         get: effectiveGetLlm,
         unavailableModelIds: state.unavailableIds,

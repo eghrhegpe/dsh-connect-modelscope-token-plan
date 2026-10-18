@@ -474,6 +474,8 @@ if (SRC_MODE) {
   zh = panel.dictionaries.zh;
 }
 const tt = (key) => zh[key];
+/** 与 `src/client/format.ts` 的 format 同一个 `{key}` 模板语义（测试侧自带，不依赖被测物）。 */
+const fillTemplate = (template, vars) => Object.entries(vars).reduce((text, [key, value]) => text.split(`{${key}}`).join(String(value)), template);
 
 const row = (id, name, extra = {}) => ({ id, name, vision: false, available: true, quotaExhausted: false, ...extra });
 const DEEPSEEK = "deepseek-ai/DeepSeek-V3";
@@ -577,6 +579,66 @@ assert.ok(usageLink, "魔粒用量外链存在");
 assert.equal(usageLink.getAttribute("target"), "_blank");
 assert.equal(usageLink.getAttribute("rel"), "noreferrer", "外链带 rel=noreferrer（令牌域名页不得带 referer）");
 assert.equal(qa('[role="alert"]').length, 0, "健康快照上没有错误行");
+// token 读数走 compactCount：行内字典模板 `{tokens} token` 拿到的是短标注，不是千分位长串。
+// fixture 的 perModel 是 `{ calls: 5, tokens: 1200 }` → 中文 "1200 token"、英文 "1.2k tokens"。
+const tokenLine = fillTemplate(tt("quota.rowTokens"), { tokens: "1.2k" });
+assert.ok(bodyText().includes(tokenLine), `单模型行显示紧凑 token 数（期望含「${tokenLine}」）`);
+assert.ok(!bodyText().includes("1,200"), "token 不再印千分位长串");
+assert.ok(bodyText().includes(fillTemplate(tt("quota.rowCalls"), { calls: "5" })), "调用次数仍走 count()（小数值原样）");
+
+// ══════════════════════════════════════════════════════════════════════════
+// §1b 趋势指标切换（次数 / token）：真点击 → 真重渲染 → 柱高按新指标重算
+//
+// 这一节只能在这里：`panel.test.mjs` 的替身 React 里 useState 是「设不进去」的，
+// 切态后会发生什么在那里完全看不到。要钉的三件事：
+//   1. 点 token tab 真的换了指标（tab 选中态 + 图例文案同时变）；
+//   2. **独立归一化**——token 模式下最高那根柱是满高（100%），若误共用 calls 的 max，
+//      它会被算成 300/4=7500% 而溢出；
+//   3. aria-label 跟着指标走（读屏念的量与画出来的是同一个）。
+// fixture：2026-10-14 calls=3 tokens=900；2026-10-15 calls=4 tokens=300。
+// ══════════════════════════════════════════════════════════════════════════
+{
+  // 只抓**趋势卡里**的柱：`[role="progressbar"]` 全局也命中模型用量排行里的横向条
+  // （height 是 6px），不收窄就会把那些条一起算进来。
+  const trendCardOf = () => {
+    const metricGroup = q(`[role="group"][aria-label="${tt("trend.metric")}"]`);
+    return metricGroup?.parentElement ?? null;
+  };
+  const bars = () => [...(trendCardOf()?.querySelectorAll('[role="progressbar"]') ?? [])];
+  const labelsOf = () => bars().map((el) => el.getAttribute("aria-label"));
+  const heightsOf = () => bars().map((el) => el.style.height);
+  assert.ok(byText("button", tt("trend.metricCalls")), "趋势卡里渲染出「调用次数」指标按钮");
+  assert.deepEqual(
+    qa('[role="tablist"]').filter((el) => el.getAttribute("aria-label") === tt("trend.metric")).length,
+    0, "指标切换器不得占用 tablist（tablist 全留给页面级三个 tab）"
+  );
+  const metricTabs = () => buttons().filter((el) => [tt("trend.metricCalls"), tt("trend.metricTokens")].includes(el.textContent.trim()));
+  assert.equal(metricTabs().length, 2, "两个指标按钮");
+  assert.equal(qa('[role="group"][aria-label="' + tt("trend.metric") + '"]').length, 1, "指标切换器是一个 group（刻意不用 tablist——那是页面级 tab 的语义）");
+  assert.equal(metricTabs()[0].getAttribute("aria-pressed"), "true", "默认停在「调用次数」");
+  assert.ok(bodyText().includes(tt("trend.legend")), "默认用 calls 那版图例");
+  assert.deepEqual(heightsOf(), ["75%", "100%"], "calls 模式：3/4=75%，4/4=100%");
+  // 先确认 calls 模式的 label 口径，作为切换后的对照基线。
+  assert.ok(labelsOf()[0].endsWith("3"), `calls 模式念次数，实际 ${JSON.stringify(labelsOf())}`);
+
+  metricTabs()[1].click();
+  await settle();
+  assert.equal(metricTabs()[1].getAttribute("aria-pressed"), "true", "点 token 后选中态跟过去");
+  assert.equal(metricTabs()[0].getAttribute("aria-pressed"), "false", "旧按钮取消选中");
+  assert.ok(bodyText().includes(tt("trend.legendTokens")), "图例换成 token 口径那版");
+  // 作用域必须收窄到趋势卡：`trend.legend` 这个键**也被 ModelUsageTable 复用**
+  // （单模型用量表末尾那句相同图例），全文档 includes 永远命中，断言恒假。
+  assert.ok(!trendCardOf().textContent.includes(tt("trend.legend")), "趋势卡里 calls 那版图例已不在（不是两版同时显示）");
+  // 独立归一化：tokens 900/300，最大是 900 → 第一根满高、第二根 33%。
+  assert.deepEqual(heightsOf(), ["100%", "33.33333333333333%"], `token 模式按 tokens 自己的 max 归一，实际 ${JSON.stringify(heightsOf())}`);
+  // aria-label 跟着指标走：读屏念的是 token 数（900 → "900"，300 → "300"），不是次数。
+  assert.ok(labelsOf()[0].endsWith("900"), `token 模式念 token 数，实际 ${JSON.stringify(labelsOf())}`);
+  assert.ok(labelsOf()[1].endsWith("300"), `第二根柱念 300 token，实际 ${JSON.stringify(labelsOf())}`);
+
+  metricTabs()[0].click();
+  await settle();
+  assert.deepEqual(heightsOf(), ["75%", "100%"], "切回次数后柱高复原");
+}
 
 // ══════════════════════════════════════════════════════════════════════════
 // §2 挂载副作用真的跑了：首轮轮询 + 定时器 + locale 订阅

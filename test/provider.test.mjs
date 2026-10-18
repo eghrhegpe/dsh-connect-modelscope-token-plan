@@ -10,6 +10,7 @@ import {
   LLM_PROVIDER_ID, LLM_DISPLAY_NAME, LLM_API_KEY_NAME,
   FALLBACK_CONTEXT_WINDOW, HIDE_ALL_MODELS,
   normalizeEntry, isVisionModel, isChatModel, contextWindowOf, maxOutputLengthOf,
+  maxTokensFor, maxTokensSourceOf,
   resolveModelCapability,
   toPiDescriptor, filterByEnabled, isModelEnabled, buildDescriptors,
   rosterWithAvailability, summarizeCatalog
@@ -128,6 +129,43 @@ import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_S
   assert.equal(roster.find((r) => r.id === "b/B").available, false);
   assert.equal(roster.find((r) => r.id === "b/B").quotaExhausted, true);
   assert.equal(roster.find((r) => r.id === "a/A").available, true);
+
+  // maxTokensOverrides：**覆盖 > 目录声明 > 不声明**，且覆盖与目录走同一个解析器
+  // （面板徽章与线上 `max_tokens` 不允许各说各话——这是本字段存在的全部理由）。
+  const bare = normalizeEntry({ id: "org/M" });
+  const declared = normalizeEntry({ id: "org/M", max_output_length: 8192 });
+  // 目录没声明 + 没覆盖 → 不声明（harness 的 32768 兜底在生效，但**这里**不算出来）
+  assert.equal(maxTokensFor(bare), 0, "无覆盖、无声明 → 0（= 不声明 maxTokens）");
+  assert.equal(maxTokensSourceOf(bare), "catalog");
+  // 覆盖赢过目录声明
+  assert.equal(maxTokensFor(declared, { "org/M": 65_536 }), 65_536, "覆盖赢过目录声明");
+  assert.equal(maxTokensSourceOf(declared, { "org/M": 65_536 }), "override");
+  // 覆盖**不能**凭空声明一个目录从未声明过的上限？——能，而且这正是它的用途：
+  // 魔搭目录对**每一个**模型都不声明，没有覆盖就永远是 0。
+  assert.equal(maxTokensFor(bare, { "org/M": 65_536 }), 65_536, "覆盖能给目录沉默的模型写下限");
+  // 精确 id：别的模型不沾光，也不误伤
+  assert.equal(maxTokensFor(bare, { "org/OTHER": 65_536 }), 0, "覆盖只认精确 id，不跨模型泄漏");
+  assert.equal(maxTokensFor(declared, { "org/OTHER": 65_536 }), 8192, "没被点名的模型继续读目录");
+  // 非正/非整数覆盖被忽略，而**不是**当成 0 发出去
+  for (const bogus of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.equal(maxTokensFor(declared, { "org/M": bogus }), 8192, `覆盖 ${bogus} 非法 → 退回目录声明，不发 0`);
+  }
+  // descriptor：覆盖真的落到请求参数上
+  const overridden = toPiDescriptor(declared, { maxTokensOverrides: { "org/M": 131_072 } });
+  assert.equal(overridden.maxTokens, 131_072, "覆盖进到 descriptor 的 maxTokens");
+  assert.equal("maxTokens" in toPiDescriptor(bare, { maxTokensOverrides: { "org/M": 65_536 } }) === true, true);
+  // buildDescriptors 把映射透传下去（不传 = 目录说了算）
+  const threaded = buildDescriptors([declared], { maxTokensOverrides: { "org/M": 131_072 } });
+  assert.equal(threaded[0].maxTokens, 131_072, "buildDescriptors 透传 maxTokensOverrides");
+  assert.equal(buildDescriptors([declared], {})[0].maxTokens, 8192, "不传覆盖 → 目录声明");
+  // roster 徽章必须引用**同一个**解析结果，否则面板会显示一个请求里不存在的数
+  const rosterOverridden = rosterWithAvailability([bare], [], { "org/M": 65_536 });
+  assert.equal(rosterOverridden[0].maxOutputLength, 65_536, "roster 显示覆盖后的值");
+  assert.equal(rosterOverridden[0].maxOutputSource, "override");
+  const rosterPlain = rosterWithAvailability([declared], []);
+  assert.equal(rosterPlain[0].maxOutputLength, 8192, "roster 无覆盖时显示目录声明");
+  assert.equal(rosterPlain[0].maxOutputSource, "catalog");
+  assert.equal(rosterWithAvailability([bare], [])[0].maxOutputLength, 0, "roster 对沉默的目录给 0（面板据此不画徽章）");
 
   // summarizeCatalog
   const summary = summarizeCatalog([normalizeEntry({ id: "a/A" }), normalizeEntry({ id: "Qwen/Qwen2.5-VL" }), normalizeEntry({ id: "wanx/wanx2.1-t2i" })]);

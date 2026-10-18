@@ -102,6 +102,14 @@ export const zh = {
   "provider.contextDefault": "不覆盖（默认）",
   "provider.contextHint": "目录未声明窗口时套用此值（会盖过内置策展表）；保存后立即重新注册",
   "provider.contextCuratedTitle": "窗口来自内置策展表（models.dev 交叉真值），平台未亲口声明；带 * 标记",
+  // 输出上限三件套。与窗口那一组刻意分开命名：窗口有「覆盖 / 策展 / 兜底」三级，
+  // 输出上限只有「覆盖 / 目录声明」两级（目录从不返回它，所以实际上只有覆盖一级），
+  // 复用 context* 的措辞会把两条真值链说成一条。
+  "provider.maxOutput": "最大输出",
+  "provider.maxOutputOverrideTitle": "最大输出：来自 maxTokensOverrides 里你写的值（盖过目录声明）",
+  // 常驻说明。它回答的正是「为什么一个模型都没带徽章」——徽章缺席 ≠ 没有上限，
+  // 而是**32768 的 harness 兜底正在生效**。这是本面板最容易读反的一处。
+  "provider.maxOutputHint": "魔搭目录不返回输出上限，未覆盖的模型按 harness 默认（32768）截断；要更大就在 maxTokensOverrides 里逐模型写实测值（面板徽章用「最大输出」显示生效值）",
 
   "section.draw": "出图工具",
   "draw.enable": "开启后，agent 可在对话里用 modelscope_draw_image 生成或编辑图片",
@@ -136,6 +144,12 @@ export const zh = {
 
   "trend.none": "还没有本地调用记录。",
   "trend.legend": "柱长相对区间内最大值，仅本地口径。",
+  "trend.metric": "趋势指标",
+  "trend.metricCalls": "调用次数",
+  "trend.metricTokens": "token 数",
+  // token 口径的两处既有歧义，明说出来：①失败调用不计 token（上游没给 usage），
+  // ②旧数据的天桶缺字段时补的是 0。两者在图上都读作「0 token」，与真的用了 0 分不开。
+  "trend.legendTokens": "按 token 数相对区间内最大值画柱，仅本地口径；失败调用没有用量记录，与「该日无数据」一样显示为 0。",
   "trend.window": "显示天数",
   "trend.windowDefault": "默认（跟随配置）",
   "trend.windowDays": "{days} 天",
@@ -269,6 +283,9 @@ export const en: typeof zh = {
   "provider.contextDefault": "No override (default)",
   "provider.contextHint": "Applied when the catalog declares no window (it overrides the built-in curated table); re-registers immediately",
   "provider.contextCuratedTitle": "Window from the built-in curated table (models.dev cross-check), not declared by the platform; marked with *",
+  "provider.maxOutput": "Max output",
+  "provider.maxOutputOverrideTitle": "Max output: the value you wrote in maxTokensOverrides (it wins over the catalogue)",
+  "provider.maxOutputHint": "The ModelScope catalogue returns no output ceiling, so models without an override are cut off at the harness default (32768); write per-model measured values in maxTokensOverrides for more (the badge shows the effective value)",
 
   "section.draw": "Draw tool",
   "draw.enable": "Once on, the agent can generate or edit images with modelscope_draw_image",
@@ -303,6 +320,10 @@ export const en: typeof zh = {
 
   "trend.none": "No local call records yet.",
   "trend.legend": "Bar lengths are relative to the maximum in the range (local scope only).",
+  "trend.metric": "Trend metric",
+  "trend.metricCalls": "Calls",
+  "trend.metricTokens": "Tokens",
+  "trend.legendTokens": "Bar lengths are relative to the largest token count in the range (local scope only). Failed calls record no usage, and days with no data also read as 0.",
   "trend.window": "Days shown",
   "trend.windowDefault": "Default (follow config)",
   "trend.windowDays": "{days} days",

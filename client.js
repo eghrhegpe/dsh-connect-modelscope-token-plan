@@ -212,6 +212,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.contextDefault": "不覆盖（默认）",
 			"provider.contextHint": "目录未声明窗口时套用此值（会盖过内置策展表）；保存后立即重新注册",
 			"provider.contextCuratedTitle": "窗口来自内置策展表（models.dev 交叉真值），平台未亲口声明；带 * 标记",
+			"provider.maxOutput": "最大输出",
+			"provider.maxOutputOverrideTitle": "最大输出：来自 maxTokensOverrides 里你写的值（盖过目录声明）",
+			"provider.maxOutputHint": "魔搭目录不返回输出上限，未覆盖的模型按 harness 默认（32768）截断；要更大就在 maxTokensOverrides 里逐模型写实测值（面板徽章用「最大输出」显示生效值）",
 			"section.draw": "出图工具",
 			"draw.enable": "开启后，agent 可在对话里用 modelscope_draw_image 生成或编辑图片",
 			"draw.on": "已开启",
@@ -244,6 +247,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.absent.unknown": "开关已开，但出图工具未挂载，原因未知。",
 			"trend.none": "还没有本地调用记录。",
 			"trend.legend": "柱长相对区间内最大值，仅本地口径。",
+			"trend.metric": "趋势指标",
+			"trend.metricCalls": "调用次数",
+			"trend.metricTokens": "token 数",
+			"trend.legendTokens": "按 token 数相对区间内最大值画柱，仅本地口径；失败调用没有用量记录，与「该日无数据」一样显示为 0。",
 			"trend.window": "显示天数",
 			"trend.windowDefault": "默认（跟随配置）",
 			"trend.windowDays": "{days} 天",
@@ -354,6 +361,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.contextDefault": "No override (default)",
 			"provider.contextHint": "Applied when the catalog declares no window (it overrides the built-in curated table); re-registers immediately",
 			"provider.contextCuratedTitle": "Window from the built-in curated table (models.dev cross-check), not declared by the platform; marked with *",
+			"provider.maxOutput": "Max output",
+			"provider.maxOutputOverrideTitle": "Max output: the value you wrote in maxTokensOverrides (it wins over the catalogue)",
+			"provider.maxOutputHint": "The ModelScope catalogue returns no output ceiling, so models without an override are cut off at the harness default (32768); write per-model measured values in maxTokensOverrides for more (the badge shows the effective value)",
 			"section.draw": "Draw tool",
 			"draw.enable": "Once on, the agent can generate or edit images with modelscope_draw_image",
 			"draw.on": "On",
@@ -386,6 +396,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.absent.unknown": "The switch is on, but the draw tool is not mounted; the reason is unknown.",
 			"trend.none": "No local call records yet.",
 			"trend.legend": "Bar lengths are relative to the maximum in the range (local scope only).",
+			"trend.metric": "Trend metric",
+			"trend.metricCalls": "Calls",
+			"trend.metricTokens": "Tokens",
+			"trend.legendTokens": "Bar lengths are relative to the largest token count in the range (local scope only). Failed calls record no usage, and days with no data also read as 0.",
 			"trend.window": "Days shown",
 			"trend.windowDefault": "Default (follow config)",
 			"trend.windowDays": "{days} days",
@@ -454,6 +468,24 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const number = typeof value === "number" && Number.isFinite(value) ? value : 0;
 		if (number >= 1e4) return Math.round(number).toLocaleString();
 		return String(Math.round(number * 100) / 100);
+	}
+	/**
+	* 大数字的紧凑文本：`< 1000` 原样，`< 1e6` 用 `k`，`≥ 1e6` 用 `m`（各留 1~2 位小数，
+	* 去尾零）。**只给 token 这类会自然到百万级的读数用**——调用次数一天几十上百，千分位
+	* 逗号反而更好读，那条路径继续走 `count()`。
+	*
+	* 单位用小写 k/m：视觉上与 SI 前缀一致，也避开「兆」的歧义（`M` 在中文语境里常被读成
+	* 万亿）。负值与 NaN 分别返回 `-1.2k` 与 `NaN`——不做掩饰，异常值该在面板上现形。
+	*/
+	function compactCount(value) {
+		if (typeof value !== "number" || !Number.isFinite(value)) return String(value);
+		const trim = (number) => String(Number(number.toFixed(number >= 100 ? 0 : number >= 10 ? 1 : 2)));
+		const sign = value < 0 ? "-" : "";
+		const abs = Math.abs(value);
+		if (abs < 1e3) return `${sign}${trim(abs)}`;
+		if (abs < 1e6) return `${sign}${trim(abs / 1e3)}k`;
+		if (abs < 1e9) return `${sign}${trim(abs / 1e6)}m`;
+		return `${sign}${trim(abs / 1e9)}b`;
 	}
 	/** 填 `{key}` 模板：vars 的每个键对应模板里的同名占位符。 */
 	function format(template, vars) {
@@ -759,6 +791,28 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				marginTop: 6,
 				fontSize: 11,
 				color: "var(--dsw-alias-label-secondary)"
+			},
+			trendMetricBar: {
+				display: "flex",
+				gap: 2,
+				marginBottom: 6,
+				alignItems: "center"
+			},
+			trendMetricBtn: {
+				appearance: "none",
+				background: "none",
+				border: "none",
+				borderBottom: "1px solid transparent",
+				padding: "2px 8px",
+				fontSize: 11,
+				color: "var(--dsw-alias-label-secondary)",
+				cursor: "pointer",
+				outlineOffset: -2
+			},
+			trendMetricBtnActive: {
+				color: "var(--dsw-alias-label-primary)",
+				fontWeight: 600,
+				borderBottom: `1px solid ${BRAND}`
 			},
 			muted: { color: "var(--dsw-alias-label-secondary)" },
 			error: { color: "var(--dsw-alias-state-error-primary)" },
@@ -1101,6 +1155,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			const id = String(row.id ?? "");
 			const w = row.contextWindow;
 			const contextSource = row.contextSource === "override" || row.contextSource === "curated" ? row.contextSource : "catalog";
+			const maxOutputSource = row.maxOutputSource === "override" ? "override" : "catalog";
+			const out = row.maxOutputLength;
 			return {
 				id,
 				name: typeof row.name === "string" && row.name !== "" ? row.name : id,
@@ -1108,7 +1164,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				available: row.available !== false,
 				quotaExhausted: row.quotaExhausted === true,
 				contextSource,
-				...typeof w === "number" && Number.isFinite(w) && w > 0 ? { contextWindow: w } : {}
+				maxOutputSource,
+				...typeof w === "number" && Number.isFinite(w) && w > 0 ? { contextWindow: w } : {},
+				...typeof out === "number" && Number.isFinite(out) && out > 0 ? { maxOutputLength: out } : {}
 			};
 		}).filter((entry) => entry.id !== "") : [];
 		return {
@@ -1479,7 +1537,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			}, h("div", { style: S.trendRowHead }, h("span", {
 				style: S.trendModel,
 				title: row.modelId
-			}, row.modelId), h("span", { style: S.trendCredits }, format(tt("quota.rowCalls"), { calls: count(row.calls) }) + (row.tokens !== null ? ` · ${format(tt("quota.rowTokens"), { tokens: count(row.tokens) })}` : ""))), pct >= 1 ? h("div", {
+			}, row.modelId), h("span", { style: S.trendCredits }, format(tt("quota.rowCalls"), { calls: count(row.calls) }) + (row.tokens !== null ? ` · ${format(tt("quota.rowTokens"), { tokens: compactCount(row.tokens) })}` : ""))), pct >= 1 ? h("div", {
 				style: S.trendBar,
 				role: "progressbar",
 				"aria-valuenow": Math.round(pct),
@@ -1526,33 +1584,62 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}
 		return out;
 	}
-	/** 近 N 天本地调用趋势（天桶；缺桶 = 该日 0 次，真实零）——**竖向柱状图**。 */
+	/**
+	* 近 N 天本地调用趋势（天桶；缺桶 = 该日 0 次，真实零）——**竖向柱状图**。
+	*
+	* token 与调用次数共用同一根柱子但**各自归一化**（`max` 按当前指标现算）：两者量级
+	* 差三四个数量级，若共用一把尺，次数柱会被 token 柱压成贴地的一条线——那图就撒谎了。
+	* 一次只画一个指标（不放双柱），窄容器里双柱既挤又难读，且对比还得再解释一遍。
+	*
+	* 切换态活在组件内的 useState：它是纯显示偏好，不落盘——与「显示天数」不同，那个
+	* 会改变 Host 的取数窗口（真要持久化就该走 usage-prefs，别混进这里）。
+	*/
 	function TrendBars({ buckets, tt }) {
+		const [metric, setMetric] = useState("calls");
 		if (!Array.isArray(buckets) || buckets.length === 0) return h("div", { style: S.trendLegend }, tt("trend.none"));
 		const rows = buckets.map((bucket) => ({
 			dateKey: bucket.dateKey,
-			calls: Number.isFinite(bucket.calls) ? Math.max(0, bucket.calls) : 0
+			calls: Number.isFinite(bucket.calls) ? Math.max(0, bucket.calls) : 0,
+			tokens: Number.isFinite(bucket.tokens) ? Math.max(0, bucket.tokens) : 0
 		}));
-		const max = Math.max(0, ...rows.map((row) => row.calls));
-		return h("div", null, h("div", { style: S.trendChartBars }, rows.map((row) => {
-			const pct = max > 0 ? row.calls / max * 100 : 0;
+		const tokenMode = metric === "tokens";
+		const values = rows.map((row) => tokenMode ? row.tokens : row.calls);
+		const max = Math.max(0, ...values);
+		/** 读数文本：次数走 count（千分位），token 走 compactCount（`1.2k` / `3.4m`）。 */
+		const readout = (value) => tokenMode ? compactCount(value) : count(value);
+		return h("div", null, h("div", {
+			style: S.trendMetricBar,
+			role: "group",
+			"aria-label": tt("trend.metric")
+		}, ...[["calls", "trend.metricCalls"], ["tokens", "trend.metricTokens"]].map(([key, labelKey]) => h("button", {
+			key,
+			type: "button",
+			"aria-pressed": metric === key,
+			style: metric === key ? {
+				...S.trendMetricBtn,
+				...S.trendMetricBtnActive
+			} : S.trendMetricBtn,
+			onClick: () => setMetric(key)
+		}, tt(labelKey)))), h("div", { style: S.trendChartBars }, rows.map((row, index) => {
+			const value = values[index] ?? 0;
+			const pct = max > 0 ? value / max * 100 : 0;
 			return h("div", {
 				key: row.dateKey,
 				style: S.trendChartBar,
-				title: `${row.dateKey}: ${count(row.calls)}`
-			}, row.calls > 0 ? h("span", {
+				title: `${row.dateKey}: ${readout(value)}`
+			}, value > 0 ? h("span", {
 				style: {
 					...S.trendChartValue,
 					bottom: `calc(${pct}% + 3px)`
 				},
 				"aria-hidden": "true"
-			}, count(row.calls)) : null, h("div", {
+			}, readout(value)) : null, h("div", {
 				style: {
 					...S.trendChartFill,
 					height: `${pct}%`
 				},
 				role: "progressbar",
-				"aria-label": `${row.dateKey} ${count(row.calls)}`,
+				"aria-label": `${row.dateKey} ${readout(value)}`,
 				"aria-valuenow": Math.round(pct),
 				"aria-valuemin": 0,
 				"aria-valuemax": 100
@@ -1564,7 +1651,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				title: key,
 				style: { whiteSpace: "nowrap" }
 			}, shortDateKey(key));
-		})), h("div", { style: S.trendLegend }, tt("trend.legend")));
+		})), h("div", { style: S.trendLegend }, tt(tokenMode ? "trend.legendTokens" : "trend.legend")));
 	}
 	/**
 	* 趋势显示窗口选择器：默认（跟随 `trendDays` 配置）/ 7 / 14 / 30 / 90 天。
@@ -1889,7 +1976,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 					color: "var(--dsw-alias-label-secondary)"
 				} : S.modelBadge,
 				title: row.contextSource === "curated" ? tt("provider.contextCuratedTitle") : tt("provider.contextWindow")
-			}, row.contextSource === "curated" ? formatWindow(row.contextWindow) + " *" : formatWindow(row.contextWindow)) : null, row.quotaExhausted === true ? h("span", { style: {
+			}, row.contextSource === "curated" ? formatWindow(row.contextWindow) + " *" : formatWindow(row.contextWindow)) : null, typeof row.maxOutputLength === "number" ? h("span", {
+				style: S.modelBadge,
+				title: row.maxOutputSource === "override" ? tt("provider.maxOutputOverrideTitle") : tt("provider.maxOutput")
+			}, formatWindow(row.maxOutputLength)) : null, row.quotaExhausted === true ? h("span", { style: {
 				...S.modelBadge,
 				color: "var(--dsw-alias-state-error-primary)"
 			} }, tt("provider.quotaExhausted")) : null, h("a", {
@@ -1957,7 +2047,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			style: S.primary,
 			disabled: busy,
 			onClick: () => onSaveList(draft.slice())
-		}, tt("provider.saveList"))), visibleRows.length === 0 ? h("div", { style: {
+		}, tt("provider.saveList"))), h("div", { style: S.advancedHint }, tt("provider.maxOutputHint")), visibleRows.length === 0 ? h("div", { style: {
 			...S.muted,
 			fontSize: 12,
 			padding: "10px 4px"

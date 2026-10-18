@@ -130,6 +130,21 @@ export interface ProviderStatus {
      * 覆盖；curated = 策展表。与 host 的 contextWindowSourceOf 同词汇。
      */
     contextSource?: "catalog" | "override" | "curated";
+    /**
+     * 该行**生效**的输出上限（覆盖 > 目录声明），与 descriptor 同源。`0`/缺席 =
+     * 不声明 `maxTokens`，此时 harness 用它的 `defaultMaxTokens ?? 32768` 兜底——
+     * 魔搭目录从不返回这个字段，所以「缺席」在现实里就是「32768 在生效」，面板必须
+     * 把这件事画出来（0 是**已知的坏消息**，不是「未知」）。
+     */
+    maxOutputLength?: number;
+    /**
+     * 输出上限数字的来源：catalog = 目录声明（对魔搭即「没声明，走兜底」）；
+     * override = 用户在 `maxTokensOverrides` 里写的值。与 host 的
+     * `maxTokensSourceOf` 同词汇。只有两级——这里**没有**策展表：窗口有实测过的
+     * context-catalog，输出上限没有（平台从不声明它，策展一张「猜每个模型能吐多少」
+     * 的表没有依据）。
+     */
+    maxOutputSource?: "catalog" | "override";
   }[];
 }
 

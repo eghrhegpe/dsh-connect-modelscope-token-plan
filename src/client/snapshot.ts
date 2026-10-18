@@ -180,6 +180,10 @@ export function providerOf(raw: unknown): ProviderStatus {
       // 缺席时徽章退化为普通窗口显示，不破坏旧行为。
       const contextSource: "catalog" | "override" | "curated" =
         row.contextSource === "override" || row.contextSource === "curated" ? row.contextSource : "catalog";
+      // 输出上限的来源同样只认已知值，其余当 catalog（旧 Host 缺字段时不画徽章，
+      // 不是画一个假的「目录声明」）。
+      const maxOutputSource: "catalog" | "override" = row.maxOutputSource === "override" ? "override" : "catalog";
+      const out = row.maxOutputLength;
       return {
         id,
         name: typeof row.name === "string" && row.name !== "" ? row.name : id,
@@ -187,10 +191,14 @@ export function providerOf(raw: unknown): ProviderStatus {
         available: row.available !== false,
         quotaExhausted: row.quotaExhausted === true,
         contextSource,
+        maxOutputSource,
         // 旧 Host 的 roster 行没有窗口字段：合法时才带键，整键缺席（
         // exactOptionalPropertyTypes 下显式 undefined 不满足可选属性）——
         // badge 缺席，而不是伪装成某个默认值。
-        ...(typeof w === "number" && Number.isFinite(w) && w > 0 ? { contextWindow: w } : {})
+        ...(typeof w === "number" && Number.isFinite(w) && w > 0 ? { contextWindow: w } : {}),
+        // 输出上限同理：只有有限正数才带键。**0 不带键**——0 的语义是「不声明
+        // `maxTokens`、harness 兜底 32768」，画成「最大输出 0」会比不画更错。
+        ...(typeof out === "number" && Number.isFinite(out) && out > 0 ? { maxOutputLength: out } : {})
       };
     }).filter((entry) => entry.id !== "")
     : [];

@@ -146,7 +146,10 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
     // 耗尽集合取 publisher 最近一次收敛发布的那份（provider-reconcile 每轮从
     // 429 事件流按纯函数 exhaustedModelIds 推断，与快照聚合、picker 同一份
     // 真值）——路由自己不算，算了就会与另外两处漂移。
-    const roster = rosterWithAvailability(entries, publisher.state.unavailableIds ?? []);
+    // 输出上限覆盖随行透传：GET 的 roster 行必须与 descriptor 用同一个解析器
+    // （llm-models.maxTokensFor），否则「面板显示的数」与「线上发的数」会分叉——
+    // 与上面 contextWindow 那条是同一类毛病，处理方式也一样。
+    const roster = rosterWithAvailability(entries, publisher.state.unavailableIds ?? [], settings.maxTokensOverrides);
     // 联合只解析一次：`allowed` 是它的 mode 投影，`enabledCount` 走它的计数
     // （all = roster 全部；none = 0；list = roster 中真正命中的条数，过期的 id
     // 不虚增，与 snapshot-aggregate 同一份 enabledCountOf）。

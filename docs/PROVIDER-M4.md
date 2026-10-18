@@ -62,7 +62,7 @@ interface CatalogEntry {
   name: string;          // 展示名，回退 id
   vision: boolean;       // 是否吃图
   contextWindow: number; // 声明的窗口，未知用 128k 兜底
-  maxOutputLength: number; // 声明的单次输出上限，0 = 未声明
+  maxOutputLength: number; // 目录声明的单次输出上限，0 = 未声明（魔搭实测恒为 0）
 }
 async fetchModels(): Promise<{ entries: CatalogEntry[]; fetchedAt: string }>
 ```
@@ -130,6 +130,16 @@ export function summarizeCatalog(entries: unknown): { modelCount: number; vision
   0 = 未声明。**descriptor 只在 >0 时声明 `maxTokens`**：harness 对未声明
   maxTokens 会用 `defaultMaxTokens ?? 32768` 兜底，那是「平台没说」的诚实
   处理，别猜数字填。
+  ⚠️ 但「诚实」有一个代价，2026-10-18 补上：魔搭 `/v1/models` **从不返回**这个
+  字段（每条只有 `id`/`object`/`owned_by`/`created`，见 `docs/REFERENCES.md`），
+  于是「目录没声明就别猜」= **每一个**模型的 descriptor 都不带 `maxTokens` =
+  每一个请求都在吃 32768 的 harness 兜底。诚实在这里等于**沉默地矮一截**。
+  出口是配置字段 `maxTokensOverrides`（模型 id → 实测值），优先级
+  `覆盖 > 目录声明 > 不声明`：
+- `maxTokensFor` / `maxTokensSourceOf`：上面那条链的**唯一**读法。descriptor 与
+  面板 roster 都调它，所以面板「最大输出」徽章显示的就是请求里那个数——同源，
+  不允许各算各的。覆盖只认**精确 id**（上限是请求参数，子串匹配会顺手改掉一批
+  没被点名的模型），值必须是正整数（0 保留给「未声明」）。
 - `toPiDescriptor` 的返回形状（对齐 qoder/sensenova 已知可用的那条）：
   ```ts
   { id, name, api: "openai-completions", provider, baseUrl,
@@ -231,7 +241,7 @@ export function summarizeCatalog(entries: unknown): { modelCount: number; vision
     signature: string; quotaSignature: string;
   }
   export function createProviderPublisher(deps: {
-    settings?: { registerProvider?: boolean; apiBase?: string };
+    settings?: { registerProvider?: boolean; apiBase?: string; maxTokensOverrides?: Record<string, number> };
     panelSwitch?: () => Promise<boolean | null>;
     loadAdapterModule?: () => Promise<object>;      // 默认 () => import("./llm-adapter.ts")
     getLlm?: (service: string) => object | null;

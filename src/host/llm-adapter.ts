@@ -46,6 +46,10 @@ import { withUsageObserver, type UsageSinks } from "./usage-observer.ts";
  *   `fs`）的服务解析器。
  * @param {string[]} [options.unavailableModelIds] - 额度耗尽的模型 id，从 offer 里
  *   排除，避免发出注定 429 的请求。
+ * @param {object} [options.maxTokensOverrides] - 逐模型输出上限覆盖（id → tokens），
+ *   归一后的 `ResolvedSettings.maxTokensOverrides`。**每次 publish 现读**，与
+ *   `apiBase` 同一个理由：改覆盖不该需要重启。魔搭目录从不声明该字段，所以这是
+ *   输出上限唯一的真值来源（见 llm-models.ts 的 `maxTokensFor`）。
  * @param {UsageSinks} [options.usage] - 本地计数的写入口（usage-store 的两条
  *   方法）。**这是面板「今日次数 / 模型分布 / 趋势 / 429 事件流」唯一的生产
  *   者**——probe 那条写入路径已随目录表删除，缺了它四块面板恒为 0 与空。
@@ -55,17 +59,18 @@ import { withUsageObserver, type UsageSinks } from "./usage-observer.ts";
  *   应该可见——否则用户发现计数不对时没有任何线索。
  * @returns {{adapter: object, providerIds: string[]}} 适配器与它拥有的 ids。
  */
-export function createModelScopeAdapter({ entries, enabledIds = [], baseUrl, resolveApiKey, get, unavailableModelIds = [], usage, onError }: {
+export function createModelScopeAdapter({ entries, enabledIds = [], baseUrl, resolveApiKey, get, unavailableModelIds = [], maxTokensOverrides = {}, usage, onError }: {
   entries: unknown;
   enabledIds?: string[];
   baseUrl: string;
   resolveApiKey: () => Promise<string>;
   get?: (service: string) => unknown;
   unavailableModelIds?: string[];
+  maxTokensOverrides?: Record<string, number>;
   usage?: UsageSinks;
   onError?: (error: unknown) => void;
 }) {
-  const models = buildDescriptors(entries, { providerId: LLM_PROVIDER_ID, baseUrl, enabledIds, unavailableModelIds });
+  const models = buildDescriptors(entries, { providerId: LLM_PROVIDER_ID, baseUrl, enabledIds, unavailableModelIds, maxTokensOverrides });
 
   const built = assemblePiAiAdapter({
     providerId: LLM_PROVIDER_ID,

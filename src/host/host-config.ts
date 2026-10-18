@@ -81,6 +81,36 @@ export const CONFIG_DEFAULTS = Object.freeze({
   /** provider 注册的 patch 默认值（面板保存值优先于它）。 */
   registerProvider: false,
   /**
+   * 逐模型的单次输出上限覆盖（模型 id → tokens），空对象 = 目录说了算。
+   *
+   * **为什么需要它**：本插件对输出上限的原始策略是「目录声明了才声明」
+   * （llm-models.ts 模块头注第 2 条），而魔搭 `/v1/models` **从不返回**这个字段
+   * （docs/REFERENCES.md 实测：每条只有 `id`/`object`/`owned_by`/`created`）。
+   * 两条合起来的结果是**每一个**模型的 descriptor 都不带 `maxTokens`，harness 于是
+   * 走它的 `defaultMaxTokens ?? 32768` 兜底——32768 不是魔搭声明的数，也不是任何
+   * 实测过的数，它只是 harness 的默认值。
+   *
+   * 目录给不出真值时，操作者是唯一的信息源：他知道某个模型实测能吐 64k。没有这个
+   * 字段，这份知识**无处可写**——写进目录缓存会被下一轮轮询覆盖。于是他只能看着
+   * 输出在 32768 处被截断，而手上明明有答案。
+   *
+   * **语义与优先级**：`覆盖 > 目录声明 > 不声明`。目录声明了时覆盖仍然赢（这是
+   * 「覆盖」二字的全部含义）；目录没声明时覆盖就是唯一的真值来源。空对象（默认）
+   * ＝ 完全维持旧行为，不改变任何已有部署的输出。
+   *
+   * **键是精确 id，不做子串匹配**——与 sensenova 那种「按名字包含」的倍率旋钮
+   * 刻意不同：上限是**请求参数**，一个宽松的键会顺手改掉一批没被点名的模型
+   * （键写 `flash` 会命中七八条）。只认整串相等。
+   *
+   * **值必须是正整数**：0 有保留含义（`maxOutputLengthOf` 里 0 = 未声明），所以
+   * 非法值一律**丢弃**（非整数 / NaN / Infinity / 字符串数字 / 0 / 负数），不是夹取
+   * ——夹取等于替用户声明一个他没说过的上限。
+   *
+   * 读取点只有一处：`llm-models.ts` 的 `maxTokensFor`。descriptor 构建与面板 roster
+   * **都**调它，所以面板显示的数字与线上真正发的 `max_tokens` 不可能不一致。
+   */
+  maxTokensOverrides: {},
+  /**
    * 出图工具的 patch 默认值（面板保存值优先于它）。
    *
    * **与 `registerProvider` 是两个独立开关**：前者是「把魔搭当 chat provider」，
@@ -163,6 +193,33 @@ function assertHttpUrl(value: string, field: string): void {
   }
 }
 
+/**
+ * 归一「逐模型输出上限覆盖」。
+ *
+ * 三个刻意的选择，都与姊妹插件的同类函数不同：
+ *
+ * 1. **键精确相等**，不做子串匹配。上限是请求参数，宽松匹配会改掉一批没被点名的
+ *    模型；倍率那种「按名字包含」的旋钮可以宽松，因为它只影响画图。
+ * 2. **值必须是正整数**，非法值**丢弃**而不是夹取。0 在 `maxOutputLengthOf` 里已经
+ *    表示「未声明」，把 `-5` 夹成 1 等于替用户声明了一个他没说过的上限；丢弃则
+ *    退回目录/兜底，方向是保守的。
+ * 3. **非对象一律回落到默认空对象**，不抛错——坏配置不能让 apply 抛出去（本文件的
+ *    既有纪律，见 resolveSettings 的 catch 分支）。
+ * @param {unknown} raw - patch 行里的原始值（加载器送来的未校验输入）。
+ * @returns {Record<string, number>} id → 上限，只含合法项。
+ */
+export function resolveMaxTokensOverrides(raw: unknown): Record<string, number> {
+  if (raw === undefined || raw === null) return CONFIG_DEFAULTS.maxTokensOverrides;
+  if (typeof raw !== "object" || Array.isArray(raw)) return { ...CONFIG_DEFAULTS.maxTokensOverrides };
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (key === "") continue;
+    if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 /** resolveSettings 的产物形状，消费方照此读。 */
 export interface ResolvedSettings {
   apiBase: string;
@@ -181,6 +238,12 @@ export interface ResolvedSettings {
    */
   exhaustionWindowMinutes: number;
   registerProvider: boolean;
+  /**
+   * 逐模型的输出上限覆盖（模型 id → tokens）。空对象 = 目录说了算。
+   * 唯一读取点是 `llm-models.ts` 的 `maxTokensFor`（descriptor 与面板 roster 共用），
+   * 所以面板显示的数字与线上真正发的 `max_tokens` 同一来源。
+   */
+  maxTokensOverrides: Record<string, number>;
   /** 出图工具开关（面板保存值优先于它）。 */
   drawEnabled: boolean;
   /** 出图默认模型（空串 = 自动）。 */
@@ -237,6 +300,10 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         // 对应任何真实的恢复语义）。
         exhaustionWindowMinutes: clampInt(source.exhaustionWindowMinutes, CONFIG_DEFAULTS.exhaustionWindowMinutes, 5, 1440),
         registerProvider: source.registerProvider === true,
+        // 输出上限覆盖在这里归一（而不是在 descriptor 构建处）：它是**请求参数**的
+        // 来源，与 apiBase / 超时同一类东西——未校验的 patch 输入必须在进消费方之前
+        // 就被夹干净，消费方只做「覆盖 > 目录 > 不声明」的选择。
+        maxTokensOverrides: resolveMaxTokensOverrides(source.maxTokensOverrides),
         // 出图三件套。超时同样夹上界：它直接喂给轮询截止，3e9 会让每一次出图
         // 立刻超时（与 pollSeconds / inferenceTimeoutMs 同一类坑）。下界 30s——
         // 低于实测最快的一次出图（61s）没有意义；上界 DRAW_TIMEOUT_MAX_MS 严格
@@ -267,6 +334,7 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         maxEvents: CONFIG_DEFAULTS.maxEvents,
         exhaustionWindowMinutes: CONFIG_DEFAULTS.exhaustionWindowMinutes,
         registerProvider: false,
+        maxTokensOverrides: CONFIG_DEFAULTS.maxTokensOverrides,
         drawEnabled: false,
         drawModelId: CONFIG_DEFAULTS.drawModelId,
         drawTimeoutMs: CONFIG_DEFAULTS.drawTimeoutMs,

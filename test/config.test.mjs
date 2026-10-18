@@ -4,7 +4,7 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { CONFIG_DEFAULTS, DRAW_TIMEOUT_MAX_MS, PLUGIN_VERSION, name, resolveSettings, clampInt, hostName, isAdmitted } from "../src/host/host-config.ts";
+import { CONFIG_DEFAULTS, DRAW_TIMEOUT_MAX_MS, PLUGIN_VERSION, name, resolveSettings, clampInt, hostName, isAdmitted, resolveMaxTokensOverrides } from "../src/host/host-config.ts";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
@@ -36,6 +36,27 @@ for (const key of ["trendDays", "retentionDays", "cacheSeconds", "pollSeconds", 
   const literal = String(patchValue[1]).trim().replace(/^["']|["']$/g, "");
   assert.equal(literal, String(CONFIG_DEFAULTS[key]), `${key} 在 patch 与 CONFIG_DEFAULTS 之间漂移`);
 }
+
+// §3b maxTokensOverrides：**对象型**默认值，进不了 §3 那条标量清单（它比的是 patch
+// 里的字面量与 `String(默认值)`，对象会退化成 `[object Object]`）。这里单独钉住
+// 「两边都在、两边都空」——空对象是有语义的（目录说了算），不等于「没配」。
+assert.equal(typeof CONFIG_DEFAULTS.maxTokensOverrides, "object", "maxTokensOverrides 的默认值必须是对象");
+assert.equal(Array.isArray(CONFIG_DEFAULTS.maxTokensOverrides), false, "maxTokensOverrides 是映射，不是数组");
+assert.equal(
+  Object.keys(CONFIG_DEFAULTS.maxTokensOverrides).length,
+  0,
+  "出厂默认是空映射：一个模型都不覆盖，目录（与它的兜底）说了算"
+);
+assert.ok(
+  /^\s*maxTokensOverrides\s*:\s*\{\s*\}\s*$/m.test(patch),
+  "cordis.patch.yml 必须以 maxTokensOverrides: {} 出厂（配置面与默认值必须同场）"
+);
+// 例子里那行注释掉的示例串必须**留着**：它是这个字段唯一的用法示范，而对象字面量
+// 没法从 `{}` 反推出来。只钉「存在」，不钉具体模型名（换模型时不必改测试）。
+assert.ok(
+  /^\s*#\s*maxTokensOverrides\s*:\s*\{/m.test(patch),
+  "cordis.patch.yml 里要留一行注释掉的 maxTokensOverrides 示例"
+);
 
 // §4 clampInt：floor → 下限 → 上限；非正/非有限回退默认。
 assert.equal(clampInt("x", 5, 1), 5);
@@ -142,6 +163,44 @@ for (const good of ["[::1]", "[::1]:3080", "[2001:db8::1]:443"]) {
   const parsed = hostName(good);
   assert.notEqual(parsed, "", `Host "${good}" 应被解析成合法形状`);
 }
+
+// §7c resolveMaxTokensOverrides：与 resolveTrendMultipliers 的形状相同、语义不同，
+// 三条差异逐条钉住，因为「宽松一点」在这里是**会改请求参数**的错。
+assert.deepEqual(resolveMaxTokensOverrides(undefined), {}, "缺省 = 空映射");
+assert.deepEqual(resolveMaxTokensOverrides(null), {}, "null = 空映射");
+assert.deepEqual(resolveMaxTokensOverrides("nope"), {}, "非对象回退默认");
+assert.deepEqual(resolveMaxTokensOverrides([]), {}, "数组回退默认（不是「空映射」以外的任何东西）");
+assert.deepEqual(resolveMaxTokensOverrides(42), {}, "数字回退默认");
+assert.deepEqual(
+  resolveMaxTokensOverrides({
+    "": 5,                       // 空键丢弃
+    zero: 0,                     // 0 是「未声明」的保留值，不是「不限制」
+    negative: -2,                // 非正丢弃
+    nan: Number.NaN,             // 非有限丢弃
+    inf: Number.POSITIVE_INFINITY,
+    frac: 1.5,                   // 必须整数——请求参数不接受半个 token
+    text: "10",                  // 不认字符串数字
+    ok: 131072
+  }),
+  { ok: 131072 },
+  "只留正整数有限值；非法项丢弃而不夹取"
+);
+// 差异一：**精确键**，不做子串匹配。`flash` 不是任何模型的 id，绝不能命中
+// `Qwen/Qwen3.8-Flash-Next` 一类（trendMultipliers 就是子串语义，别混）。
+assert.deepEqual(resolveMaxTokensOverrides({ flash: 4096 }), { flash: 4096 }, "键原样保留（是否命中由 maxTokensFor 精确判定）");
+// 差异二：显式空对象 = 目录说了算（不是「回退到某个默认映射」）。
+assert.deepEqual(resolveMaxTokensOverrides({}), {}, "显式空对象保持为空");
+// 差异三：走的是 resolveSettings 的**同一个**净化器，不是两条实现。
+assert.deepEqual(
+  resolveSettings({ maxTokensOverrides: { ok: 65536, bad: 0 } }).settings.maxTokensOverrides,
+  { ok: 65536 },
+  "resolveSettings 必须把原始值交给同一个净化器"
+);
+assert.deepEqual(
+  resolveSettings({ maxTokensOverrides: "junk" }).settings.maxTokensOverrides,
+  {},
+  "非法输入在 resolveSettings 里也回退成空映射"
+);
 
 // §8 isAdmitted：Host 对白名单；Origin 与 Host 一致；无 Origin 放行。
 const allowed = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);

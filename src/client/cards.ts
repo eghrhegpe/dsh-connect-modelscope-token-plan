@@ -4,7 +4,7 @@
  * 不许白屏整个面板。仅 TokenForm 持有 state（输入框），其余无 hook。
  * @module dsh-connect-modelscope-token-plan/client/cards
  */
-import { count, format, isoTime } from "./format.ts";
+import { compactCount, count, format, isoTime } from "./format.ts";
 import { h, useEffect, useMemo, useState } from "./runtime.ts";
 import type { DictionaryKey, Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
@@ -130,11 +130,13 @@ export function ModelUsageTable({ rows, tt }: { rows: Array<{ modelId: string; c
           // 两个读数分别走字典（`{calls} 次` / `{tokens} token`），不拼裸后缀：
           // 单位跟着语言走，也顺带保住「读不到 token 时整段不画」这条——token 为
           // null 只画次数，不画 `0 token`（读不到 ≠ 0）。
+          // token 走 compactCount（`1.2k` / `3.4m`）而不是 count：这一列会自然到百万级，
+          // 千分位长串在窄行里会挤掉模型名；调用次数一天几十上百，保留逗号更好读。
           h(
             "span",
             { style: S.trendCredits },
             format(tt("quota.rowCalls"), { calls: count(row.calls) }) +
-              (row.tokens !== null ? ` · ${format(tt("quota.rowTokens"), { tokens: count(row.tokens) })}` : "")
+              (row.tokens !== null ? ` · ${format(tt("quota.rowTokens"), { tokens: compactCount(row.tokens) })}` : "")
           )
         ),
         pct >= 1 ? h("div", { style: S.trendBar, role: "progressbar", "aria-valuenow": Math.round(pct), "aria-valuemin": 0, "aria-valuemax": 100 }, h("div", { style: { ...S.barFill, width: `${pct}%` } })) : null
@@ -185,8 +187,21 @@ function tickIndices(count: number): number[] {
   return out;
 }
 
-/** 近 N 天本地调用趋势（天桶；缺桶 = 该日 0 次，真实零）——**竖向柱状图**。 */
+/** 趋势指标：`calls` 与 `tokens` 量级差几个数量级，所以**各自独立归一化**，不共用一根轴。 */
+type TrendMetric = "calls" | "tokens";
+
+/**
+ * 近 N 天本地调用趋势（天桶；缺桶 = 该日 0 次，真实零）——**竖向柱状图**。
+ *
+ * token 与调用次数共用同一根柱子但**各自归一化**（`max` 按当前指标现算）：两者量级
+ * 差三四个数量级，若共用一把尺，次数柱会被 token 柱压成贴地的一条线——那图就撒谎了。
+ * 一次只画一个指标（不放双柱），窄容器里双柱既挤又难读，且对比还得再解释一遍。
+ *
+ * 切换态活在组件内的 useState：它是纯显示偏好，不落盘——与「显示天数」不同，那个
+ * 会改变 Host 的取数窗口（真要持久化就该走 usage-prefs，别混进这里）。
+ */
 export function TrendBars({ buckets, tt }: { buckets: TrendBucket[]; tt: Tt }): unknown {
+  const [metric, setMetric] = useState<TrendMetric>("calls");
   if (!Array.isArray(buckets) || buckets.length === 0) return h("div", { style: S.trendLegend }, tt("trend.none"));
   // 脏数据归一，与 ModelUsageTable 同口径：这里曾经直接 `Math.max(0, b.calls)` 与
   // `String(b.calls)`——一条 NaN 桶既把 max 变成 NaN（所有条都不画），又把字面量
@@ -194,31 +209,59 @@ export function TrendBars({ buckets, tt }: { buckets: TrendBucket[]; tt: Tt }): 
   // 唯一安全的画法（Number.isFinite 顺带挡掉 Infinity，`Number(x) || 0` 挡不住）。
   const rows = buckets.map((bucket) => ({
     dateKey: bucket.dateKey,
-    calls: Number.isFinite(bucket.calls) ? Math.max(0, bucket.calls) : 0
+    calls: Number.isFinite(bucket.calls) ? Math.max(0, bucket.calls) : 0,
+    tokens: Number.isFinite(bucket.tokens) ? Math.max(0, bucket.tokens) : 0
   }));
-  const max = Math.max(0, ...rows.map((row) => row.calls));
+  const tokenMode = metric === "tokens";
+  const values = rows.map((row) => (tokenMode ? row.tokens : row.calls));
+  const max = Math.max(0, ...values);
+  /** 读数文本：次数走 count（千分位），token 走 compactCount（`1.2k` / `3.4m`）。 */
+  const readout = (value: number) => (tokenMode ? compactCount(value) : count(value));
   return h(
     "div",
     null,
+    // 指标切换：放进 role=group 的按钮组，选中态走 aria-pressed——**刻意不用
+    // role=tablist/tab**：那是页面级 tabBar（额度/模型/接入）的语义，趋势卡里的
+    // 指标切换不对应「面板分区」，混进去会让读屏把两种层级读成同一件事。
+    h(
+      "div",
+      { style: S.trendMetricBar, role: "group", "aria-label": tt("trend.metric") },
+      ...[(["calls", "trend.metricCalls"] as const), (["tokens", "trend.metricTokens"] as const)].map(([key, labelKey]) =>
+        h(
+          "button",
+          {
+            key,
+            type: "button",
+            "aria-pressed": metric === key,
+            style: metric === key ? { ...S.trendMetricBtn, ...S.trendMetricBtnActive } : S.trendMetricBtn,
+            onClick: () => setMetric(key)
+          },
+          tt(labelKey)
+        )
+      )
+    ),
     h(
       "div",
       { style: S.trendChartBars },
-      rows.map((row) => {
-        const pct = max > 0 ? (row.calls / max) * 100 : 0;
+      rows.map((row, index) => {
+        const value = values[index] ?? 0;
+        const pct = max > 0 ? (value / max) * 100 : 0;
         return h(
           "div",
-          { key: row.dateKey, style: S.trendChartBar, title: `${row.dateKey}: ${count(row.calls)}` },
+          { key: row.dateKey, style: S.trendChartBar, title: `${row.dateKey}: ${readout(value)}` },
           // 次数标签**骑在柱顶**（相对本柱绝对定位，bottom = 柱高 + 3px）：比另起
           // 一行数字更贴柱，也不必为最长的那根柱预留一条空白行。0 次不标——空柱
           // 没有高度可骑，标了只会堆在基线上（与姊妹插件 Agnes 同一处理）。
-          row.calls > 0
-            ? h("span", { style: { ...S.trendChartValue, bottom: `calc(${pct}% + 3px)` }, "aria-hidden": "true" }, count(row.calls))
+          value > 0
+            ? h("span", { style: { ...S.trendChartValue, bottom: `calc(${pct}% + 3px)` }, "aria-hidden": "true" }, readout(value))
             : null,
           h("div", {
             // 0 次 = 0% 高 + minHeight 的 2px 底座：天桶确实存在，不是空心缺柱。
             style: { ...S.trendChartFill, height: `${pct}%` },
             role: "progressbar",
-            "aria-label": `${row.dateKey} ${count(row.calls)}`,
+            // aria-label 必须跟着当前指标走：切到 token 视图后这里还念「调用次数」
+            // 就是无障碍 bug（读屏听到的数与画出来的是两个量）。
+            "aria-label": `${row.dateKey} ${readout(value)}`,
             "aria-valuenow": Math.round(pct),
             "aria-valuemin": 0,
             "aria-valuemax": 100
@@ -235,7 +278,7 @@ export function TrendBars({ buckets, tt }: { buckets: TrendBucket[]; tt: Tt }): 
         return h("span", { key, title: key, style: { whiteSpace: "nowrap" } }, shortDateKey(key));
       })
     ),
-    h("div", { style: S.trendLegend }, tt("trend.legend"))
+    h("div", { style: S.trendLegend }, tt(tokenMode ? "trend.legendTokens" : "trend.legend"))
   );
 }
 
@@ -613,6 +656,24 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
             row.contextSource === "curated" ? formatWindow(row.contextWindow) + " *" : formatWindow(row.contextWindow)
           )
           : null,
+        // 输出上限徽章。**只在有值时画**（host 侧 0/缺席 = 不声明，见 snapshot.ts）
+        // ——对魔搭目录这就是常态：目录从不返回这个字段，于是未覆盖的模型一个徽章
+        // 都没有，而 32768 的 harness 兜底正在每一个请求里生效。那件事由下面的
+        // `provider.maxOutputHint` 一行话说清，**不**伪造成一个「32768」徽章：那个
+        // 数不是任何一个模型的属性，它是 harness 的缺省值，画在行上会让人以为是
+        // 平台声明。
+        typeof row.maxOutputLength === "number"
+          ? h(
+            "span",
+            // 来源只有两级（见 wire.ts）：override = 用户自己写的值（title 说清）；
+            // catalog = 目录真的声明了——对魔搭目录永远不会发生，换上游才会。
+            {
+              style: S.modelBadge,
+              title: row.maxOutputSource === "override" ? tt("provider.maxOutputOverrideTitle") : tt("provider.maxOutput")
+            },
+            formatWindow(row.maxOutputLength)
+          )
+          : null,
         // 「推荐」不在这里——它是**厂商级**的标记，挂在组头（见下方 group head）。
         // `FEATURED_OWNERS` 列的是 owner，挂到每一行上会让同名 owner 的十几行各说
         // 一遍，而组头也在说：同一件事说十几遍，还把那十几行的宽度吃掉。
@@ -670,6 +731,12 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
             onClick: () => onSaveList(draft.slice())
           }, tt("provider.saveList"))
         ),
+        // 输出上限的**缺省说明**，常驻一行。它存在的理由是这个面板最反直觉的一件
+        // 事：魔搭 `/v1/models` 从不返回输出上限字段（docs/REFERENCES.md 实测），
+        // 所以没有一个模型带这个徽章——而 harness 的 32768 兜底**正在生效**。
+        // 「什么都没显示」与「没有上限」在面板上长得一模一样，这句话就是用来把
+        // 两者分开的：没显示 = 走兜底 32768；要更大就写 maxTokensOverrides。
+        h("div", { style: S.advancedHint }, tt("provider.maxOutputHint")),
         visibleRows.length === 0
           ? h("div", { style: { ...S.muted, fontSize: 12, padding: "10px 4px" } }, tt("provider.noMatch"))
           : h(

@@ -318,7 +318,7 @@ for (const suffix of new Set(clientSuffixes)) {
     `client.js 里 HIDE_ALL_MODELS 定义应只出现 1 次（shared 单一定义），实际 ${definitionCount} 次`);
 }
 
-// §6d locale 文件 key 集合一致。i18n.ts 的运行时字典（zh/en 各 85 键）由
+// §6d locale 文件 key 集合一致。i18n.ts 的运行时字典（zh/en 各 144 键）由
 // `export const en: typeof zh` 在编译期钉死，但 locale/*.json 是另一套（给市场
 // 页用的 title/description），两边互不兜底。en.json 曾缺 meta.description，
 // 市场英文页简介空白而所有测试全绿。
@@ -412,6 +412,87 @@ for (const suffix of new Set(clientSuffixes)) {
   assert.ok(!unknown.includes("今日 0 次"), "读不到不得画成 0 次");
   const known = JSON.stringify(panel.components.LocalDailyCard({ snapshot: snapshotOf(0), tt: zhOnly }));
   assert.ok(known.includes("今日 0 次"), "真实 0 仍照实渲染 0");
+}
+
+// §5d compactCount：token 读数的短标注（`1.2k` / `3.4m`），边界值逐个钉死。
+//
+// 为什么单独一节：这是 `format.ts` 新增的第二个数字格式化器，两条路径（count /
+// compactCount）互不覆盖。边界（999/1000/1000000）与「小数该留几位」是最容易被后续
+// 改动悄悄挪走的东西；异常值（NaN/null/字符串）必须原样透出，不得被画成 0。
+{
+  const { compactCount } = await import("../src/client/format.ts");
+  const cases = [
+    [0, "0"],
+    [7, "7"],
+    [999, "999"],
+    [1000, "1k"],
+    [1200, "1.2k"],
+    [12345, "12.3k"],
+    [123456, "123k"],
+    [999999, "1000k"],
+    [1_000_000, "1m"],
+    [3_456_789, "3.46m"],
+    [12_345_678, "12.3m"],
+    [-1200, "-1.2k"]
+  ];
+  for (const [input, want] of cases) {
+    assert.equal(compactCount(input), want, `compactCount(${input}) 应为 ${want}`);
+  }
+  // 异常值：不粉饰、不画成 0——面板上「不知道」与「0」必须是两个样子。
+  assert.equal(compactCount(Number.NaN), "NaN", "NaN 原样透出（不得静默变 0）");
+  assert.equal(compactCount(Number.POSITIVE_INFINITY), "Infinity", "Infinity 原样透出");
+  assert.equal(compactCount(null), "null", "null 原样透出（读不到 ≠ 0）");
+  // 与 count() 的分工：count 不动，调用次数那条路径不受影响。
+  const { count } = await import("../src/client/format.ts");
+  assert.equal(count(1234), "1234", "count 仍是千分位口径的小数规则");
+  assert.equal(count(1_234_567), (1_234_567).toLocaleString(), "count 仍走千分位");
+}
+
+// §5e TrendBars 的指标切换：token 模式必须**独立归一化**，且 aria-label 跟着指标走。
+//
+// 这是本次改动的核心不变量，两条都容易在重构时悄悄丢掉：
+//   1. 共用一把尺 → 次数柱被 token 柱压成贴地一条线（图在撒谎）；
+//   2. aria-label 不跟着走 → 读屏听到「3 次」而柱高画的是 12k token（无障碍 bug）。
+// 这里直接调组件拿树：`useState` 的初值是 "calls"，所以点击回调要**手动触发**后再读树。
+{
+  const { TrendBars } = panel.components;
+  // 量级刻意拉开：calls 是几十，tokens 是几万 —— 共用归一化的话次数柱会变成 0.1% 高。
+  const buckets = [
+    { dateKey: "2026-10-16", calls: 50, tokens: 100_000 },
+    { dateKey: "2026-10-17", calls: 5, tokens: 10_000 }
+  ];
+  // 用真 hooks 渲染一次太绕；改从 SSR 树里读默认（calls）态，再模拟点击拿 token 态。
+  const tree = TrendBars({ buckets, tt: (key) => zh[key] });
+  const text = JSON.stringify(tree);
+  assert.ok(text.includes(zh["trend.metricCalls"]), "默认渲染出指标切换器");
+  assert.ok(text.includes(zh["trend.metricTokens"]), "两个指标都可选");
+  assert.ok(text.includes(zh["trend.legend"]), "默认（calls）用调用次数那版图例");
+
+  // 抓出两个指标按钮，确认默认按压态与回调真的绑上了（不是死按钮）。
+  // 真切换由 dom-render 套件覆盖——替身 React 的 useState 设不进去。
+  const tabs = [];
+  const walk = (node) => {
+    if (!node || typeof node !== "object") return;
+    if (node.type === "button" && ["calls", "tokens"].includes(node.props?.key)) tabs.push(node);
+    for (const child of node.children ?? []) walk(child);
+    if (node.props?.children) walk(node.props.children);
+    if (Array.isArray(node.props?.children)) node.props.children.forEach(walk);
+  };
+  walk(tree);
+  assert.equal(tabs.length, 2, "两个指标按钮");
+  assert.deepEqual(tabs.map((t) => t.props["aria-pressed"]), [true, false], "calls 默认按下");
+  assert.equal(typeof tabs[1].props.onClick, "function", "token 按钮有 onClick（不是死按钮）");
+
+  // 首帧 aria-label 必须带调用次数（不是 token），确认默认态口径正确。
+  const labels = [];
+  const collect = (node) => {
+    if (!node || typeof node !== "object") return;
+    if (node.props?.["aria-label"]) labels.push(node.props["aria-label"]);
+    if (Array.isArray(node.children)) node.children.forEach(collect);
+    if (Array.isArray(node.props?.children)) node.props.children.forEach(collect);
+  };
+  collect(tree);
+  assert.ok(labels.some((l) => l.includes("2026-10-16") && l.includes("50")), `默认态 aria-label 念调用次数，实际 ${JSON.stringify(labels)}`);
 }
 
 console.log("panel.test.mjs: all checks passed");

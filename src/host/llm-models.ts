@@ -9,9 +9,12 @@
  * 1. `compat.supportsDeveloperRole: false`——pi-ai 缺省会**自动探测**这个标志，
  *    对非标准 provider 一律猜 `true`，于是每条请求都用 `developer` 角色，魔搭这个
  *    多模型代理不认识，会 400 或 403。qoder 路由证明必须显式写 false。
- * 2. `maxTokens` 只在目录**声明了**上限时声明——harness 对未声明的 maxTokens
- *    用 `defaultMaxTokens ?? 32768` 兜底，所以「不声明」是「平台没说」的诚实处理，
- *    别猜数字填。
+ * 2. `maxTokens` 由 `maxTokensFor` 一处决定，优先级 **`覆盖 > 目录声明 > 不声明`**：
+ *    目录没声明时不猜数字（harness 会用它的 `defaultMaxTokens ?? 32768` 兜底，那是
+ *    harness 的默认值，不是平台说的），但操作者可以在 `maxTokensOverrides` 里显式
+ *    填实测值。**本插件的目录（魔搭 `/v1/models`）从不返回这个字段**，所以「目录
+ *    说了算」在现实里等于「永远是 32768」——这条退路不是锦上添花，它是唯一出口。
+ *    完整回退顺序写在 `maxTokensFor` 上，此处不重复。
  * 3. `reasoning: false` + **不设** `thinkingLevelMap`——魔搭 API-Inference 是
  *    多模型代理，是否吃 `reasoning_effort` 取决于背后那个具体模型，本插件无法
  *    离线得知每个 id 的档位表（sensenova 那份是拿真令牌逐模型探测才钉出来的）。
@@ -406,9 +409,11 @@ export function contextWindowSourceOf(entry: CatalogEntry): "catalog" | "overrid
 /**
  * 读目录声明的单次输出上限，0 = 未声明。
  *
- * 这个数**只用于展示/投影**。descriptor 只在 >0 时声明 `maxTokens`（见模块头注
- * 第 2 条），所以它从不变成请求参数——它说的是平台至多能吐多少，让用户明白为什么
- * 长回答仍会以 `finish_reason: length` 停住。
+ * 这个数**是请求参数**，不是纯展示值：`toPiDescriptor` 在它 >0 时声明为
+ * `maxTokens`（见模块头注第 2 条）。**但 `0` 有真实的代价**——魔搭目录从不返回
+ * 这个字段，所以它对本插件的每一个模型都是 0，harness 于是用 `defaultMaxTokens ??
+ * 32768` 兜底。「目录没说」在这里不等于「平台没限制」，只等于**我们不知道**；把它
+ * 当「不设上限」读会错得很远。操作者知道时用 `maxTokensFor` 的覆盖参数补上。
  * @param {object} entry - 一条归一目录条目。
  * @returns {number} 声明的上限，未声明为 0。
  */
@@ -421,6 +426,52 @@ export function maxOutputLengthOf(entry: CatalogEntry): number {
 }
 
 /**
+ * 该条目**实际生效**的输出上限：`覆盖 > 目录声明 > 不声明(0)`——全插件唯一的
+ * 回退顺序，写在这里就只写一遍。
+ *
+ * 为什么覆盖必须排在目录**之前**（而不是「目录优先、覆盖只补空缺」）：目录说的是
+ * 「这个平台声称能吐多少」，覆盖说的是「我实测过这个模型能吐多少」。两者冲突时后者
+ * 是更新的事实——目录是我们**抓来的**（`/v1/models`，会随上游改动、也可能常年不
+ * 更新），覆盖是操作者**写的**。魔搭这条路上目录连这个字段都不返回，所以顺序在
+ * 多数情况下没有争议；把它写死仍然重要，因为「谁赢」这件事只能有一个答案。
+ *
+ * 返回 0 的含义与 `maxOutputLengthOf` 完全一致：**不声明** `maxTokens`，让 harness
+ * 用它的兜底值——不是「上限为 0」。`0` 因此不是一个可以配置的上限（
+ * `resolveMaxTokensOverrides` 会把 0 丢掉）。
+ * @param {object} entry - 一条归一目录条目。
+ * @param {object|null} [overrides] - 归一后的 id → 上限映射（`ResolvedSettings`）。
+ * @returns {number} 生效上限，未声明为 0。
+ */
+export function maxTokensFor(entry: CatalogEntry, overrides?: Record<string, number> | null): number {
+  const declared = maxOutputLengthOf(entry);
+  if (overrides === undefined || overrides === null) return declared;
+  const id = str(entry?.id, "");
+  if (id === "") return declared;
+  const override = overrides[id];
+  return typeof override === "number" && Number.isInteger(override) && override > 0 ? override : declared;
+}
+
+/**
+ * 这个条目的输出上限数字从真值链哪一级来——与 {@link maxTokensFor} 配对的来源标记，
+ * 形状与 {@link contextWindowSourceOf} 刻意保持同一套词汇。
+ *
+ * 只有两级，因为这里**没有策展表**：窗口有 `context-catalog.ts` 那份实测策展表，
+ * 输出上限没有（魔搭从不声明它，策展一张「猜每个模型能吐多少」的表没有依据）。
+ * `catalog` 的含义因此是「覆盖没命中」——包括目录没声明、值就是 0 的情况，面板据此
+ * 不画徽章。
+ * @param {object} entry - 一条归一目录条目。
+ * @param {object|null} [overrides] - 归一后的 id → 上限映射。
+ * @returns {"catalog"|"override"} 来源标记。
+ */
+export function maxTokensSourceOf(entry: CatalogEntry, overrides?: Record<string, number> | null): "catalog" | "override" {
+  if (overrides === undefined || overrides === null) return "catalog";
+  const id = str(entry?.id, "");
+  if (id === "") return "catalog";
+  const override = overrides[id];
+  return typeof override === "number" && Number.isInteger(override) && override > 0 ? "override" : "catalog";
+}
+
+/**
  * 把一条目录条目映射成适配器交给 pi-ai 的 model descriptor。
  *
  * vision 用的是与快照/roster 完全相同的判定（`isVisionModel`），所以模型选择器
@@ -429,14 +480,19 @@ export function maxOutputLengthOf(entry: CatalogEntry): number {
  * @param {object} [options] - 装配参数。
  * @param {string} [options.providerId] - 该 descriptor 所属的 provider id。
  * @param {string} [options.baseUrl] - OpenAI 兼容源站。
+ * @param {object} [options.maxTokensOverrides] - 逐模型输出上限覆盖（id → tokens），
+ *   经 `maxTokensFor` 决定 `maxTokens`。缺省 = 目录说了算（对本插件的目录即「不声
+ *   明」）。
  * @returns {object} pi-ai descriptor。
  */
-export function toPiDescriptor(entry: CatalogEntry, options: { providerId?: string; baseUrl?: string } = {}) {
-  const { providerId = LLM_PROVIDER_ID, baseUrl } = options;
+export function toPiDescriptor(entry: CatalogEntry, options: { providerId?: string; baseUrl?: string; maxTokensOverrides?: Record<string, number> } = {}) {
+  const { providerId = LLM_PROVIDER_ID, baseUrl, maxTokensOverrides } = options;
   const id = str(entry?.id, "");
   if (id === "") throw new Error("toPiDescriptor: catalog entry has no id");
   const vision = isVisionModel(entry);
-  const maxOutputLength = maxOutputLengthOf(entry);
+  // 解析一次：既要放进返回字面量，又要避免在展开里重复求值（`maxTokensFor` 是纯
+  // 函数，但它读两次等于把「谁赢」这条规则执行两遍，将来加日志就会打两行）。
+  const effectiveMaxTokens = maxTokensFor(entry, maxTokensOverrides);
   return {
     id,
     // 优先用目录自己的展示名，回退 id。
@@ -452,9 +508,10 @@ export function toPiDescriptor(entry: CatalogEntry, options: { providerId?: stri
     reasoning: false,
     cost: { ...NO_COST },
     contextWindow: contextWindowOf(entry),
-    // 只在目录声明了输出上限时才声明 maxTokens——harness 对未声明会用
-    // `defaultMaxTokens ?? 32768` 兜底，那是「平台没说」的诚实处理。
-    ...(maxOutputLength > 0 ? { maxTokens: maxOutputLength } : {}),
+    // `maxTokensFor` 是唯一裁决点：覆盖 > 目录声明 > 不声明。不声明时 harness 用
+    // `defaultMaxTokens ?? 32768` 兜底——对本插件的目录（从不返回该字段）这意味着
+    // 「不写覆盖就是 32768」，所以这条退路是承重的，不是可选装饰。
+    ...(effectiveMaxTokens > 0 ? { maxTokens: effectiveMaxTokens } : {}),
     // `supportsDeveloperRole: false` 是承重墙——见模块头注第 1 条。
     compat: { maxTokensField: "max_tokens", supportsDeveloperRole: false }
   };
@@ -597,11 +654,11 @@ export function rosterOf(entries: unknown): { id: string; name: string; vision: 
  * `rosterWithAvailability` 仍显示它们，灰显加原因，但 picker 不提供注定 429 的
  * 请求；两处口径不同是故意的，别统一。
  * @param {object[]} entries - 归一目录条目。
- * @param {object} options - `{ providerId, baseUrl, enabledIds, unavailableModelIds }`。
+ * @param {object} options - `{ providerId, baseUrl, enabledIds, unavailableModelIds, maxTokensOverrides }`。
  * @returns {object[]} pi-ai descriptor，按首见顺序。
  */
-export function buildDescriptors(entries: unknown, options: { providerId?: string; baseUrl?: string; enabledIds?: string[]; unavailableModelIds?: string[] } = {}) {
-  const { providerId = LLM_PROVIDER_ID, baseUrl, enabledIds = [], unavailableModelIds = [] } = options;
+export function buildDescriptors(entries: unknown, options: { providerId?: string; baseUrl?: string; enabledIds?: string[]; unavailableModelIds?: string[]; maxTokensOverrides?: Record<string, number> } = {}) {
+  const { providerId = LLM_PROVIDER_ID, baseUrl, enabledIds = [], unavailableModelIds = [], maxTokensOverrides } = options;
   // 生图模型（`output_modalities` 只含 image）不能当 chat 模型寻址，在允许清单
   // **之前**排除——这样 enabledIds 里的过期 id 匹配不到东西，而不是把生图模型
   // 复活成 chat。
@@ -623,7 +680,7 @@ export function buildDescriptors(entries: unknown, options: { providerId?: strin
       seen.set(id, out.length);
       out.push(undefined);
     }
-    out[seen.get(id)!] = toPiDescriptor({ ...catalogEntry, id }, { providerId, ...(baseUrl !== undefined ? { baseUrl } : {}) });
+    out[seen.get(id)!] = toPiDescriptor({ ...catalogEntry, id }, { providerId, ...(baseUrl !== undefined ? { baseUrl } : {}), ...(maxTokensOverrides !== undefined ? { maxTokensOverrides } : {}) });
   }
   return out as object[];
 }
@@ -813,9 +870,14 @@ export function resolveDrawModelChoice(entries: unknown, requested?: string, pre
  * 面板保留它们在清单里、灰显，让用户看得见「为什么模型从选择器里不见了」。
  * @param {object[]} entries - 归一目录条目。
  * @param {string[]} unavailableIds - 额度耗尽的模型 id；空数组 = 全部可用。
- * @returns {{id: string, name: string, vision: boolean, capability: ModelCapability, available: boolean, quotaExhausted: boolean, contextWindow: number, maxOutputLength: number}[]}
+ * @param {object} [maxTokensOverrides] - 逐模型输出上限覆盖（id → tokens）。**位置参数
+ *   而非 options 对象**：本函数的既有调用面就是两个位置参数，第三个在三个调用点都是
+ *   一次机械追加；改成对象会动三处签名与它们各自的测试假件，收益只是好看。窗口那边
+ *   （`contextSource`）**不**走这个参数——它在 fetchModels 归一时就被打标了，两条路
+ *   的机制不同，这里不假装统一。
+ * @returns {{id: string, name: string, vision: boolean, capability: ModelCapability, available: boolean, quotaExhausted: boolean, contextWindow: number, contextSource: "catalog"|"override"|"curated", maxOutputLength: number, maxOutputSource: "catalog"|"override"}[]}
  */
-export function rosterWithAvailability(entries: unknown, unavailableIds: string[]): { id: string; name: string; vision: boolean; capability: ModelCapability; available: boolean; quotaExhausted: boolean; contextWindow: number; contextSource: "catalog" | "override" | "curated"; maxOutputLength: number }[] {
+export function rosterWithAvailability(entries: unknown, unavailableIds: string[], maxTokensOverrides?: Record<string, number> | null): { id: string; name: string; vision: boolean; capability: ModelCapability; available: boolean; quotaExhausted: boolean; contextWindow: number; contextSource: "catalog" | "override" | "curated"; maxOutputLength: number; maxOutputSource: "catalog" | "override" }[] {
   const blocked = new Set(Array.isArray(unavailableIds) ? unavailableIds : []);
   // 循环骨架与 rosterOf 共用 buildRosterRows——只多投 5 个字段。
   return buildRosterRows(entries, (entry, id) => ({
@@ -832,9 +894,13 @@ export function rosterWithAvailability(entries: unknown, unavailableIds: string[
     // （目录声明 > 覆盖 > 策展表 > 兜底），两侧不会说两套话。
     contextWindow: contextWindowOf(entry),
     contextSource: contextWindowSourceOf(entry),
-    // 平台声明的输出上限（0 = 未知）。刻意把投影加宽：原始条目留在 Host 侧，
-    // 面板只引这两个参数值与 vision 判定。
-    maxOutputLength: maxOutputLengthOf(entry)
+    // 生效的输出上限（0 = 不声明 → harness 兜底 32768）。**必须走 `maxTokensFor`**
+    // 而不是 `maxOutputLengthOf`：那是 descriptor 用的同一个函数，面板于是显示
+    // 线上真正会发的那个数。曾经这里读目录原值——对魔搭目录那就是恒 0，面板既不
+    // 显示「32768」也不显示任何东西，而那个值一直在请求里生效。
+    // 投影刻意加宽：原始条目留在 Host 侧，面板只引这两个参数值与 vision 判定。
+    maxOutputLength: maxTokensFor(entry, maxTokensOverrides),
+    maxOutputSource: maxTokensSourceOf(entry, maxTokensOverrides)
   }));
 }
 
