@@ -18,7 +18,7 @@ import { resolveWindowDays } from "./usage-prefs-store.ts";
 import { rosterWithAvailability, drawCandidates, resolveDrawModelChoice } from "./llm-models.ts";
 import { parseAllowedList, enabledCountOf } from "../shared/allow-list.ts";
 import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "./switch-precedence.ts";
-import { drawToolNote } from "./draw-tool-state.ts";
+import { drawToolMounted, drawToolNote } from "./draw-tool-state.ts";
 import { CURATED_AS_OF, curatedCatalogAgeDays, curatedCatalogStale } from "./context-catalog.ts";
 import { errMsg, redactSecrets } from "./util.ts";
 import type { Snapshot } from "../shared/wire.ts";
@@ -218,7 +218,16 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
       // 缺席原因由 draw-register 在挂载时写入（仅内存）；开关未开时它也是 null，
       // 面板据 enabled 区分「没开」与「开了但不在」。
       absentReason: drawToolNote(),
-      mountPending: resolveSwitchEnabled(panel, settings.drawEnabled) === true && drawToolNote() !== null,
+      // 「待重启」的真判据是**本次挂载没注册上**，不是「有缺席原因」——两者恰好
+      // 互补：缺席原因非 null = 注册尝试过且失败，而挂载那一刻开关是关的（用户
+      // 之后才翻开）时 absentReason 是 null、却同样没注册上。用后者当判据会把
+      // 最常见的「刚打开开关」场景漏掉。见 `draw-tool-state.ts` 文件头。
+      mountPending: resolveSwitchEnabled(panel, settings.drawEnabled) === true && drawToolMounted() !== true,
+      // 首选模型还在不在目录里。`false` = 目录读到了、它不在（模型下架/改名，
+      // 但快照仍按「用户点了谁就是谁」照显这个 id）；`null` = 目录读不到或没设
+      // 首选，不敢断言。红线 3：不知道 ≠ 不在。
+      preferredInCatalog:
+        preferred === null ? null : models.ok ? candidates.some((row) => row.id === preferred) : null,
       toolName: "modelscope_draw_image"
     } satisfies Snapshot["draw"];
   })());
@@ -261,7 +270,11 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
       windowDays: panelWindow,
       // 可选窗口的上界 = 保留窗口。画得比它多会把已剪的日子画成 0。
       maxDays: settings.retentionDays,
-      buckets: trend.ok ? trend.value : []
+      // 读不到 = null（读不到 ≠ 0，wire.ts TrendBucket 的语义）：`trend()` 自身
+      // 的三态透上来，面板画「—」。曾经这里 `trend.ok ? trend.value : []`——soft()
+      // 失败时降级成空数组，与「读到了、这些天确实一次都没有」同形，于是坏文件在
+      // 今日计数上画「—」、在趋势图上画一片结实的零柱（同一份坏数据两个答案）。
+      buckets: trend.ok ? trend.value : null
     },
     models: {
       available: models.ok,

@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply } from "../src/host/index.ts";
 import { DRAW_PATH, PROVIDER_PATH } from "../src/host/routes/paths.ts";
-import { setDrawToolNote, resetDrawToolNote } from "../src/host/draw-tool-state.ts";
+import { setDrawToolNote, setDrawToolMounted, resetDrawToolNote } from "../src/host/draw-tool-state.ts";
 
 process.env.DSH_HOME = mkdtempSync(join(tmpdir(), "ms-draw-routes-"));
 
@@ -135,7 +135,11 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由仍注册（两条独立�
   assert.equal(res.status, 200);
   assert.equal(res.body.enabled, true);
   assert.equal(res.body.source, "panel", "保存后来源是面板");
-  assert.equal(res.body.mountPending, false, "本次挂载未登记缺席 → 不算 pending");
+  // 开关刚翻开、而本次挂载没注册上 → **正是**「待重启」场景。旧实现用「有缺席
+  // 原因」当判据，恰好漏掉这一种（挂载那一刻开关是关的，压根没尝试注册，所以
+  // 没有缺席原因）——面板于是什么都不说，用户以为开关坏了。
+  assert.equal(res.body.mountPending, true, "开关开着但本次挂载没注册上 → 要提示重启");
+  assert.equal(res.body.absentReason, null, "没尝试过注册 → 没有缺席原因（两者互补）");
 }
 
 // ── 开关持久化到 GET ──
@@ -150,7 +154,19 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由仍注册（两条独立�
   try {
     const res = await call(handlers, DRAW_PATH, makeReq("GET"));
     assert.equal(res.body.absentReason, "no-tools-service");
-    assert.equal(res.body.mountPending, true, "开关开着且有缺席原因 → 面板要提示重启");
+    assert.equal(res.body.mountPending, true, "开关开着且没注册上 → 面板要提示重启");
+  } finally {
+    resetDrawToolNote();
+  }
+}
+
+// ── 注册成功 → 不再提示重启（这是旧判据唯一答不对的方向）──
+{
+  setDrawToolMounted(true);
+  try {
+    const res = await call(handlers, DRAW_PATH, makeReq("GET"));
+    assert.equal(res.body.mountPending, false, "本次挂载已注册上 → 不该再提示重启");
+    assert.equal(res.body.absentReason, null);
   } finally {
     resetDrawToolNote();
   }
@@ -166,7 +182,24 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由仍注册（两条独立�
   // 指定后生效模型跟着变，理由是「按你的指定」——面板据此不再显示「自动」。
   assert.equal(res.body.effectiveModel, "MusePublic/Qwen-Image-Edit", "指定即生效");
   assert.equal(res.body.effectiveSource, "preferred", "理由从自动切到指定");
+  // 它在目录里 → 明确 true（不是「不知道」）。
+  assert.equal(res.body.preferredInCatalog, true, "首选还在目录里 → true");
 }
+
+// ── 首选模型不在目录里：必须说出来，不能照显「当前使用」──
+{
+  const res = await call(handlers, DRAW_PATH, makeReq("POST", { body: { modelId: "Owner/Vanished-Model" } }));
+  assert.equal(res.status, 200);
+  assert.equal(res.body.preferredModel, "Owner/Vanished-Model", "用户点了谁就是谁，不校验目录在场");
+  assert.equal(res.body.effectiveModel, "Owner/Vanished-Model", "因此生效模型仍是这个已消失的 id");
+  assert.equal(res.body.preferredInCatalog, false, "目录读到了、它不在 → false（面板据此提示重选）");
+  // 回到自动后不再是「有首选却不在目录」，置 null 而不是 false。
+  const back = await call(handlers, DRAW_PATH, makeReq("POST", { body: { modelId: null } }));
+  assert.equal(back.body.preferredInCatalog, null, "没设首选 → null（不是 false）");
+}
+
+// 「目录读不到 → null」那一半由 routes.test.mjs 的聚合层用例钉（那里能直接换成会
+// 抛的 fetchModels，不受本套件 coalesced 缓存的影响）。
 
 // ── modelId: null 清掉偏好（回到自动） ──
 {

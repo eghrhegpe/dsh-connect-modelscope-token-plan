@@ -260,7 +260,13 @@ export function PanelPage({ tt, localeSubscribe }: {
         SectionCard,
         { title: format(tt("section.trend"), { days: snap.trend?.days ?? 0 }), open: openSections.trend, onToggle: () => toggleSection("trend"), tt },
         h(TrendWindowPicker, { trend: snap.trend, busy: trendBusy, error: trendError, onChange: (windowDays: number | null) => void saveTrendWindow(windowDays), tt }),
-        h(TrendBars, { buckets: snap.trend?.buckets ?? [], tt })
+        // 兜底方向必须是 null，不是 []：`[]` 是「读到了，确实一次都没有」这句事实
+        // 断言，而这里两种缺席都谈不上读到——缺整个 `trend` 键（旧 Host / 双端漂移，
+        // 契约漂移本身由上面的 missingKeys 那行负责说）和「键在、buckets 是 null」
+        // （Host 侧 usage.json 读不出，红线 3）。只有 Host 明确给出 `[]` 才说「没有
+        // 记录」。曾经这里写 `?? []`，把 null 抹平成空数组，于是 TrendBars 那条
+        // `buckets === null` 的「—」分支在真实面板路径上永远走不到（死分支）。
+        h(TrendBars, { buckets: snap.trend?.buckets ?? null, tt })
       ),
       h(
         SectionCard,

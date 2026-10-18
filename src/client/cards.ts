@@ -200,8 +200,14 @@ type TrendMetric = "calls" | "tokens";
  * 切换态活在组件内的 useState：它是纯显示偏好，不落盘——与「显示天数」不同，那个
  * 会改变 Host 的取数窗口（真要持久化就该走 usage-prefs，别混进这里）。
  */
-export function TrendBars({ buckets, tt }: { buckets: TrendBucket[]; tt: Tt }): unknown {
+export function TrendBars({ buckets, tt }: { buckets: TrendBucket[] | null; tt: Tt }): unknown {
   const [metric, setMetric] = useState<TrendMetric>("calls");
+  // 读不到 ≠ 0（红线 3，wire.ts trend.buckets 的语义）：坏文件在今日计数上画
+  // 「—」，这里也画「—」。曾经 `buckets ?? []` 把 null 和「这些天确实一次都没有」
+  // 合成同一种渲染，于是同一份坏数据在面板上给出两种答案。
+  if (buckets === null) {
+    return h("div", { style: S.trendLegend }, tt("trend.unreadable"));
+  }
   if (!Array.isArray(buckets) || buckets.length === 0) return h("div", { style: S.trendLegend }, tt("trend.none"));
   // 脏数据归一，与 ModelUsageTable 同口径：这里曾经直接 `Math.max(0, b.calls)` 与
   // `String(b.calls)`——一条 NaN 桶既把 max 变成 NaN（所有条都不画），又把字面量
@@ -887,13 +893,31 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, 
     statusNode = h("div", { style: { ...S.muted, fontSize: 12 }, role: "status" }, tt("draw.notMounted"));
   }
 
-  // 挂载发生在下次 Host 启动——开关翻转后本次不生效。只在开关为开时提示。
-  const restartHint = enabled
+  // 挂载发生在下次 Host 启动——开关翻转后本次不生效。
+  //
+  // 判据是 Host 给的 `mountPending`（= 开关为开且本次挂载没注册上），不是「开关
+  // 为开」。后者会把**已经挂好**的情况也提示一遍重启，等于每时每刻都在撒谎；
+  // 而 Host 那一侧的 `mountPending` 曾误用「有缺席原因」当判据，恰好漏掉最常见
+  // 的「挂载时开关是关的、之后才翻开」——那种情况没有缺席原因。两侧都已修正。
+  const restartHint = enabled && status.mountPending === true
     ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("draw.restartHint"))
     : null;
 
   const tokenHint = enabled && tokenPresent === false
     ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("draw.needsKey"))
+    : null;
+
+  // 保存的默认模型已经不在目录里：`resolveDrawModelChoice` 按「用户点了谁就是谁」
+  // 不校验目录在场（改目录不该偷偷改掉用户的选择），所以 `effectiveModel` 仍等于
+  // 那个消失的 id、照显「当前使用」，而真出图会失败。这一句是把沉默的失败说出来。
+  // 只在 `false` 时给——`null` 是「没设首选」或「目录读不到」，两种都不是事实断言
+  // （红线 3：读不到 ≠ 不在）。
+  const preferredGoneHint = status.preferredModel !== null && status.preferredInCatalog === false
+    ? h(
+      "div",
+      { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" }, role: "status" },
+      format(tt("draw.preferredGone"), { model: status.preferredModel })
+    )
     : null;
 
   // ── 「自动选择」这一项自己的说明 ──
@@ -1041,7 +1065,8 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, 
     ),
     error !== null ? h("div", { style: S.formError, role: "alert" }, error) : null,
     restartHint,
-    tokenHint
+    tokenHint,
+    preferredGoneHint
   );
 }
 

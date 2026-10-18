@@ -327,10 +327,12 @@ for (const suffix of new Set(clientSuffixes)) {
     `client.js 里 HIDE_ALL_MODELS 定义应只出现 1 次（shared 单一定义），实际 ${definitionCount} 次`);
 }
 
-// §6d locale 文件 key 集合一致。i18n.ts 的运行时字典（zh/en 各 144 键）由
-// `export const en: typeof zh` 在编译期钉死，但 locale/*.json 是另一套（给市场
-// 页用的 title/description），两边互不兜底。en.json 曾缺 meta.description，
+// §6d locale 文件 key 集合一致。i18n.ts 的运行时字典 zh/en 键集由
+// `export const en: typeof zh` 在编译期钉死（见 §1），但 locale/*.json 是另一套（给
+// 市场页用的 title/description），两边互不兜底。en.json 曾缺 meta.description，
 // 市场英文页简介空白而所有测试全绿。
+// 这里刻意不写死键数：那个数字随每一次加提示漂移（曾写 144，实际早已不是），
+// 而断言的是两套文件键集相同，与总数无关。
 {
   const flat = (obj, prefix = "") => Object.entries(obj).flatMap(([k, v]) =>
     (v !== null && typeof v === "object") ? flat(v, `${prefix}${k}.`) : [`${prefix}${k}`]);
@@ -409,6 +411,27 @@ for (const suffix of new Set(clientSuffixes)) {
   assert.ok(!text.includes("NaN"), "NaN 不得上屏");
   assert.ok(!text.includes("Infinity"), "Infinity 不得上屏");
   assert.ok(text.includes("2026-10-06"), "正常天桶照常渲染");
+}
+
+// §5b-2 TrendBars 三态：读不到（null）≠ 确实没有（[]）≠ 有数据。
+//
+// 红线 3 的组件级落点。`null` 是 Host 读不出 usage.json（`usage-store.trend()` 的
+// 第三态），`[]` 是读到了、这些天真的没有调用。两者在面板上是**两句不同的事实
+// 断言**，合成一句就是欺骗。曾经 `buckets ?? []` 把它们并成「还没有本地调用记录」，
+// 而 panel-page 又从外面 `?? []` 把 null 提前抹平——于是这个分支在真实路径上
+// 是死代码（2026-10-18 评审实测：三处修复都到位，唯独 panel-page.ts 那一行把
+// 最后一跳吃掉了）。这里按三态逐个钉住组件本身。
+{
+  const zhOnly = (key) => zh[key];
+  const { TrendBars } = panel.components;
+  const unknown = JSON.stringify(TrendBars({ buckets: null, tt: zhOnly }));
+  assert.ok(unknown.includes(zh["trend.unreadable"]), "buckets 为 null（读不到）→ 出「读不到」那句话");
+  assert.ok(!unknown.includes(zh["trend.none"]), "读不到不得画成「还没有本地调用记录」（那是事实断言）");
+  const empty = JSON.stringify(TrendBars({ buckets: [], tt: zhOnly }));
+  assert.ok(empty.includes(zh["trend.none"]), "空数组 → 确实没有记录");
+  assert.ok(!empty.includes(zh["trend.unreadable"]), "空数组不得画成「读不到」");
+  const filled = JSON.stringify(TrendBars({ buckets: [{ dateKey: "2026-10-06", calls: 3, tokens: 9 }], tt: zhOnly }));
+  assert.ok(filled.includes("2026-10-06"), "有桶 → 照常画柱（不受三态改动影响）");
 }
 
 // §5c LocalDailyCard：读不到 ≠ 0。usedLocal 为 null 时渲染「—」并提示，不得画成

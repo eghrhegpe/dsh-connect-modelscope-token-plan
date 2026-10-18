@@ -70,7 +70,11 @@ function emptyBlock(key: string): unknown {
     case "events":
       return [];
     case "trend":
-      return { days: 0, buckets: [] };
+      // 缺键 = **未知**，不是「读到了、都是零」：buckets 给 null，TrendBars 画
+      // 「—」，与 Host 软失败时的形状同构（wire.ts trend.buckets：null = 没读到，
+      // [] = 确实一次都没有）。`{days:0,buckets:[]}` 那个旧形状既让选择器以为
+      // maxDays=0（放开全部档位），又把「读不到」画成零柱。
+      return { days: 0, windowDays: null, maxDays: 0, buckets: null };
     case "models":
       return { available: false, count: 0, sample: [], error: null };
     case "provider":
@@ -248,6 +252,8 @@ export const DEGRADED_DRAW: DrawStatus = Object.freeze({
   effectiveSource: null,
   absentReason: null,
   mountPending: false,
+  // 「不知道」而不是 false：没设首选，且这个 Host 连目录都没给我，无从判断。
+  preferredInCatalog: null,
   toolName: "modelscope_draw_image"
 });
 
@@ -306,6 +312,10 @@ export function drawOf(raw: unknown): DrawStatus {
     ...("effectiveSource" in d ? { effectiveSource } : {}),
     absentReason,
     mountPending: d.mountPending === true,
+    // 三态归一：只有显式 true/false 才采信，其余（旧 Host 不给、给了 null、给了
+    // 别的类型）一律读作 null = 「不知道」，不做任何断言（红线 3）。
+    preferredInCatalog:
+      d.preferredInCatalog === true ? true : d.preferredInCatalog === false ? false : null,
     toolName: typeof d.toolName === "string" && d.toolName !== "" ? d.toolName : "modelscope_draw_image"
   };
 }

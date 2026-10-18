@@ -191,6 +191,8 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
       clearInterval(timer);
       // 出图工具的缺席原因只对**本次挂载**有意义：清掉，下一个生命周期从干净的
       // 「未登记」开始（否则一次成功挂载后会残留上一轮的缺席原因）。
+      // 缺席原因 + 「本次是否注册上」一起清：下一个生命周期从干净的「未登记、
+      // 未注册」开始（否则一次成功挂载后会残留上一轮的缺席原因或注册位）。
       resetDrawToolNote();
       // 顺序承重：先 dispose（闸住后续 publish，不再注册进已撤下本插件的 Host），
       // 再 release（摘掉已注册的 provider 对）。

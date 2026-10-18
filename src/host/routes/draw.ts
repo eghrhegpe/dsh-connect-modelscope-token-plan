@@ -21,7 +21,7 @@
  */
 import { DRAW_PATH } from "./paths.ts";
 import { drawCandidates, resolveDrawModelChoice } from "../llm-models.ts";
-import { drawToolNote } from "../draw-tool-state.ts";
+import { drawToolMounted, drawToolNote } from "../draw-tool-state.ts";
 import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "../switch-precedence.ts";
 import { optional } from "../util.ts";
 import { writeJson, refuseMethod, withOrigin, readJsonBodyOr400, readJsonBody, respondError, redactedError, MAX_JSON_BODY_BYTES } from "./http.ts";
@@ -47,16 +47,29 @@ interface DrawRouteWiring {
 }
 
 /**
- * 读目录条目，读不到按空目录降级。
+ * 读目录条目。
  *
  * 与 provider 路由同一条纪律：GET 不能因为一次目录失败就把整个面板状态打掉——
  * 出图候选为空只影响「能不能挑模型」，不影响开关的显示。
+ *
+ * 但「空目录」和「目录读不到」必须分开（红线 3）：后者要能回答「首选模型还在
+ * 不在」时说「不知道」而不是「不在」。所以这里返回 `{ ok, entries }`，调用方
+ * 按 ok 决定是断言还是弃权。
+ *
  * @param {object} inference - inference client。
- * @returns {Promise<unknown[]>} 归一目录条目。
+ * @returns {Promise<{ok: boolean, entries: unknown[]}>} 目录读取结果与归一条目。
  */
-async function readEntries(inference: DrawRouteWiring["inference"]): Promise<unknown[]> {
-  const catalog = await inference.fetchModels().catch(() => ({ entries: [] }));
-  return Array.isArray(catalog?.entries) ? catalog.entries : [];
+async function readEntries(
+  inference: DrawRouteWiring["inference"]
+): Promise<{ ok: boolean; entries: unknown[] }> {
+  try {
+    const catalog = await inference.fetchModels();
+    return { ok: true, entries: Array.isArray(catalog?.entries) ? catalog.entries : [] };
+  } catch {
+    // 读不到 ≠ 空目录：`preferredInCatalog` 要据此置 null（不知道），而不是 false
+    // （不在）。候选集仍按空数组走，面板照常显示开关与已保存的首选。
+    return { ok: false, entries: [] };
+  }
 }
 
 /**
@@ -76,12 +89,12 @@ export function registerDrawRoute(ctx: any, wiring: DrawRouteWiring) {
   const snapshot = async (extra: Record<string, unknown> = {}) => {
     const panelSwitch = await optional(drawStore.enabled());
     const panelModelId = await optional(drawStore.modelId());
-    const entries = await readEntries(inference);
+    const catalog = await readEntries(inference);
     // 候选明细与「当前使用谁、为什么」都从 llm-models 的同一份判定派生（与快照
     // 聚合、工具里 pickDrawModel 同源），面板据此画出能力徽章与生效模型。
-    const candidates = drawCandidates(entries);
+    const candidates = drawCandidates(catalog.entries);
     const preferredModelId = resolveSwitchValue(panelModelId, settings.drawModelId === "" ? undefined : settings.drawModelId) ?? null;
-    const choice = resolveDrawModelChoice(entries, undefined, preferredModelId ?? undefined);
+    const choice = resolveDrawModelChoice(catalog.entries, undefined, preferredModelId ?? undefined);
     return {
       ok: true,
       enabled: resolveSwitchEnabled(panelSwitch, settings.drawEnabled),
@@ -103,9 +116,22 @@ export function registerDrawRoute(ctx: any, wiring: DrawRouteWiring) {
        *
        * 工具无法注销（peer 的 tools registry 没有 unregister），所以开关翻转只在
        * 下次 Host 启动时生效。面板据此显示一句说明——否则用户会以为开关坏了。
-       * 判据：开关为开且本次挂载尚未注册成功（或缺席原因未知）。
+       * 判据：开关为开且**本次挂载没注册上**。
+       *
+       * 注意判据不是「有缺席原因」：缺席原因非 null 表示注册尝试过且失败，而挂载
+       * 那一刻开关是关的（用户之后才翻开）时 absentReason 为 null、却同样没注册
+       * 上——后者才是最需要这句提示的场景。见 `draw-tool-state.ts` 文件头。
        */
-      mountPending: resolveSwitchEnabled(panelSwitch, settings.drawEnabled) === true && drawToolNote() !== null,
+      mountPending: resolveSwitchEnabled(panelSwitch, settings.drawEnabled) === true && drawToolMounted() !== true,
+      // 首选模型还在不在目录里。false = 目录读到了、它不在（下架/改名，但按「用户
+      // 点了谁就是谁」快照仍照显这个 id）；null = 没设首选或目录读不到，不敢断言
+      // （红线 3：读不到 ≠ 不在）。
+      preferredInCatalog:
+        preferredModelId === null
+          ? null
+          : catalog.ok
+            ? candidates.some((row) => row.id === preferredModelId)
+            : null,
       toolName: "modelscope_draw_image",
       ...extra
     };

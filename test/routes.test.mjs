@@ -10,6 +10,7 @@ import { buildSnapshotBody } from "../src/host/snapshot-aggregate.ts";
 import { name, resolveSettings } from "../src/host/host-config.ts";
 import { registerProbeRoute } from "../src/host/routes/probe.ts";
 import { CODE } from "../src/host/codes.ts";
+import { setDrawToolNote, setDrawToolMounted, resetDrawToolNote } from "../src/host/draw-tool-state.ts";
 import { SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH } from "../src/host/routes/paths.ts";
 
 process.env.DSH_HOME = mkdtempSync(join(tmpdir(), "ms-routes-"));
@@ -197,7 +198,12 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   assert.deepEqual(body.quota.daily, { usedLocal: 0 }, "quota.daily 只有本地次数：无 limit / remainingComputed");
   assert.equal(body.quota.countingNote, "local-counting");
   assert.deepEqual(body.events, []);
-  assert.equal(body.trend.buckets.length, 14, "趋势默认 14 天");
+  // 没有 usage.json（这台 Host 从未经本插件调用过）= 空趋势数组，**不是** 14 根零柱。
+  // 桶的形状来自 store 的三态（读不到 ≠ 0，红线 3）：文件不在 = 从未记录过 =
+  // 已知的零；文件在却读不出 = null（面板画「—」）。两种零在面板上必须分开。
+  assert.deepEqual(body.trend.buckets, [], "无本地记录 = 空趋势（不是 14 根零柱）");
+  assert.equal(body.trend.days, 14, "趋势默认 14 天");
+  assert.equal(body.trend.maxDays, 90, "保留窗口默认 90 天（显示被夹在它之内）");
   assert.equal(body.models.available, false, "上游断网时目录降级，不伪装成 0 个模型");
   assert.equal(body.models.error !== null, true);
   assert.equal(body.quotaError, null, "v0.1 无上游余额来源");
@@ -572,6 +578,51 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   );
 }
 
+// ── 趋势读不到：trend 抛错 → `buckets` 必须是 null，不是 [] ──
+//
+// 红线 3 在聚合层的落点。`trend.ok ? trend.value : []` 是本轮修掉的那半条：soft()
+// 失败时画成空数组，面板就会说「还没有本地调用记录」——对一份坏 usage.json 下事实
+// 断言。这里用会拒绝的桩造出该路径（挂载的真实 store 造不出「读的时候抛」），并
+// 顺手钉住三件事：null 透传、警告按来源标注、以及「store 自己说 null」与「抛错」
+// 两条路汇聚到同一个 wire 值。
+{
+  const base = {
+    settings: resolveSettings({}).settings,
+    tokenStore: { state: async () => ({ present: false, source: "none", valid: null, checkedAt: null, ephemeral: true }) },
+    inference: {
+      fetchModels: async () => ({ ids: [], entries: [] }),
+      fetchBalance: async () => { throw new Error("balance endpoint refused"); }
+    },
+    providerStore: { enabled: async () => null, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
+    drawStore: { enabled: async () => null, modelId: async () => null, versionNote: async () => null },
+    usagePrefsStore: { windowDays: async () => null, versionNote: async () => null },
+    publisher: { state: { enabledIds: [], llmAvailable: false, registered: false, error: null } },
+    logger: { warn: () => {} }
+  };
+  const common = {
+    daily: async () => ({ calls: 0 }),
+    perModelToday: async () => [],
+    events: async () => [],
+    anomaly: () => null
+  };
+
+  const threw = await buildSnapshotBody({ ...base, usageStore: { ...common, trend: async () => { throw new Error("usage.json unreadable"); } } });
+  assert.equal(threw.trend.buckets, null, "trend 抛错 → buckets 为 null（读不到 ≠ 0 条记录）");
+  assert.ok(
+    threw.shapeWarnings.some((w) => w.startsWith("trend source failed")),
+    "趋势失败必须进 shapeWarnings（否则面板只说「—」，没人知道是上游还是自己没调用过）"
+  );
+
+  // store 自己的第二态（文件在、读不出 → null）走的是另一条代码路径（trend.ok === true，
+  // value === null），两条路必须在 wire 上汇合成同一个值。
+  const storedNull = await buildSnapshotBody({ ...base, usageStore: { ...common, trend: async () => null } });
+  assert.equal(storedNull.trend.buckets, null, "store 返回 null（文件在、读不出）→ 原样透传 null");
+
+  // 对照：真实空数组不得被升级成 null（否则「确实一次都没有」这个可信日常值也会消失）。
+  const trulyEmpty = await buildSnapshotBody({ ...base, usageStore: { ...common, trend: async () => [] } });
+  assert.deepEqual(trulyEmpty.trend.buckets, [], "store 返回 []（读到了、确实没有）→ 原样透传空数组");
+}
+
 // ── provider 块聚合失败：**省略**整个块，不塞填满默认值的「降级块」 ──
 //
 // 旧实现失败时塞 `{ enabled:false, allowed:"all", roster:[], … }`。那个形状**看起来
@@ -642,6 +693,86 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   assert.equal(rows.get("a/A")?.available, true, "没有证据的模型可用");
   assert.equal(rows.get("b/B")?.available, false, "publisher 发布过的耗尽模型 → 面板不可用");
   assert.equal(rows.get("b/B")?.quotaExhausted, true, "且带 quotaExhausted 标记（客户端据此灰显 + 禁勾选）");
+}
+
+// ── 出图块：待重启 + 首选已不在目录 ──
+//
+// 两条都是「字段算出来了却用错了地方」：
+//   · mountPending 曾以「有缺席原因」为判据，而挂载那一刻开关是关的（用户之后才
+//     翻开）时压根没尝试注册、没有缺席原因——最常见的「刚打开开关」场景因此
+//     什么都不提示。真判据是「本次挂载没注册上」。
+//   · 首选模型下架后 resolveDrawModelChoice 仍照显它（用户点了谁就是谁），
+//     preferredInCatalog=false 把这件沉默的事说出来；目录读不到时必须置 null。
+{
+  const base = {
+    settings: resolveSettings({}).settings,
+    tokenStore: { state: async () => ({ present: true, source: "env", valid: null, checkedAt: null, ephemeral: true }) },
+    usageStore: {
+      daily: async () => ({ calls: 0 }), perModelToday: async () => [], trend: async () => [], events: async () => [], anomaly: () => null
+    },
+    providerStore: { enabled: async () => null, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
+    usagePrefsStore: { windowDays: async () => null, versionNote: async () => null },
+    publisher: { state: { enabledIds: [], llmAvailable: false, registered: false, error: null } },
+    logger: { warn: () => {} }
+  };
+  // 目录条目必须带任务标签：能力只认平台声明（`image-to-image`），没有标签的条目
+  // 会走名字启发落到 vision-input，根本进不了出图候选。
+  const entries = [{ id: "a/Image", tasks: ["image-to-image"] }, { id: "b/Image", tasks: ["image-to-image"] }];
+
+  // 开关开着、本次挂载没注册上（缺席原因也是 null：压根没尝试过）——正是要提示
+  // 重启的那一档。
+  setDrawToolMounted(false);
+  setDrawToolNote(null);
+  const pending = await buildSnapshotBody({
+    ...base,
+    inference: { fetchModels: async () => ({ ids: ["a/Image"], entries: [{ id: "a/Image" }] }), fetchBalance: async () => ({}) },
+    drawStore: { enabled: async () => true, modelId: async () => null, versionNote: async () => null }
+  });
+  assert.equal(pending.draw?.mountPending, true, "开关开着但本次没注册上 → 待重启（哪怕没有缺席原因）");
+  assert.equal(pending.draw?.absentReason, null);
+
+  // 注册成功 → 不再提示。旧判据在这一档答不对。
+  setDrawToolMounted(true);
+  const mounted = await buildSnapshotBody({
+    ...base,
+    inference: { fetchModels: async () => ({ ids: ["a/Image"], entries: [{ id: "a/Image" }] }), fetchBalance: async () => ({}) },
+    drawStore: { enabled: async () => true, modelId: async () => null, versionNote: async () => null }
+  });
+  assert.equal(mounted.draw?.mountPending, false, "已注册上 → 不该再提示重启");
+
+  // 首选在目录 / 不在目录 / 目录读不到：三态。
+  const inCatalog = await buildSnapshotBody({
+    ...base,
+    inference: { fetchModels: async () => ({ ids: entries.map((e) => e.id), entries }), fetchBalance: async () => ({}) },
+    drawStore: { enabled: async () => true, modelId: async () => "a/Image", versionNote: async () => null }
+  });
+  assert.equal(inCatalog.draw?.preferredInCatalog, true, "首选还在目录里 → true");
+
+  const gone = await buildSnapshotBody({
+    ...base,
+    inference: { fetchModels: async () => ({ ids: entries.map((e) => e.id), entries }), fetchBalance: async () => ({}) },
+    drawStore: { enabled: async () => true, modelId: async () => "Owner/Vanished", versionNote: async () => null }
+  });
+  assert.equal(gone.draw?.preferredModel, "Owner/Vanished", "用户点了谁就是谁，不校验目录在场");
+  assert.equal(gone.draw?.effectiveModel, "Owner/Vanished", "因此生效模型仍是这个已消失的 id");
+  assert.equal(gone.draw?.preferredInCatalog, false, "目录读到了、它不在 → false（面板据此提示重选）");
+
+  const unreadable = await buildSnapshotBody({
+    ...base,
+    inference: { fetchModels: async () => { throw new Error("catalog refused"); }, fetchBalance: async () => ({}) },
+    drawStore: { enabled: async () => true, modelId: async () => "Owner/Vanished", versionNote: async () => null }
+  });
+  assert.equal(unreadable.draw?.preferredInCatalog, null, "目录读不到 → null（不知道），不是 false（红线 3）");
+
+  // 没设首选 → null，不是 false。
+  const auto = await buildSnapshotBody({
+    ...base,
+    inference: { fetchModels: async () => ({ ids: ["a/Image"], entries: [{ id: "a/Image" }] }), fetchBalance: async () => ({}) },
+    drawStore: { enabled: async () => true, modelId: async () => null, versionNote: async () => null }
+  });
+  assert.equal(auto.draw?.preferredInCatalog, null, "没设首选 → null");
+
+  resetDrawToolNote();
 }
 
 // ── 同一条语义，用**真实挂载的插件**再钉一次 ──

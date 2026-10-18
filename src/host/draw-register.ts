@@ -30,7 +30,7 @@
  * @module dsh-connect-modelscope-token-plan/draw-register
  */
 import { defineDrawTool } from "./draw-runtime.ts";
-import { setDrawToolNote } from "./draw-tool-state.ts";
+import { setDrawToolNote, setDrawToolMounted } from "./draw-tool-state.ts";
 import { resolveSwitchEnabled, resolveSwitchValue } from "./switch-precedence.ts";
 import { errMsg, redactSecrets } from "./util.ts";
 import { name } from "./host-config.ts";
@@ -78,6 +78,10 @@ export async function registerDrawTool(
   // 每次尝试都重算缺席原因：一个迟到的 tools 服务最终注册时，必须**清掉**面板上
   // 那句过期的「缺席」，而不是让它挂着。
   setDrawToolNote(null);
+  // 「已注册」这一位同样重算：挂载那一刻开关若是关的，下面会直接 return，此时
+  // 既没有缺席原因（没尝试过）也没注册上——用户之后翻开开关就得等下次启动，面板
+  // 只能靠这一位认出来（见 `draw-tool-state.ts` 文件头）。
+  setDrawToolMounted(false);
 
   try {
     if (configError !== null) return;
@@ -151,6 +155,9 @@ export async function registerDrawTool(
         isDisposed
       })
     );
+    // 走到这里 = registry 收下了。置位必须放在 register 返回之后：抛了就是拒收，
+    // 由下面的 catch 处理，不能谎报成功。
+    setDrawToolMounted(true);
   } catch (error) {
     // registry 拒收与上面两种同性质：工具缺席、面板完好，且是 Host 问题不是配置问题。
     setDrawToolNote("registry-refused");

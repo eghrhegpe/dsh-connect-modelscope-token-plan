@@ -141,8 +141,15 @@ export const zh = {
   "draw.absent.peerLoad": "开关已开，但 tools 模块加载失败，出图工具缺席（Host 问题，非配置）。",
   "draw.absent.registry": "开关已开，但工具注册被 Host 拒绝，出图工具缺席（Host 问题，非配置）。",
   "draw.absent.unknown": "开关已开，但出图工具未挂载，原因未知。",
+  // 首选模型从目录消失：`resolveDrawModelChoice` 按「用户点了谁就是谁」不校验目录
+  // 在场，所以快照仍照显「当前使用：xxx」，而实际出图会失败。这句把真相说出来。
+  "draw.preferredGone": "已保存的默认模型 {model} 已不在当前目录（下架或改名）——出图会用它失败，请在下面重选。",
 
   "trend.none": "还没有本地调用记录。",
+  // 与 trend.none 是两种答案：none = 读到了、这些天确实一次都没有（真实零）；
+  // unreadable = 本地计数文件读不出来（读不到 ≠ 0，红线 3）。画零柱等于告诉操作者
+  // 「最近很闲」，而真相是「不知道」。
+  "trend.unreadable": "本地计数读不到，趋势图无法显示（不是 0 次）。",
   "trend.legend": "柱长相对区间内最大值，仅本地口径。",
   "trend.metric": "趋势指标",
   "trend.metricCalls": "调用次数",
@@ -317,8 +324,15 @@ export const en: typeof zh = {
   "draw.absent.peerLoad": "The switch is on, but the tools module failed to load; the draw tool is absent (a Host fault, not config).",
   "draw.absent.registry": "The switch is on, but the Host refused the tool registration; the draw tool is absent (a Host fault, not config).",
   "draw.absent.unknown": "The switch is on, but the draw tool is not mounted; the reason is unknown.",
+  // The saved preferred model vanished from the catalogue: resolveDrawModelChoice
+  // honours "whoever the user picked" without checking catalogue presence, so the
+  // snapshot still shows it as current while drawing with it fails. Say so.
+  "draw.preferredGone": "The saved default model {model} is no longer in the catalogue (delisted or renamed) — drawing with it will fail. Pick another one below.",
 
   "trend.none": "No local call records yet.",
+  // Two different answers: none = read OK, genuinely zero calls; unreadable = the
+  // local count file could not be read (unreadable is not zero — red line 3).
+  "trend.unreadable": "Local counts could not be read; the trend chart is unavailable (this is not zero calls).",
   "trend.legend": "Bar lengths are relative to the maximum in the range (local scope only).",
   "trend.metric": "Trend metric",
   "trend.metricCalls": "Calls",

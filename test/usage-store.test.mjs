@@ -96,6 +96,30 @@ assert.equal((await fresh.daily()).calls, 0, "文件不存在 = 真实的 0（�
 assert.equal((await fresh.daily()).tokens, 0);
 assert.equal(fresh.anomaly(), null, "真实零不该带任何痕迹");
 
+// §6c trend() 与 daily() 同一条红线（读不到 ≠ 0），三态逐字对齐。
+//
+// 事故（2026-10-18 评审实测）：daily() 早就有三态，trend() 只做了一半——
+// `payload === null` 时照样逐日 push `{calls: 0}`。于是**同一份坏文件**在面板上
+// 给出两种答案：今日计数画「—」，趋势图画 14 根结实的零柱。shapeWarnings 里那条
+// anomaly 会出现，但它只说「usage.json 有问题」，不说「你看到的趋势线是假的」。
+//
+// 这里钉死三种答案：缺桶 = 真实零；载荷读不出 + 文件在 = null；文件不在 = 空数组
+// （从未记录过，与 daily() 的 0 对应）。
+{
+  writeFileSync(file, "{not json", "utf8");
+  const corrupted = makeStore();
+  assert.equal(await corrupted.trend(3), null, "损坏：trend 给 null，不是三根零柱");
+  assert.equal((await corrupted.daily()).calls, null, "同一次读，daily 与 trend 答案一致");
+
+  writeFileSync(file, JSON.stringify({ version: 2, days: { "2099-01-01": { calls: 9, tokens: 9 } } }), "utf8");
+  const future2 = makeStore();
+  assert.equal(await future2.trend(3), null, "未知版本：trend 读作「读不到」，不是空");
+
+  rmSync(file, { force: true });
+  const fresh2 = makeStore();
+  assert.deepEqual(await fresh2.trend(3), [], "文件不存在 = 从未记录过 = 空趋势（真实零）");
+}
+
 // §7 版本只读闸：磁盘 version 2 → 读作空且写入被拒绝（不 clobber）。
 mkdirSync(dir, { recursive: true });
 writeFileSync(file, JSON.stringify({ version: 2, days: { "2099-01-01": { calls: 9, tokens: 9 } } }), "utf8");

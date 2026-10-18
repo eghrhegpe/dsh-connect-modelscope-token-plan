@@ -783,6 +783,45 @@ assert.deepEqual(jsonOf(lastPost(HOST.DRAW_PATH)), { enabled: true }, "出图开
 assert.equal(toggleSwitches()[1].closest("label").textContent.trim(), tt("draw.on"), "回显 enabled=true → 标签「已开启」");
 assert.ok(bodyText().includes(tt("draw.restartHint")), "enabled=true 的出图卡把「下次 Host 启动才挂载」说出来");
 
+// `draw.restartHint` 与 `draw.preferredGone` 都是「条件性的一句提示」：条件对就
+// 出现、不对就消失，都不留占位节点。客户端那半的判据修正是这一节存在的理由——
+// restartHint 曾只看 enabled（已经挂好也在撒同一句谎），Host 那半曾误用「有缺席
+// 原因」当判据（挂载那一刻开关是关的、用户之后才翻开的情况没有缺席原因，恰好漏掉）。
+// 用「据」按钮换快照：轮询周期是 30s，等它自己转过来会把套件拖慢到分钟级。
+const cases = [
+  { draw: { mountPending: true }, key: "draw.restartHint", want: true },
+  { draw: { mountPending: false }, key: "draw.restartHint", want: false },
+  {
+    draw: {
+      mountPending: false,
+      preferredModel: "Owner/Vanished-Model",
+      preferredInCatalog: false
+    },
+    key: "draw.preferredGone",
+    want: true,
+    vars: { model: "Owner/Vanished-Model" }
+  },
+  // 目录读不到 → null：不敢断言「不在」（红线 3）。
+  {
+    draw: { preferredModel: "Owner/Vanished-Model", preferredInCatalog: null },
+    key: "draw.preferredGone",
+    want: false,
+    vars: { model: "Owner/Vanished-Model" }
+  }
+];
+for (const testCase of cases) {
+  snapshotResponses = [{ body: snapshotWith({ draw: { ...SNAPSHOT.draw, enabled: true, ...testCase.draw } }) }];
+  byText("button", tt("panel.refresh")).click();
+  await settle();
+  const line = fillTemplate(tt(testCase.key), testCase.vars ?? {});
+  assert.ok(
+    bodyText().includes(line) === testCase.want,
+    `mountPending=${JSON.stringify(testCase.draw.mountPending ?? null)} / preferredInCatalog=${JSON.stringify(testCase.draw.preferredInCatalog ?? null)} -> ${testCase.key} = ${testCase.want}`
+  );
+}
+snapshotResponses = [{ body: snapshotWith({ draw: SNAPSHOT.draw }) }];
+await settle();
+
 // ══════════════════════════════════════════════════════════════════════════
 // §8 哨兵独占态：全部隐藏 → 发纯哨兵；勾一个真实模型即退出哨兵再保存
 // ══════════════════════════════════════════════════════════════════════════
@@ -973,8 +1012,49 @@ const driftPrefix = tt("panel.shapeDrift").replace("{detail}", "");
 assert.ok(bodyText().includes(driftPrefix), "缺键进了面板上的「结构可能有变」那一行");
 assert.ok(bodyText().includes("trend"), "缺的键名本身也上屏（运维能据此对上 Host 侧日志）");
 assert.ok(byText("button", tt("section.balance")), "缺 trend 不影响别的区块：余额卡头部仍在");
-assert.ok(bodyText().includes(tt("trend.none")), "缺的块被补成空形状：趋势画成「无数据」而不是崩");
+// 缺键 → 补出来的 `buckets` 是 null（snapshot.ts 的 emptyBlock），而 null 的语义是
+// 红线 3 的「读不到」——**不是**「还没有本地调用记录」。这条断言曾经写的是
+// `trend.none` 并且一直绿，原因不是它对，而是 panel-page 在外面 `?? []` 把 null
+// 抹平了、TrendBars 的 null 分支根本走不到（死分支）。补形状与面板兜底同步改成
+// null 后，这里才能真的分辨两者。
+assert.ok(bodyText().includes(tt("trend.unreadable")), "缺的块补成空形状后，趋势说「读不到」而不是「没有记录」");
+assert.ok(!bodyText().includes(tt("trend.none")), "缺键不得被画成「确实一次都没有」（那是事实断言）");
 assert.ok(bodyText().includes("143"), "缺 trend 不影响余额块照常显示");
+renderer.unmount();
+await settle();
+
+// ── §17b 「读不到」要一路走到屏幕上（红线 3 的端到端）──
+//
+// §17 钉的是缺键（契约漂移），这里钉的是 Host 明确给了 `null`：usage.json 损坏 /
+// 未知版本时 `usage-store.trend()` 返回 null，聚合层 `buckets: trend.ok ? ... : null`
+// 原样透上来。三处修复（store 三态 / 聚合层不兜底 / 组件画「—」）当中任何一处
+// 再被 `?? []` 抹一次，屏幕上就会重新出现「还没有本地调用记录」这句假话。
+const unreadable = {
+  ...SNAPSHOT,
+  // 同一份坏 usage.json 会同时毒化今日计数与趋势（Host 侧两个读的是同一个文件）：
+  // 两边必须给出同一个答案，这正是本轮要修的那个「一份坏数据两种答案」。
+  quota: { ...SNAPSHOT.quota, daily: { ...SNAPSHOT.quota.daily, usedLocal: null } },
+  trend: { ...SNAPSHOT.trend, buckets: null }
+};
+snapshotResponses = [{ body: unreadable }];
+renderer.mount(PanelPage, { tt, localeSubscribe: null });
+await settle();
+assert.ok(bodyText().includes(tt("trend.unreadable")), "Host 给 buckets:null → 面板说读不到");
+assert.ok(!bodyText().includes(tt("trend.none")), "Host 给 buckets:null 时不得退化成「没有记录」");
+assert.ok(bodyText().includes("—"), "同一份坏数据在今日计数与趋势上给出同一个答案（都是「—」）");
+renderer.unmount();
+await settle();
+
+// ── §17c 对照组：真实空数组仍然说「还没有本地调用记录」──
+//
+// 上一条防的是「把读不到画成没有」，这一条防的是矫枉过正——把「确实没有」也画成
+// 「读不到」。两者必须分得开，否则红线 3 会以另一种方向被违反。
+const trulyEmpty = { ...SNAPSHOT, trend: { ...SNAPSHOT.trend, buckets: [] } };
+snapshotResponses = [{ body: trulyEmpty }];
+renderer.mount(PanelPage, { tt, localeSubscribe: null });
+await settle();
+assert.ok(bodyText().includes(tt("trend.none")), "Host 给 buckets:[] → 「还没有本地调用记录」（可信日常值）");
+assert.ok(!bodyText().includes(tt("trend.unreadable")), "真实空数组不得被画成「读不到」");
 renderer.unmount();
 await settle();
 

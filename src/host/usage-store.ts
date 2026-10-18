@@ -48,7 +48,7 @@ import {
 } from "./state-store.ts";
 import { pluginError, errMsg, redactSecrets } from "./util.ts";
 import { CODE } from "./codes.ts";
-import type { QuotaEvent } from "../shared/wire.ts";
+import type { QuotaEvent, TrendBucket } from "../shared/wire.ts";
 
 /** 本地日期键（ quota 按天重置，以 Host 本地时区为准）。 */
 export function localDateKey(now: Date): string {
@@ -377,16 +377,43 @@ export function createFileUsageStore({ name, profile = null, retentionDays = 90,
       return out;
     },
 
-    /** 最近 N 天趋势（含今天；缺桶 = 该日 0 次，真实零不是数据丢失）。 */
-    async trend(days = retentionDays) {
+    /**
+     * 最近 N 天趋势（含今天）。
+     *
+     * 三种答案，与 {@link daily} 同一条红线（wire.ts：读不到 ≠ 0）：
+     *   - `TrendBucket[]` —— 逐日桶，缺桶 = 该日 0 次（**真实零**：那天确实没有
+     *     记录，是已知答案）；
+     *   - `null` —— **读不到**：载荷读不出来（损坏 / 形状不对 / 更新构建写的
+     *     版本 / 存在却不可读）。面板渲染「—」，不是一片零柱。
+     *
+     * 判据与 daily() 逐字一致：**文件不存在**才是真实的零（这台 Host 从未经本
+     * 插件调用过），**文件在却读成空**是信息丢失。缺桶补 0 与整份读空补 0 是两件
+     * 完全不同的事，前者是数据，后者是伪造。
+     *
+     * 这是 2026-10-18 补上的一块拼图：daily() 早在 2026-10-16 就有了三态，
+     * trend() 一直只做了一半——`payload === null` 时照样逐日 push `{calls: 0}`，
+     * 于是「usage.json 被写坏」在今日计数上画「—」、在趋势图上却画 14 根结实的
+     * 零柱，同一份坏数据在两个区块给出两种答案。shapeWarnings 里那条 anomaly
+     * 确实会出现，但它说「usage.json 有问题」，不说「你看到的这条趋势线是假的」。
+     *
+     * @returns {TrendBucket[] | null}
+     */
+    async trend(days = retentionDays): Promise<TrendBucket[] | null> {
       const payload = await cache.read();
-      const out: Array<{ dateKey: string; calls: number; tokens: number }> = [];
+      if (payload === null) {
+        // 与 daily() 同一发 stat：只发生在「载荷读不出来」的异常路径上（正常循环
+        // 由读缓存命中短路，零额外 IO）。文件不在 = 从未记录过 = 真实零；
+        // 文件在 = 我们失去了那些信息 = 不知道。
+        const stored = await pathExists(file);
+        return stored ? null : [];
+      }
+      const out: TrendBucket[] = [];
       const cursor = now();
       for (let offset = Number(days) - 1; offset >= 0; offset -= 1) {
         const date = new Date(cursor);
         date.setDate(date.getDate() - offset);
         const key = localDateKey(date);
-        const bucket = payload?.days[key];
+        const bucket = payload.days[key];
         out.push({ dateKey: key, calls: bucket?.calls ?? 0, tokens: bucket?.tokens ?? 0 });
       }
       return out;
@@ -439,8 +466,11 @@ export function createFileUsageStore({ name, profile = null, retentionDays = 90,
  *
  * 总量语义：`events` 是环形缓冲（`maxEvents` 截断、Newest-first），所以「窗口
  * 内没有证据」可能是**真没有**、也可能是**证据被截掉了**——后者只发生在
- * 极端刷屏（50 条以内）时，方向同样是保守收敛（灰显集合收缩）。时间戳解析
- * 不出的事件跳过，不猜。
+ * 极端刷屏（50 条以内）时。**方向是假阴性，不是保守**：证据被挤掉 → 集合收缩
+ * → 一个仍耗尽的模型可能提前回灰、被重新放进选择器。以前这里写的是「保守收敛」，
+ * 把危险方向说成了安全方向（下一轮会话会据此放松，所以改掉）。它之所以还能接受，
+ * 是因为失败面很小且自限：窗口最长 1440min、事件天然会滑出，`reconcile` 每轮
+ * 现算，下一个 quota 事件会立刻把它重新灰掉。时间戳解析不出的事件跳过，不猜。
  *
  * @param {readonly QuotaEvent[]|null|undefined} events - 事件流（任意顺序）。
  * @param {Date|number} [now] - 时钟源（测试注入）。

@@ -245,7 +245,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.absent.peerLoad": "开关已开，但 tools 模块加载失败，出图工具缺席（Host 问题，非配置）。",
 			"draw.absent.registry": "开关已开，但工具注册被 Host 拒绝，出图工具缺席（Host 问题，非配置）。",
 			"draw.absent.unknown": "开关已开，但出图工具未挂载，原因未知。",
+			"draw.preferredGone": "已保存的默认模型 {model} 已不在当前目录（下架或改名）——出图会用它失败，请在下面重选。",
 			"trend.none": "还没有本地调用记录。",
+			"trend.unreadable": "本地计数读不到，趋势图无法显示（不是 0 次）。",
 			"trend.legend": "柱长相对区间内最大值，仅本地口径。",
 			"trend.metric": "趋势指标",
 			"trend.metricCalls": "调用次数",
@@ -394,7 +396,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.absent.peerLoad": "The switch is on, but the tools module failed to load; the draw tool is absent (a Host fault, not config).",
 			"draw.absent.registry": "The switch is on, but the Host refused the tool registration; the draw tool is absent (a Host fault, not config).",
 			"draw.absent.unknown": "The switch is on, but the draw tool is not mounted; the reason is unknown.",
+			"draw.preferredGone": "The saved default model {model} is no longer in the catalogue (delisted or renamed) — drawing with it will fail. Pick another one below.",
 			"trend.none": "No local call records yet.",
+			"trend.unreadable": "Local counts could not be read; the trend chart is unavailable (this is not zero calls).",
 			"trend.legend": "Bar lengths are relative to the maximum in the range (local scope only).",
 			"trend.metric": "Trend metric",
 			"trend.metricCalls": "Calls",
@@ -1088,7 +1092,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			case "events": return [];
 			case "trend": return {
 				days: 0,
-				buckets: []
+				windowDays: null,
+				maxDays: 0,
+				buckets: null
 			};
 			case "models": return {
 				available: false,
@@ -1234,6 +1240,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			..."effectiveSource" in d ? { effectiveSource } : {},
 			absentReason,
 			mountPending: d.mountPending === true,
+			preferredInCatalog: d.preferredInCatalog === true ? true : d.preferredInCatalog === false ? false : null,
 			toolName: typeof d.toolName === "string" && d.toolName !== "" ? d.toolName : "modelscope_draw_image"
 		};
 	}
@@ -1293,6 +1300,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			effectiveSource: null,
 			absentReason: null,
 			mountPending: false,
+			preferredInCatalog: null,
 			toolName: "modelscope_draw_image"
 		});
 		GUIDANCE_BY_CODE = Object.freeze({
@@ -1603,6 +1611,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	*/
 	function TrendBars({ buckets, tt }) {
 		const [metric, setMetric] = useState("calls");
+		if (buckets === null) return h("div", { style: S.trendLegend }, tt("trend.unreadable"));
 		if (!Array.isArray(buckets) || buckets.length === 0) return h("div", { style: S.trendLegend }, tt("trend.none"));
 		const rows = buckets.map((bucket) => ({
 			dateKey: bucket.dateKey,
@@ -2171,7 +2180,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			},
 			role: "status"
 		}, tt("draw.notMounted"));
-		const restartHint = enabled ? h("div", { style: {
+		const restartHint = enabled && status.mountPending === true ? h("div", { style: {
 			...S.formNote,
 			color: "var(--dsw-alias-state-warn-primary)"
 		} }, tt("draw.restartHint")) : null;
@@ -2179,6 +2188,13 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			...S.formNote,
 			color: "var(--dsw-alias-state-warn-primary)"
 		} }, tt("draw.needsKey")) : null;
+		const preferredGoneHint = status.preferredModel !== null && status.preferredInCatalog === false ? h("div", {
+			style: {
+				...S.formNote,
+				color: "var(--dsw-alias-state-warn-primary)"
+			},
+			role: "status"
+		}, format(tt("draw.preferredGone"), { model: status.preferredModel })) : null;
 		const autoDescription = !hasEffectiveKey || status.preferredModel !== null ? null : effectiveModel === null || effectiveModel === "" ? h("div", { style: {
 			...S.muted,
 			fontSize: 11,
@@ -2296,7 +2312,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, tt("draw.reset"))), error !== null ? h("div", {
 			style: S.formError,
 			role: "alert"
-		}, error) : null, restartHint, tokenHint);
+		}, error) : null, restartHint, tokenHint, preferredGoneHint);
 	}
 	var MAX_TICKS, TREND_WINDOW_TIERS, EVENT_KIND_KEY, DRAW_ABSENT_KEY;
 	var init_cards = __esmMin((() => {
@@ -2759,7 +2775,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				onChange: (windowDays) => void saveTrendWindow(windowDays),
 				tt
 			}), h(TrendBars, {
-				buckets: snap.trend?.buckets ?? [],
+				buckets: snap.trend?.buckets ?? null,
 				tt
 			})), h(SectionCard, {
 				title: tt("section.events"),

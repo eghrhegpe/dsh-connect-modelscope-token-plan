@@ -201,12 +201,30 @@ export interface DrawStatus {
    */
   absentReason: "no-tools-service" | "peer-load-failed" | "registry-refused" | null;
   /**
-   * 开关已开，但本次挂载**尚未**把工具注册上（或缺席）。
+   * 开关已开，但本次挂载**没有**把工具注册上。
    *
-   * 与 `absentReason` 的区别：这个说「本进程里还看不到工具」，是翻转开关后到下次
-   * Host 启动之间应有的状态——不是故障。面板据此显示「重启后生效」。
+   * 与 `absentReason` 的区别（两者互补，不要互相代替）：
+   * - `absentReason !== null`：注册尝试过且失败（三种缺席原因之一）；
+   * - `absentReason === null && mountPending === true`：挂载那一刻开关是关的，
+   *   压根没走到注册（或还没走完），用户之后翻开开关。这是翻转开关到下次 Host
+   *   启动之间**最常见**的状态，不是故障，但必须提示重启——否则用户以为开关坏了。
+   *
+   * 曾有实现用 `absentReason !== null` 充当本字段的判据，恰好漏掉了第二种场景。
    */
   mountPending: boolean;
+  /**
+   * 保存的首选模型**还在不在**当前目录里。
+   *
+   * - `false`：目录读到了，它不在（下架/改名）。此时 `effectiveModel` 仍等于这个
+   *   消失的 id——`resolveDrawModelChoice` 按「用户点了谁就是谁」不校验目录在场，
+   *   快照照显「当前使用：xxx」，而实际出图会失败。面板必须把这句说出来。
+   * - `true`：在目录里。
+   * - `null`：**没有首选**（走自动选择），或**目录读不到**——不敢断言（红线 3：
+   *   读不到 ≠ 不在）。
+   *
+   * 可选：旧 Host 不给这个字段，面板退化为不提示（不假装知道）。
+   */
+  preferredInCatalog?: boolean | null;
   /** agent 侧的工具名（就是用户能在对话里看到的那个）。 */
   toolName: string;
 }
@@ -267,7 +285,17 @@ export interface Snapshot {
     windowDays: number | null;
     /** 可选窗口的上界 = 保留窗口（画得比它多会把已剪的日子画成 0）。 */
     maxDays: number;
-    buckets: TrendBucket[];
+    /**
+     * 逐日桶（含今天，长度 = `days`）。
+     *
+     * `null` = **没读到**（本地计数文件读失败/损坏被拒），`[]` = 读到了但这些天
+     * 一次都没有。两者必须分开，理由与 {@link DailyUsage.usedLocal} 逐字相同：
+     * 0 是可信的日常值，把「读不到」画成零柱会让操作者以为最近两周很闲，而真相是
+     * 他不知道。面板对 null 渲染「—」，与今日计数同一种处理。
+     *
+     * 桶内缺某一天 = 该日 0 次（真实零）：那是数据说了话，不是数据丢失。
+     */
+    buckets: TrendBucket[] | null;
   };
   models: { available: boolean; count: number; sample: string[]; error: string | null };
   /**
