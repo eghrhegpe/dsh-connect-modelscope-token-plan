@@ -1,36 +1,20 @@
 # Submission draft for awesome-dsh-plugin.
 #
 # Copy this file to `data/plugins/eghrhegpe__dsh-connect-modelscope-token-plan.yml` in a fork
-# of awesome-dsh-plugin/awesome-dsh-plugin and open a PR that adds only it. Do not edit that
-# repository's READMEs — both are generated from data/plugins/. Do not add an `npm:` field
-# (market CI rejects it); do not add screenshots here (the market reads this repo's root
-# screenshots.json instead).
+# of awesome-dsh-plugin/awesome-dsh-plugin and open a PR that touches only it.
+# Do not edit that repository's READMEs (they are generated), do not add an `npm:` field,
+# do not put screenshots here (the market reads this repo's `screenshots.json`).
+# Rules live in `./contributing.md` (upstream copy) — do not restate them anywhere.
 #
-# The description is read as a claim and checked against the code line by line, so every noun
-# below is one the source actually has:
-#   "language and image-generation models … default-off switches" —
-#     src/host/provider-publish.ts and src/host/llm-adapter.ts publish the provider;
-#     src/host/draw-register.ts registers the agent tool modelscope_draw_image
-#     (DRAW_TOOL_NAME, src/host/draw-runtime.ts:53); the switches default to off in
-#     src/host/host-config.ts and cordis.patch.yml.
-#   "image recognition and context windows filled in automatically" —
-#     src/host/llm-models.ts fills vision/contextWindow from the platform's own roster, with
-#     src/host/context-catalog.ts as the curated fallback (rendered at src/client/cards.ts:666/677).
-#   "free Magicube balance" — src/host/inference-client.ts:220 fetchBalance(), hitting
-#     GET {siteBase}/openapi/v1/magicubes/balance and reading {total_balance, available_balance,
-#     frozen_amount}. This is the only figure on the card that comes from ModelScope;
-#     src/host/usage-store.ts:6 says so explicitly.
-#   "links each model to its ModelScope page" — MODELSCOPE_MODEL_URL_BASE in
-#     src/client/const.ts:75 builds https://www.modelscope.cn/models/<model id>.
-#   "local call counts, a daily trend and rate-limit events" — src/host/usage-observer.ts:9 is
-#     the only producer of the local counters (it hooks DSH's model-call lifecycle, so
-#     direct-to-ModelScope clients do not show up); src/client/cards.ts:91 LocalDailyCard,
-#     cards.ts:133 TrendBars, cards.ts:153 EventsList; kind classified in src/host/codes.ts:76.
-#   "needs only an API key, with no account sign-in" — src/host/ms-auth.ts states there is no
-#     login flow: the token is a static key the user generates in the ModelScope console.
+# `description.zh` is the text of record; `description.en` is its sentence-by-sentence
+# counterpart. Re-check a claim against these modules, not against this comment:
+#   provider registration / vision  src/host/provider-publish.ts, llm-models.ts
+#   draw tool                       src/host/draw-register.ts, draw-runtime.ts
+#   Magicube balance                src/host/inference-client.ts
+#   local counts / trend / events   src/host/usage-observer.ts, src/client/cards.ts
 url: https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan
 name: eghrhegpe/dsh-connect-modelscope-token-plan
 category: model
 description:
-  en: 'Bring the ModelScope language and image-generation models into DSH as default-off switches, with image recognition and context windows filled in automatically. The card also shows the free Magicube balance, links each model to its ModelScope page, and records local call counts, a daily trend and rate-limit events. All of it needs only an API key, with no account sign-in.'
+  en: 'One-tap connect ModelScope language and image-generation models into DSH, with image recognition and context window filled in automatically (off by default). You can also see the free Magicube balance, jump to a model''s info page, and record local call counts, trends and rate-limit events. All of it needs only an API key, with no account sign-in.'
   zh: '一键接入魔搭社区的语言、生图模型到 DSH ，自动填入图片识别与上下文窗口（默认关）；还可查看免费魔粒余额、跳转到模型信息页，记录本地调用计数、趋势、限流事件。上述功能仅需填入 API key ，不需要登陆账号。'
