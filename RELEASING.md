@@ -240,28 +240,12 @@ gh release create vX.Y.Z \
 
 ### 7. （可选，与发版解耦）收录到插件市场
 
-向 `awesome-dsh-plugin/awesome-dsh-plugin` 提 PR，增加且仅增加一个文件
-`data/plugins/eghrhegpe__dsh-connect-modelscope-token-plan.yml`。投稿指南（唯一权威，改规则以
-它为准）：<https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/contributing.md>
+规则只认上游原文，本仓副本在 `awesome-dsh-plugin-submission/contributing.md`——**别在本文件转述规则**（本节此前那张「硬门槛」表就是转述，已经漂移过）。
 
-**硬门槛**（CI 自动查 + 维护者人工读码）：
+本仓只有三件事实：
 
-| 项 | 说明 |
-|---|---|
-| `dsh.bundle` 必须在 `package.json` 声明 | 只声明 `dsh.client` **不可安装**，是最常见的被拒原因 |
-| GitHub 仓库打 `dsh-plugin` topic | — |
-| 仓库创建满 1 天 | CI 按 `created_at` 卡 |
-| 真实可用代码、非占位 | 维护者会读源码 |
-| 一个 PR 最多 3 条 | 超过 CI 直接拒 |
-| `description.en` 必填、禁营销词 | 维护者**逐句对照源码核验**，夸大是唯一的打回理由 |
-| 分类从有效列表里选 | 选错维护者会自己改，不打回 |
-
-**截图不是 yml 字段**，而是放在本仓根目录的 `screenshots.json`（1–8 张，相对路径）。
-不声明时市场回退去抓 README 里的图——而 README 里**有**图（见
-[README「面板长什么样」](README.md)），两条路都通。`test/release.test.mjs` 守住清单与资产的
-一致性。
-
-**本仓分类建议 `model`**（语言模型 + 生图模型的接入；投稿 yml 的 `category` 取此值）。
+- 条目文件 `awesome-dsh-plugin-submission/eghrhegpe__dsh-connect-modelscope-token-plan.yml`，提 PR 时原样复制到对方仓库的 `data/plugins/` 下。不要在这里再维护第二份 yaml。
+- 截图声明在仓库根 `screenshots.json`；清单与资产由 `test/release.test.mjs` 绑在一起（改名必须同步清单）。
 
 ## 常见问题
 
