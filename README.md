@@ -1,70 +1,62 @@
 # dsh-connect-modelscope-token-plan
 
-把魔搭社区（modelscope.cn）**API-Inference 免费额度**的本地用量面板接入 DeepSeek Harness 的 Plugins 页（插件卡内联，三个 tab：额度 / 模型 / 接入），并可选把魔搭注册成 **DSH 的 LLM provider**（id `modelscope-token-plan`，直连 `apiBase`，OpenAI 兼容）——注册后魔搭模型进入 DSH 模型选择器，可直接对话调用。见 [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md)。
+把魔搭社区（modelscope.cn）**API-Inference 免费额度**的面板接进 DeepSeek Harness 的 **Plugins 页**（插件卡内联，三个 tab：额度 / 模型 / 接入），并可选把魔搭模型注册成 **DSH 的 LLM provider**（id `modelscope-token-plan`，OpenAI 兼容）——注册后魔搭模型进 DSH 模型选择器，可直接对话调用；还能开**出图工具**做文生图 / 图生图。
 
-姊妹插件：`dsh-connect-sensenova-token-plan`、`dsh-connect-agnes-token-plan`（同族结构，受控复制）。
+姊妹插件：`dsh-connect-sensenova-token-plan`、`dsh-connect-agnes-token-plan`（同族结构）。
 
-**状态：M4 已落地（provider 注册 + 面板「接入为 DSH 模型」），离线测试与 typecheck/build 全绿。**
+> **三条先知道（省得装完才发现）**
+>
+> 1. **只要一枚 API Key，不要登录**：魔搭访问令牌（形如 `ms-…`，在魔搭「个人中心 > 访问令牌」生成），无 OAuth、无密码、无刷新。`MODELSCOPE_API_KEY` 环境变量只在 DSH 启动时读一次、且优先级高于面板保存值——所以**最省事是直接在面板「接入」tab 保存令牌**（立即生效，不依赖重启）。
+> 2. **面板头条是官方魔粒余额（真实值）**；本地计数只统计**经本插件的调用**，且**按 profile（客户端）分段**——桌面端与 Web 端各记各的账、互不可见（`npm run doctor` 并排列出各 profile）。它不是跨端总量。
+> 3. **接入 provider 与出图工具都默认关**：不打开时插件就是个额度看板；打开任一项失败，面板照常用、只是该模块缺席。
 
 ## 面板长什么样
 
 三个 tab：**额度 / 模型 / 接入**。
 
-**「额度」tab**——头条是官方魔粒余额（真实值），下面接本地调用分布与趋势图：
+**「额度」tab**——头条是官方魔粒余额（真实值），下面接本地调用分布与趋势图（竖向柱状，可切**显示天数**：默认 / 7 / 14 / 30 / 90）：
 
 ![「额度」tab：魔粒余额与本地调用](assets/tab-account-and-usage.png)
 
-趋势图是**竖向柱状图**（每根柱顶标出当天次数、0 次不标；轴约 7 个日期刻度且不带年份），区块内可切**显示天数**（默认 / 7 / 14 / 30 / 90）。这个选择器只决定「画多少天」，与决定「能回看多久」的**保留窗口**（`retentionDays`，默认 90 天）是两件事——显示窗口恒被夹在保留窗口之内，所以不会出现「把已剪掉的日子画成 0」那种与「那天真的没调用」无法区分的形状。选择保存在 `usage-prefs.json`（按 profile 分段）。
+- 本地计数只回答官方余额答不了的问题——按模型分布、本地趋势、429 事件流；它**只读不到时画「—」**，绝不会把「不知道」画成 0。
+- 本地计数**按 profile 分段**（本客户端口径）：桌面端与 Web 端是两个 profile，各有各的状态目录，互不可见；直连魔搭的其它客户端不计入。
 
-**「模型」tab**——模型按**厂商分组**（组头可折叠、带数量与已选数，「推荐」徽标挂在组头、推荐的三家置顶），组内一行一个魔搭模型、勾选即启用，顶部可搜索；开关打开即把魔搭注册为 DSH provider：
+**「模型」tab**——模型按厂商分组、勾选即启用，顶部可搜索；开关「接入为 DSH 模型」即把魔搭注册为 DSH provider，模型进入 DSH 选择器：
 
 ![「模型」tab：接入为DSH 模型与模型清单](assets/tab-model-list.png)
 
-同一 tab 下方另有**「出图工具」**卡（v0.2 起）：开启后 Host 给 agent 注册
-`modelscope_draw_image`，支持文生图、图生图与多图编辑。**它与「接入为 DSH 模型」
-是两条独立开关**，且开关值立即保存、而工具的**挂载发生在下次 Host 启动**（peer 的
-tools registry 没有 unregister）。实测协议（异步两段式、必需头、提交态不可信、
-计费与耗时口径）见 [docs/SPIKE-image-gen.md](docs/SPIKE-image-gen.md)。
+- 同一 tab 下方有**「出图工具」**卡：开启后支持文生图、图生图与多图编辑。它与「接入为 DSH 模型」是两条独立开关，开关值立即保存、**工具的挂载发生在下次 Host 启动**。出图是异步的：一次没出好会返回 `status: pending` 与 `jobId`，带上它再调一次即可续查（不必重出）。协议细节见 [docs/SPIKE-image-gen.md](docs/SPIKE-image-gen.md)（2026-10-10 实测，v0.2 起已实现）。
+- 卡片底部有**「上下文窗口覆盖」**选择器（不覆盖 / 128K / 256K / 512K / 1M）：魔搭目录不返回窗口字段，插件按「目录声明 → 你选的档位 → 内置策展表（models.dev 交叉真值）→ 128K 兜底」四级兜底；覆盖压过策展表。档位来源与「为什么不给输出上限内置策展表」见 [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md)。
 
-工具本身也是**两段式**的（v0.4 起）：一次调用只等 `drawWaitMs`（默认 90 秒）——
-图好了直接返回，没好就返回 `status: pending` 与一个 `jobId`，**带上它再调用即可
-继续查询**（只查询、不重复出图）。上游排队实测 1–15 分钟，此前一次调用会一直
-await 到出图为止，整轮对话都得陪着等。
-
-![「模型」tab：出图工具卡（能力徽标、自动选择、重启提示）](assets/tab-model-draw.png)
-
-**卡片最底**另有**「上下文窗口覆盖」**选择器（不覆盖 / 128K / 256K / 512K / 1M）：
-魔搭目录 `/v1/models` 不返回窗口字段，Host 侧按四级真值链给每个模型定窗口——
-① 目录真声明了就用目录值（不受任何下层影响）；② 用户在下面选一个档位（保存即
-重注册）；③ 没设覆盖才查内置策展表（`context-catalog.ts`，来自 models.dev 各厂 host
-交叉比对的同 id 主流窗口，2026-10-16 核对，含 DeepSeek-V4 全系 1M、
-Qwen3.5/Qwen3.8-27B/Step 3.x 256K、GLM-5.2 1M 等 19 个当前目录 id）；④ 都没有才落
-128K 兜底。**覆盖压过策展表**——插件自带的那份是第三方交叉真值，用户要改就改得动。
-档位落盘在 `provider.json` 的 `contextWindow` 键（v1 形状的新增可选键，旧构建宽容读），
-roster 每行标出该模型当前生效的窗口，数字按**上游写出来的进制**显示（目录写 `128000`
-就是 `128K`、档位写 `131072` 也是 `128K`，不做进制换算；策展表来的值带 `*` 号与悬停
-说明——平台未亲口声明）。
+**「接入」tab**——粘贴一枚 `ms-…` 访问令牌即完成凭据配置（令牌永不入日志、永不进插件目录）。没有令牌时面板会提示你到这里来填。
 
 ## 对话框胶囊（v0.2 起）
 
-注册 provider 之后，输入框工具栏会多一枚胶囊（用户不需要打开 Plugins 页就能看见额度）：
+注册 provider 之后，输入框工具栏会多一枚用量胶囊，不用打开 Plugins 页也能看到额度：
 
 ```
 魔搭 · 143 魔粒 · 今日本地 7 次
 ```
 
-- **前半**是官方魔粒余额（`balance.available`，真实值，与面板头条同一个数）；**后半**是今日本地调用次数（Host 侧本地日桶，只统计经本插件的调用）。两个数字来源不同，所以后段必须带「本地」——官方接口没有「今日」这一项，不写清就会被读成官方计数。
-- **只在会话当前选中的 provider 是 `modelscope-token-plan` 时出现**（读宿主 session 作用域的 `modelSelection` 投影），切到别的 provider 即整块消失，且一个请求都不发。
-- **没有百分比、没有黄色档**。魔粒余额是**存量**、官方没有发布任何上限或低额阈值：画进度条或定一个「低于 N 魔粒算黄」的阈值，都是给一个没人公布过的分母配数。三档只有绿（读数是正数）/ 红（官方读数确实是 0）/ 灰（读不到）。
-- **读不到 ≠ 0**（与面板同一条纪律）：读不到时该段渲染「—」，0 只在官方真的给了 0 时出现并走告警色；读失败保留上一次的数值，并标「上次数据」（阈值 = Host 声明的 `pollSeconds` × 3）。tooltip 里带余额时间、失败原文与本地计数缺失的原因。
+- 前半是官方魔粒余额（与面板头条同一个数）；后半是**今日本地调用次数**（只统计经本插件的调用）——两个数字来源不同，所以后段必须带「本地」。
+- **只在当前选中的 provider 是 `modelscope-token-plan` 时出现**，切到别的 provider 整块消失、不发任何请求。
+- **没有百分比、没有黄色档**：魔粒是存量、官方没有发布上限或低额阈值，造进度条 / 阈值都是给沒人公布过的分母配数。三档只有绿（正）/ 红（官方确为 0）/ 灰（读不到）。
+- **读不到 ≠ 0**：读不到时该段渲染「—」，0 只在官方真的给 0 时出现并走告警色；读失败保留上次数值并标「上次数据」。
 
-## 三条事实（写代码前先认清）
+## 安装
 
-1. **官方有「魔粒」余额端点**：`GET {siteBase}/openapi/v1/magicubes/balance`（Bearer 访问令牌，匿名 401），返回 `{success, data:{total_balance, available_balance, frozen_amount}}`（2026-10-04 实测，见 [docs/SPIKE.md](docs/SPIKE.md)）。推理响应本身仍不带任何额度头。
-2. **本地计数是辅助口径**：面板头条是官方魔粒余额；本地计数只回答官方余额答不了的问题——按模型分布、本地趋势、429 事件流（只统计经本插件的调用，直连魔搭的其它客户端不计入）。次数口径的「推算剩余/参考上限」已从面板移除（官方改魔粒计费后两个单位并排是误导），相应的 `dailyQuotaTotal` / `dailyQuotaPerModel` 两个社区快照常数也从配置里一并删除了——面板不消费它们，留着只会让人以为能算「还剩几次」。
-3. **凭据只有一把静态钥匙**：魔搭访问令牌（个人中心生成，形如 `ms-…`），无 OIDC、无密码、无 refresh。默认读 DSH 凭据服务已有的 `MODELSCOPE_API_KEY` 引用；`MODELSCOPE_API_KEY` 环境变量只在启动时读一次，且优先级高于存储值（坑见下段）；令牌永不入日志、永不进插件目录。
+1. 在 DSH「插件」页搜索 `dsh-connect-modelscope-token-plan` 点击安装，或运行：
 
-   **凭据分层有个坑（2026-10-05 实测）**：DSH 凭据服务的优先级里，**启动时的环境快照压过存储文件**，而那个快照**在启动时冻结**（不是活的 `process.env`）。两个后果：①在 DSH 启动**之后**改环境变量——包括 Windows 用户级变量——**不会被看见**，改完必须**完全重启 DSH**（退出全部 `DeepSeek Harness` 进程，不只是关窗口）才进快照；②重启让环境变量生效后，它会**反过来压过面板里保存的值**，而面板仍显示「已保存」。**最省事的做法是直接在面板里保存令牌**（立即生效，且不依赖重启）。
+   ```bash
+   dsh plugin --profile web add dsh-connect-modelscope-token-plan       # Web 端
+   dsh plugin --profile desktop add dsh-connect-modelscope-token-plan  # 桌面端
+   ```
+
+2. **完全退出 DSH（含托盘）再启动**。
+
+3. 打开 DSH 的 **Plugins 页**，找到本插件的插件卡（面板是页内联卡片，**不在侧边栏**）。
+
+> 装到 npm 的那一份**不含 `docs/`**（`package.json` 的 `files` 白名单只带 `lib/` / `client.js` / `assets/` / `README.md` / `CHANGELOG.md` / `LICENSE` 等），下文指向 `docs/*` 的链接在已安装副本上打不开，请到 GitHub 仓库看。
 
 ## 免费额度怎么算（2026-10 快照，以官方为准）
 
@@ -73,32 +65,43 @@ roster 每行标出该模型当前生效的窗口，数字按**上游写出来�
 - 额度按天重置；耗尽返回 429。
 - `/v1/models` 免认证可读，**不消耗额度**。
 
-上面这些数字来自社区公开信息，非官方数据，官方调整后需手动更新本节；**它们只用于解释
-「额度怎么算」，不参与任何计算**——面板不消费次数上限，「还剩几次」算不出来（见下节）。
+上面这些数字来自社区公开信息、非官方数据，官方调整后需手动更新本节；**它们只用于解释「额度怎么算」，不参与任何计算**——面板不消费次数上限，「还剩几次」算不出来。
 
-## 文档地图
+## 运维诊断：这台机器现在开没开 provider？
 
-| 何时 | 查 |
-|---|---|
-| 「上游到底有没有额度信号」 | [docs/SPIKE.md](docs/SPIKE.md)（实测记录 + 结论） |
-| 「能不能接生图、协议是什么」 | [docs/SPIKE-image-gen.md](docs/SPIKE-image-gen.md)（2026-10-10 实测；**v0.2 起已实现**，承上表体例） |
-| provider 怎么接入（写代码前） | [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md)（实现契约） |
-| **这版是怎么做出来的、踩过什么坑** | [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)（0.1.0 / M4 实施过程档案） |
-| v0.2.0 的十二轮修复细节（已冻结，非入门路径） | [docs/archive/2026-10-05-closeout.md](docs/archive/2026-10-05-closeout.md) |
-| 上游端点全景 / 第三方方案对比 | [docs/REFERENCES.md](docs/REFERENCES.md)、[docs/REFERENCE-modelsdev.md](docs/REFERENCE-modelsdev.md) |
-| v1 要做什么、做到哪了 | [docs/ROADMAP.md](docs/ROADMAP.md) |
-| Host/Client 两半怎么分 | [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md)（§14 红线）＋ [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)；本仓库暂无独立的 `ARCHITECTURE.md` |
-| 开发者校验工具（变异测试 / 覆盖率） | [tools/dev/README.md](tools/dev/README.md)；发布流程见 [RELEASING.md](RELEASING.md) |
+provider / 出图 / 上下文窗口的生效值存在插件私有状态文件里，不在任何配置或路由上，按 profile 分段。查「到底开没开」用 doctor，它只读状态文件、不碰凭据，Host 没起也能跑：
+
+```bash
+npm run doctor          # 人读：每个 profile 的 provider / draw 开关与模型清单
+npm run doctor:json     # 机器读：JSON（可进你的巡检 / 工单脚本）
+```
 
 ## 诚实声明
 
-- 面板头条是**官方魔粒余额**（真实值）；本地计数只统计**经本插件的调用**——它回答的是分布/趋势/429 事件流，不是余额。**它是「本客户端」的口径**：注册 provider 之后该客户端的全部魔搭调用都经本插件，但**不跨客户端**——桌面端与 Web 端是两个 profile，各有各的状态目录（`$DSH_HOME/state/<profile>/<插件名>/usage.json`），各记各的账、互不可见；直连魔搭的其它客户端同样不计入。`npm run doctor` 会把每个 profile 的用量并排列出来，这是「另一个客户端的数字去哪了」的答案；迁移窗口期（旧共享目录与 profile 目录并存）它也会把旧共享布局以 `shared (legacy)` 作用域报出。次数口径的「推算剩余」已从面板移除（官方改魔粒计费后两个单位并排是误导），相应地`quota.daily` 只剩 `usedLocal` 一个数——没有 `limit`，也没有推算出的「剩余」。这个数还有第三种答案：**本地计数文件读不到时它是 `null`，面板渲染「—」**——「今日 0 次」是可信的日常值，把「我不知道」画成它会让人以为今天没调用过（`usage.json` 损坏、形状不对、或被更新的构建写过都是这种情形，原因会在面板上方的漂移提示里说明）。
-- **本地计数的口径与 harness 全局账本不同，且刻意不合并**。DSH 自己有 `@linxin666/dsh-usage`，按 `days→provider→model` 记成功调用的 token；它只订阅 session 的 `assistant/message`，**失败调用一次都不记**。所以本插件只做两件全局账本答不了的事：①「经本插件的调用分布与趋势」；②**429/错误事件流**——这是本插件的独家数据（官方只给总额度余额，不给「哪个模型刚才在限频」）。成功的 token 总量不在此重复记账（详见 `src/host/usage-observer.ts` 文件头）。
-- 429/错误事件的分类读的是 **`llm-error-fix` 重分类之后**的 code：被误判成 QUOTA 的 rpm 限频在事件流里记作 `rate_limit`，与退避策略说同一件事。观察层套在重分类层**之外**，顺序不可反。
-- **单模型「额度耗尽」是推断，不是读数**：官方只有账户级魔粒余额，没有 per-model 额度端点。某模型最近一次真耗尽（quota 类 429 事件，重分类后的口径；瞬时限频不算）落在推断窗口内（`exhaustionWindowMinutes`，默认 60 分钟，5–1440 可调）时，picker 不再提供它、面板 roster 灰显且禁勾选；事件移出窗口即恢复。**恢复不可观测是已知代价**——成功的调用不发事件，额度若在窗口内恢复（按天重置恰好如此），模型最多灰显满一个窗口：方向保守（不提供注定 429 的模型），且灰显带着原因，不是静默消失。判定规则与接线见 [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md) §15。
-- **计数口径**：每次流结束记一次 call，**含失败、含用户中断**（魔搭按次数计费，限频掉的请求同样是一次调用）；token 数上游没给时是 `null` 而非 0。偏差方向是**按流计次**：重试不在流内部发生，而是在流消费完后由 `agent/request-error` 瀑布决定重发，因而**每次重试各记一次**——按「魔搭按次数计费」的口径这反而是对的（每次重发都真打了一次上游）。
-- **provider 默认关**（opt-in，与姊妹插件一致）：面板「模型」tab 的「接入为 DSH 模型」开关翻转即生效，面板保存值优先于 `cordis.patch.yml` 的 `registerProvider` 默认。
-- **已知限制：`reasoning` 恒为 false**。魔搭 API-Inference 是多模型代理，是否吃 `reasoning_effort` 取决于背后那个模型，本插件保守默认不发该参数（模型用自己的默认），也不提供思考强度选择器。**原理由「发错档位会整条请求 400」已在 2026-10-05 真机探测中证伪**：`reasoning_effort` 传 `"bogus"` 同样返回 200，值不被校验。真实障碍是无法区分「生效」与「静默忽略」（都是 200），且该端点会在真响应与空壳 200 之间摇摆——档位表做不出来，不是没做。见 [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md) §4。
-- **输出上限默认是 harness 的 32768，不是魔搭声明的数**。魔搭 `/v1/models` 从不返回输出上限字段（实测每条只有 `id`/`object`/`owned_by`/`created`），而本插件对输出上限的策略是「目录声明了才声明」——两条合起来：**每一个**模型的 descriptor 都不带 `maxTokens`，harness 于是用它的 `defaultMaxTokens ?? 32768` 兜底。32768 不是魔搭声明的数、也不是实测过的数，它只是 harness 的缺省值；目录给不出真值时，只有你知道某个模型实测能吐多少。出口是 `cordis.patch.yml` 的 `maxTokensOverrides`（**精确**模型 id → 正整数），优先级 `覆盖 > 目录声明 > 不声明`；面板模型清单行用「最大输出」徽章显示**生效值**（来源是覆盖还是目录写在 tooltip 里），**没带徽章 = 正在吃 32768 兜底**——「没显示」不等于「没上限」，这是本面板最容易读反的一处。**为什么不像上下文窗口那样内置一张策展表**：窗口有 models.dev 的交叉真值可引，输出上限平台从不声明、也没对它做过逐模型实测，策展一张「猜每个模型能吐多少」的表就是在编数字。
-- 429 响应形状未实测（不值得烧额度去触发），解析按 OpenAI 惯例兼容，漂移时面板会给 `shapeWarnings`。
-- 面板「模型」tab 的每个模型都外链到其魔搭详情页（`https://www.modelscope.cn/models/{owner}/{model}`）：魔粒单价只在网页展示、不在官方 API，所以这只是一个**人工核对用的跳转，不是数据源**（「为什么没有按模型消耗 API」见 [docs/REFERENCES.md](docs/REFERENCES.md)）。
+- 面板头条是**官方魔粒余额**（真实值）；本地计数只统计**本客户端（本 profile）内经本插件的调用**——它回答分布/趋势/429 事件流，不是余额，且桌面端与 Web 端各记各的、互不可见（迁移窗口期旧共享布局以 `shared (legacy)` 报出）。读不到时渲染「—」，不是 0。
+- **本地计数与 harness 全局账本刻意不合并**：DSH 自己的 `@linxin666/dsh-usage` 只记成功调用的 token、且失败一次都不记；本插件只补它答不了的两件事——① 经本插件的分布与趋势；② **429 / 错误事件流**（官方只给总额度余额，不给「哪个模型刚才在限频」，这是本插件的独家数据）。
+- 429 / 错误事件读的是 `llm-error-fix` 重分类之后的 code；观察层套在重分类层之外，顺序不可反。
+- **单模型「额度耗尽」是推断，不是读数**：官方只有账户级魔粒余额，没有 per-model 额度端点；最近一次真耗尽落在推断窗口内时 picker 不再提供它、面板灰显禁勾选，事件移出窗口即恢复（恢复不可观测是已知代价）。判定见 [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md) §15。
+- 计数口径：每次流结束记一次 call，**含失败、含用户中断**；token 数上游没给时是 `null` 而非 0。重试各记一次（魔搭按次数计费，每次重发都真打了一次上游；完整论述见 `src/host/usage-observer.ts`）。
+- **provider 默认关**（opt-in）：面板「模型」tab 的「接入为 DSH 模型」开关翻转即生效，面板保存值优先于 `cordis.patch.yml` 的默认。
+- **已知限制：`reasoning` 恒为 false**：本插件保守默认不发 `reasoning_effort`（模型用自己的默认），也不提供思考强度选择器——值不被校验、且无法区分「生效」与「静默忽略」。完整论证见 [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md) §4。
+- **输出上限默认是 harness 的 32768，不是魔搭声明的数**：魔搭 `/v1/models` 从不返回输出上限字段，本插件策略是「目录声明了才声明」，所以每个模型的 descriptor 都不带 `maxTokens`，harness 用缺省 32768 兜底；面板「最大输出」徽章显示生效值，**没带徽章 = 正在吃 32768 兜底**。精确覆盖在 `cordis.patch.yml` 的 `maxTokensOverrides`。为什么不像上下文窗口那样内置策展表：平台从不声明、也没逐模型实测，策展一张「猜能吐多少」的表就是在编数字（详见 [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md)）。
+- 次数口径的「推算剩余 / 参考上限」已从面板移除（官方改魔粒计费后两个单位并排是误导），配置里的 `dailyQuotaTotal` / `dailyQuotaPerModel` 两个社区快照常数也一并删除——面板不消费它们，留着只会让人以为能算「还剩几次」。
+- 429 响应形状未实测，解析按 OpenAI 惯例兼容，漂移时面板给 `shapeWarnings`。
+- 面板「模型」tab 的每个模型外链到其魔搭详情页（单价只在网页展示、不在官方 API），所以只是**人工核对用的跳转，不是数据源**。
+
+## 文档
+
+- [docs/SPIKE.md](docs/SPIKE.md) — 上游到底有没有额度信号（实测记录 + 结论）
+- [docs/SPIKE-image-gen.md](docs/SPIKE-image-gen.md) — 出图协议实测（2026-10-10；v0.2 起已实现）
+- [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md) — provider 接入实现契约（设计裁定都在这里）
+- [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) — 这版怎么做出来的、踩过什么坑
+- [docs/REFERENCES.md](docs/REFERENCES.md)、[docs/REFERENCE-modelsdev.md](docs/REFERENCE-modelsdev.md) — 上游端点全景 / 第三方方案对比
+- [docs/ROADMAP.md](docs/ROADMAP.md) — v1 要做什么、做到哪了
+- [docs/archive/](docs/archive/) — 已冻结的逐版修复档案
+
+AI 协作会话请先读 [AGENTS.md](AGENTS.md)（验证入口、红线与文档地图）；开发者校验工具（变异测试 / 覆盖率）见 [tools/dev/README.md](tools/dev/README.md)；发布流程见 [RELEASING.md](RELEASING.md)。
+
+## 许可证
+
+MIT License，全文见 [LICENSE](LICENSE)。
