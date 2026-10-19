@@ -455,7 +455,7 @@ const FACTS = [
   }
 }
 
-// ── §11 引用有效性：src/ 与 test/ 里引用的 test/*.test.mjs 必须真实存在 ────────
+// ── §11 引用有效性：每个 test/*.test.mjs 引用必须指向真实存在的文件 ──────────
 //
 // §1/§5/§9 都查文档侧的引用，但查不到**代码注释与测试注释**里指向不存在测试的
 // 引用。事故：`test/peer-contract.test.mjs` 曾在 6 处注释里被当成既成事实引用
@@ -466,27 +466,58 @@ const FACTS = [
 // 实际没有。IMPLEMENTATION.md:149 已把这个事故记作「幽灵测试引用」，但当时只把
 // 措辞改成「在门禁之外」，引用字符串留在原地，幽灵就一直活着。
 // 判据机械：所有 `test/xxx.test.mjs` 形式的引用必须是磁盘上真实存在的文件。
-// docs/** 不在射程内（§1/§9 已管文档），docs/archive/** 也不扫（冻结历史）。
+//
+// 射程（2026-10-19 扩展）：src/ + test/ 照旧；**docs/**（非归档）也进射程——
+// docs/PROVIDER-M4.md §13 曾点名三个从未存在的套件（provider-store / llm-models /
+// publish-core 的 .test.mjs），正因旧判据射程止步 src+test，幽灵全绿存活了很久，
+// 2026-10-19 评审才把它改写成真实承重套件。docs/archive/** 仍不扫（冻结历史）。
+// 一条例外：**docs** 里指向不存在测试的引用，所在段落带缺口声明标记
+// （幽灵 / 从未存在 / 无此文件 / 缺口声明 / 该契约测试在…）时放行——与 §3
+// SAFE_CONTEXT 同一套段落判据先例（中文文档折行，标记可能落在引用的另一行上）。
+// 该例外不给 src/test：代码注释声称覆盖，必须真有文件。
 {
   const refRe = /\btest\/[A-Za-z0-9_.-]+\.test\.mjs(?::\d+)?\b/g;
+  // docs 侧缺口声明段落标记：段内带这些词 = 该引用被明确声明为已知缺口（§3 先例）。
+  const GAP_DECL = /幽灵|从未存在|无此文件|缺口声明|该契约测试在/;
   // 本文件必须被排除——门禁定义文件需要能提到任何测试名（包括不存在的那个），
   // 否则它没法描述自己的判据来源，会自我绊倒。
   const scanned = [
     ...tsFiles("src"),
-    ...walk("test", ".mjs").filter((f) => f !== "test/docs.test.mjs")
+    ...walk("test", ".mjs").filter((f) => f !== "test/docs.test.mjs"),
+    // 2026-10-19 射程扩展：非归档 docs 也查（docFiles() 已排除 vendored spec，归档另排）。
+    ...docFiles().filter((f) => !inArchive(f)),
   ];
   for (const file of scanned) {
-    for (const m of read(file).matchAll(refRe)) {
-      const full = m[0];
+    const isDoc = file.startsWith("docs/");
+    const check = (full, para) => {
       // 带行号的引用是**跨仓库**的精确定位（如 release.test.mjs 引用姊妹仓
       // agnes 的 test/package.test.mjs:58 事故溯源），指向的是另一个仓库的文件，
       // 不是本仓的覆盖声称。本仓的声称形如「由 test/xxx.test.mjs 钉死」，不带行号。
-      if (/:\d+$/.test(full)) continue;
+      if (/:\d+$/.test(full)) return;
+      if (isDoc && para !== null && GAP_DECL.test(para)) return;
       assert.ok(
         existsSync(join(root, full)),
         `${file}: 引用了 ${full}，但该测试文件不存在——声称有测试覆盖其实没有。` +
-          `要么实现它，要么把注释改成明确的缺口声明并记进 docs/ROADMAP.md 的 Backlog。`
+          (isDoc
+            ? ` 要么实现它，要么把引用放进带缺口声明标记（幽灵/从未存在/无此文件/缺口声明）的段落。`
+            : ` 要么实现它，要么把注释改成明确的缺口声明并记进 docs/ROADMAP.md 的 Backlog。`)
       );
+    };
+    if (isDoc) {
+      // 文档侧按段落判：段落 = 一段非空行（与 §3 同一套「按整段」约定）。
+      const paras = [];
+      let cur = [];
+      for (const l of read(file).split(/\r?\n/)) {
+        if (l.trim()) cur.push(l);
+        else {
+          if (cur.length) paras.push(cur.join("\n"));
+          cur = [];
+        }
+      }
+      if (cur.length) paras.push(cur.join("\n"));
+      for (const p of paras) for (const m of p.matchAll(refRe)) check(m[0], p);
+    } else {
+      for (const m of read(file).matchAll(refRe)) check(m[0], null);
     }
   }
 }

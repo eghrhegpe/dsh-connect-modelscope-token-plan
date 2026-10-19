@@ -356,7 +356,8 @@ export type SnapshotResponse = Snapshot | SnapshotFailure;
  * 就必须同样缺席。
  *
  * 判据：`Snapshot` 接口里带 `?` 的顶层字段，这里**必须**没有。
- * test/wire.test.mjs 用类型层 + 运行期双向钉住这条。
+ * test/wire.test.mjs 机械解析该接口做三向交叉：必给字段集合 === 本清单、可选
+ * 字段 ∩ 清单 = ∅、可选字段集合 === 可选块名字清单——清单腐化或漏登记都判红。
  */
 export const SNAPSHOT_REQUIRED_KEYS = Object.freeze([
   "ok",
