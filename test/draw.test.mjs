@@ -268,6 +268,26 @@ section("describeDrawFailure 只在 body 真的提到账号态时才说账号态
   assert.match(describeDrawFailure({ status: 401, bodyText: "账号未完成实名认证" }), /实名/, "中文口径同样认");
 });
 
+section("describeDrawFailure 的账号态判据两头都不许松（复核补）", () => {
+  // 上面那两组断言当时选的措辞恰好落在旧正则的命中集里，把两个方向的空洞留在了
+  // 绿灯之外（复核实证：旧判据漏 `verify your email`、误认 `令牌认证已过期`）。
+  // 这组用例就是那两条洞的回归钉。
+  for (const body of ["please verify your email", "verify your email address"]) {
+    assert.match(
+      describeDrawFailure({ status: 403, bodyText: body }),
+      /邮箱验证/,
+      `上游点名了邮箱验证就得照说：${body}`
+    );
+  }
+  for (const body of ["认证失败", "令牌认证已过期"]) {
+    const msg = describeDrawFailure({ status: 401, bodyText: body });
+    assert.ok(
+      !/邮箱验证|实名/.test(msg),
+      `纯令牌问题的 body 不得被读成账号态（「认证」不是账号态证据）：${msg}`
+    );
+  }
+});
+
 section("describeDrawFailure 分诊 404 / 429 / 5xx", () => {
   assert.match(describeDrawFailure({ status: 404 }), /端点或模型不存在/);
   assert.match(describeDrawFailure({ status: 429 }), /限流/);

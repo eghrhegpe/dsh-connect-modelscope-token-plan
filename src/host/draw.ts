@@ -348,10 +348,15 @@ export function describeDrawFailure(failure: {
     // 也覆盖令牌过期或无权访问该模型（`docs/SPIKE-image-gen.md:74` 的匿名 401 只
     // 证明端点存在）。所以这句只在 body 真写出账号态时才出现，否则给中性枚举——
     // 把「实测遇到过一次」写成 401/403 的固定附注，等于编造上游未给的原因。
-    const accountState = /邮箱|实名|认证|email\s*verif|verif\w*\s*email|complete\s+your\s+profile/i.test(text);
+    // 判据两头都要收紧——复核（2026-10-19）用 10 个措辞实测过：
+    // 过松：裸 `认证` 会把「令牌认证已过期」这种纯令牌问题拉回「你没实名」；
+    // 过紧：`verif\w*\s*email` 跨不过 `verify your email` 中间的 `your`（漏匹配）。
+    // 所以只认 body **点名账号态**的措辞：邮箱 / 实名，或 email 与 verif 邻近出现。
+    // 其余一律中性——反正 body 原文经脱敏后会附在 tail 里，信息不丢。
+    const accountState = /邮箱|实名|email[^\n]{0,40}verif|verif\w*[^\n]{0,40}email|complete\s+your\s+profile/i.test(text);
     const reason = accountState
       ? "访问令牌无效、无权访问该模型，或账号未完成邮箱验证/实名（上游 body 提到了账号态）"
-      : "访问令牌无效或无权访问该模型（上游未说明账号态）";
+      : "访问令牌无效或无权访问该模型（上游未指明具体原因）";
     return `出图失败：HTTP ${status} —— ${reason}。请在面板确认令牌与账号状态${tail}`;
   }
   if (status === 404) {

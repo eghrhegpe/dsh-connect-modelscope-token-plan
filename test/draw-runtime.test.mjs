@@ -649,7 +649,7 @@ section("等待进行中被撤下：下一轮巡检就收场，不等预算耗�
   const out = await def.execute({ prompt: "a cat" });
   const elapsed = Date.now() - started;
   assert.equal(out.status, "pending", "撤下不是失败，也不是「已生成」");
-  assert.equal(out.jobId, "t1", "jobId 要交回去：插件重挂后还能续查");
+  assert.equal(out.jobId, "t1", "jobId 要交回去：本次挂载内还能续查（重挂后作业表是新的一张）");
   assert.equal(calls.length, 2, "第二轮轮询不该发出（撤下后每轮先巡检）");
   assert.ok(elapsed < 2_000, `撤下后不该继续占住调用（实测 ${elapsed}ms，预算 60s）`);
 });

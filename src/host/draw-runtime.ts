@@ -664,7 +664,7 @@ export function defineDrawTool({
       hint:
         `仍在生成中（已等 ${Math.round(elapsedMs / 1000)}s，${polls} 次轮询，task ${job.taskId}）：` +
         `上游排队通常 1–15 分钟。稍后带 jobId ${job.jobId} 再调用本工具即可继续查询` +
-        `（只查询、不会重复出图）`
+        `（只查询、不会重复出图；作业表只在本次挂载内有效，重启 DSH 或重挂插件后要重新提交）`
     };
   };
 
