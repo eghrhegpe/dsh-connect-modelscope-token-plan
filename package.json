@@ -8,7 +8,7 @@
     "url": "https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan/issues"
   },
   "author": "eghrhegpe",
-  "description": "ModelScope (modelscope.cn) access bundle for DSH: opt-in registration of ModelScope language models and draw tool as an OpenAI-compatible provider (vision and context windows auto-filled, usable the moment registered), plus a free-quota panel with the official Magicube balance, per-model local call counts, daily trends and 429 event list — usable without registering.",
+  "description": "Bring the ModelScope language and image-generation models into DSH as default-off switches, with image recognition and context windows filled in automatically. The card also shows the free Magicube balance, links each model to its ModelScope page, and records local call counts, a daily trend and rate-limit events. All of it needs only an API key, with no account sign-in.",
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",

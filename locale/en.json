@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "ModelScope Model Access",
-    "description": "Register ModelScope's language models and draw tool into DSH with one toggle: image-recognition capability and context windows auto-filled, usable the moment it is registered (both default off); the free-quota panel — official Magicube balance, local call counts, trends, rate-limit events — works even without registering."
+    "description": "Bring the ModelScope language and image-generation models into DSH as default-off switches, with image recognition and context windows filled in automatically. The card also shows the free Magicube balance, links each model to its ModelScope page, and records local call counts, a daily trend and rate-limit events. All of it needs only an API key, with no account sign-in."
   }
 }

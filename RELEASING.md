@@ -261,7 +261,7 @@ gh release create vX.Y.Z \
 [README「面板长什么样」](README.md)），两条路都通。`test/release.test.mjs` 守住清单与资产的
 一致性。
 
-**本仓分类建议 `usage`**（额度/用量面板）。
+**本仓分类建议 `model`**（语言模型 + 生图模型的接入；投稿 yml 的 `category` 取此值）。
 
 ## 常见问题
 

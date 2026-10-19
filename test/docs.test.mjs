@@ -370,9 +370,9 @@ const isVendoredSpec = (rel) => rel.startsWith("docs/modelscope.cn-openapi/");
 // 投稿 yml 的逐条溯源引用是市场 CI 核验 description 的证据链，符号名是引用承重
 // 部分（行号随编辑漂移，不判）；npm 公开 description 则描述给用户看的第一句话。
 {
-  const submissionDir = join(root, "docs", "submission");
+  const submissionDir = join(root, "awesome-dsh-plugin-submission");
   const submissions = existsSync(submissionDir)
-    ? readdirSync(submissionDir).filter((f) => f.endsWith(".yml")).map((f) => `docs/submission/${f}`)
+    ? readdirSync(submissionDir).filter((f) => f.endsWith(".yml")).map((f) => `awesome-dsh-plugin-submission/${f}`)
     : [];
   for (const rel of submissions) {
     const refRe = /src\/([A-Za-z0-9_./-]+\.ts)(?::\d+)?(?:\s+([A-Z][A-Za-z0-9]{3,}))?/g;
