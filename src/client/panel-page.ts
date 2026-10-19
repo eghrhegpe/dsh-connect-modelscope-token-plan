@@ -83,6 +83,23 @@ export function PanelPage({ tt, localeSubscribe }: {
     return () => { cancelled = true; };
   }, [hasDrawBlock, pollRevision]);
 
+  // 本地计数的**生产者提示**（2026-10-19 评审落地）：计数的唯一写入侧
+  // （usage-observer）只挂在注册 provider 后的适配器上——未接入时四块计数恒为
+  // 0/空，形状与「插件坏了」不可区分。已知依赖要渲染成界面事实，而不是只活在
+  // README 里。
+  //
+  // 只有在 provider 状态**读得到**时才给结论：快照省略该块、兜底 GET 也失败时，
+  // provider 是 DEGRADED_PROVIDER（编出来的形状），此时说「未开启」等于替 Host
+  // 断言——那是伪造，不是降级（与 balance 的 tokenKnownAbsent 同一条纪律）。
+  const providerStateKnown = hasProviderBlock || fetchedProvider !== null;
+  const countingNote = !providerStateKnown
+    ? null
+    : provider.enabled !== true
+      ? tt("quota.countingOff")
+      : provider.registered !== true
+        ? tt("quota.countingPending")
+        : null;
+
   // 写盘统一入口：开关、允许清单、回到默认都 POST 到 provider 路由族。失败
   // 必须传播到面板（不静默吞）——这是用户的显式操作。成功即刷新快照，回显
   // Host 实际落盘的值（不做乐观更新）。
@@ -254,7 +271,7 @@ export function PanelPage({ tt, localeSubscribe }: {
       h(
         SectionCard,
         { title: tt("section.local"), open: openSections.local, onToggle: () => toggleSection("local"), tt },
-        h(LocalDailyCard, { snapshot: snap, tt })
+        h(LocalDailyCard, { snapshot: snap, countingNote, tt })
       ),
       h(
         SectionCard,

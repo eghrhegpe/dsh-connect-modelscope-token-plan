@@ -25,6 +25,9 @@
  *    轮询只与更慢相关。
  * 3. 失败原因实测可能**不可知**（`errors.code:0` + 空 message）。`describeDrawFailure`
  *    因此明说「未给出原因」，本文件也**不从空错误里编造**。
+ * 4. 轮询的 5xx / 429 / 408 是**瞬态**不是终局（{@link isTransientPollStatus}）：
+ *    同一个物理故障不因表现为 TCP 抛错还是 5xx 响应就两种判法；只有 4xx 是
+ *    终局证据。瞬态持续时由 deadline 收口成 pending，续查把手不丢。
  *
  * @module dsh-connect-modelscope-token-plan/draw-runtime
  */
@@ -227,8 +230,10 @@ export type DrawAwait =
  * 抛错是「这件事做不成了」，`pending` 是「还没成，可以再查」。同一段循环因此
  * 同时服务于两种调用形状（一次性跑完 / 分段续查），不写两份。
  *
- * 轮询带 `X-ModelScope-Task-Type`（**必需**，漏了必假失败）；传输层抖动与非
- * JSON 响应体都**不升级为终局**，继续等下一轮。
+ * 轮询带 `X-ModelScope-Task-Type`（**必需**，漏了必假失败）。三类情形**不升级
+ * 为终局**，在本次预算内继续等下一轮：① 传输层抛错（ECONNRESET / DNS）；
+ * ② 非 JSON / 200 垃圾响应体（CDN 错误页）；③ **瞬态 HTTP 状态码**（5xx /
+ * 429 / 408，见 {@link isTransientPollStatus}）。只有 4xx 是终局证据。
  * @param {object} options - 等待参数。
  * @param {DrawFetch} options.fetchImpl - 注入的 fetch。
  * @param {string} options.apiBase - apiBase。
@@ -298,6 +303,10 @@ export async function awaitDrawTask({
     }
     const pollText = await safeText(polled);
     if (!polled.ok) {
+      // 瞬态（5xx / 429 / 408）不判死刑：本轮没读到终态，但也没有终局证据，
+      // 按传输层抖动同纪律继续等（见 isTransientPollStatus 的判据）。等不到
+      // 由 deadline 收口成 pending，续查把手不丢。
+      if (isTransientPollStatus(polled.status)) continue;
       // 本轮**没读到**状态：`lastStatus` 是上一轮的读数，不能当本轮的终态证据。
       // 旧写法把它塞进 `taskStatus`，于是一个 400/402 会被报成「任务停在 RUNNING
       // （非终态），已超过截止时间」——而截止时间根本没到。改用 `cause` 陈述事实；
@@ -857,6 +866,25 @@ function toNonNegativeInt(value: unknown): number | undefined {
 function toPositiveNumber(value: unknown): number | undefined {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
+ * 轮询响应里的**瞬态** HTTP 状态码：不判作业死刑，本次等待预算内继续等下一轮。
+ *
+ * 判据是「同一个物理故障不因表现形态而异」：传输层抛错（ECONNRESET / DNS
+ * 解析失败）早就走的是「继续等下一轮」，而同一种 CDN 边缘抖动、上游短暂过载
+ * 以 **5xx/429 响应**的形态出现时，旧写法直接判失败、作业出表、进 60s 冷却
+ * ——agent 想续查只能重新提交一张图。上游排队窗口实测 1–15 分钟
+ * （docs/SPIKE-image-gen.md），那个窗口内的边缘 5xx 是常态噪声，不是终局。
+ *
+ * 4xx 保持终局：401/403 = 令牌或权限真的没了，404/400 = 任务或端点真的没了
+ * ——这些等下去也不会变。deadline 负责收口：瞬态一直持续时耗尽预算后返回
+ * `pending`，两段式的续查把手（jobId）不丢。
+ * @param {number} status - 轮询响应的 HTTP 状态码。
+ * @returns {boolean} 是否按瞬态继续等。
+ */
+function isTransientPollStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
 }
 
 /** 读 body 文本，读不到给空串（错误分诊不能因为读 body 失败而失败）。 */

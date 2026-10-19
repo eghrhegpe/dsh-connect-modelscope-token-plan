@@ -206,6 +206,25 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
     return Array.from(new Set(tasks));
   };
 
+/**
+ * 令牌的稳定指纹（FNV-1a，32 位 hex）——只用作余额缓存的键。
+ *
+ * **不用 `token.slice(-6)` 那种末位截断**：两个不同令牌末 6 位相同的概率在
+ * 1/16^7 量级，虽低但非零，而代价是一个 TTL（cacheSeconds，默认 60s）内把
+ * A 的身份的余额当 B 的返回——缓存键的正确性不该交给运气。指纹不需要保密、
+ * 不进日志（脱敏正则的形状与它无关），完整的哈希零成本。
+ * @param {string} token - 访问令牌。
+ * @returns {string} 8 位 hex 指纹。
+ */
+function tokenFingerprint(token: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < token.length; i++) {
+    hash ^= token.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
   return {
     /**
      * 模型目录：GET apiBase/models，免认证、零额度，coalesced 缓存
@@ -320,7 +339,8 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
     /**
      * 官方「魔粒」余额：GET siteBase/openapi/v1/magicubes/balance（Bearer
      * 令牌；2026-10-04 实测可用，匿名 401，SPIKE.md §魔粒）。coalesced 缓存
-     * cacheSeconds，缓存键带令牌指纹——换令牌 ≤1 个 TTL 内必然读到新身份。
+     * cacheSeconds，缓存键带令牌指纹（FNV-1a 完整哈希，不是末位截断——
+     * 换令牌 ≤1 个 TTL 内必然读到新身份，且不同令牌不会因同后缀串味）。
      */
     async fetchBalance(): Promise<{ available: number | null; total: number | null; frozen: number | null; fetchedAt: string }> {
       const { value: token } = await tokenStore.resolve();
@@ -328,7 +348,7 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
         throw pluginError(CODE.AUTH_ERROR, "no ModelScope token configured — set MODELSCOPE_API_KEY or save one in the panel");
       }
       const url = settings.siteBase + "/openapi/v1/magicubes/balance";
-      const key = "balance#" + token.slice(-6);
+      const key = "balance#" + tokenFingerprint(token);
       return await read(key, async () => {
         const response = await fetchWithTimeout(url, {
           method: "GET",

@@ -62,13 +62,37 @@ section("notePolls 对不在表里的 id 静默（调用方已另有错误路径
 
 // ── 边界 ──────────────────────────────────────────────────────────────────────
 section("容量满时淘汰最旧的一条（长跑会话不能把内存养成泄漏）", () => {
-  const jobs = createDrawJobs({ maxJobs: 2 });
-  jobs.create({ taskId: "t-1", model: "m", prompt: "p" });
-  jobs.create({ taskId: "t-2", model: "m", prompt: "p" });
-  jobs.create({ taskId: "t-3", model: "m", prompt: "p" });
+  // 软上限只淘汰**已过续查保护窗**的（越过总放弃线，找回来也只会换来「超过
+  // 总预算」）；保护窗内的不淘汰——见下一个用例。
+  const jobs = createDrawJobs({ maxJobs: 2, resumeWindowMs: 60_000 });
+  const now = Date.now();
+  jobs.create({ taskId: "t-1", model: "m", prompt: "p", now: now - 120_000 });
+  jobs.create({ taskId: "t-2", model: "m", prompt: "p", now: now - 90_000 });
+  jobs.create({ taskId: "t-3", model: "m", prompt: "p", now: now - 30_000 });
   assert.equal(jobs.size(), 2);
-  assert.equal(jobs.get("t-1"), null, "最旧的 t-1 应被淘汰");
+  assert.equal(jobs.get("t-1"), null, "最旧且已过保护窗的 t-1 应被淘汰");
   assert.notEqual(jobs.get("t-3"), null, "最新的必须还在");
+});
+
+section("续查保护窗内的作业不被容量淘汰（能续查的作业被杀 = 两段式残缺）", () => {
+  // 2026-10-19 评审落地：旧 FIFO 会把仍在等待线内的 pending 作业淘汰掉，
+  // agent 带 jobId 回来只换来「不在表中」，而上游任务还在跑。
+  const jobs = createDrawJobs({ maxJobs: 2, resumeWindowMs: 60_000 });
+  const now = Date.now();
+  jobs.create({ taskId: "t-1", model: "m", prompt: "p", now: now - 10_000 });
+  jobs.create({ taskId: "t-2", model: "m", prompt: "p", now: now - 5_000 });
+  jobs.create({ taskId: "t-3", model: "m", prompt: "p", now });
+  assert.equal(jobs.size(), 3, "三条都在保护窗内：软上限一条都不淘汰");
+  assert.notEqual(jobs.get("t-1"), null, "最旧的也还在——它还没越过总放弃线");
+});
+
+section("硬上限保底：全是保护窗内的作业也绝不无界", () => {
+  const jobs = createDrawJobs({ maxJobs: 2, resumeWindowMs: 60_000, hardMaxJobs: 3 });
+  const now = Date.now();
+  for (let i = 1; i <= 4; i++) jobs.create({ taskId: `t-${i}`, model: "m", prompt: "p", now: now - i * 1_000 });
+  assert.equal(jobs.size(), 3, "超过硬上限淘汰最旧，保护窗不放弃有界性");
+  assert.equal(jobs.get("t-1"), null, "最旧的 t-1 被硬上限淘汰");
+  assert.notEqual(jobs.get("t-4"), null, "最新的必须还在");
 });
 
 section("同一个 id 重复登记：以新代旧，但保住累计轮询数", () => {

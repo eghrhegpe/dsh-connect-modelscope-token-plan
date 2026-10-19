@@ -67,6 +67,12 @@ export const zh = {
   "quota.rowTokens": "{tokens} token",
   "quota.note": "本地口径：只统计本客户端经本插件的调用（桌面端与 Web 端各记各的）；直连魔搭的其它客户端不计入。消耗总量以官方魔粒余额为准。",
   "quota.unavailable": "本地计数本次读不到（原因见上方提示）",
+  // 本地计数的**生产者依赖**（2026-10-19 评审落地）：唯一写入侧是 usage-observer，
+  // 只挂在注册 provider 后的适配器上——未开启接入时四块计数恒为 0/空，形状与
+  // 「插件坏了」不可区分。已知依赖要渲染成界面事实，而不是只活在 README 里。
+  // 两条分开：没开开关 vs 开了但没注册上（后者要去模型 tab 看注册状态）。
+  "quota.countingOff": "本地计数只统计接入后的调用：当前未开启「接入为 DSH 模型」（开关在「模型」tab），开启后开始记录。",
+  "quota.countingPending": "「接入为 DSH 模型」已开启但尚未注册成功（见「模型」tab 状态），注册生效后本地计数开始记录。",
 
   // 目录表与其行内 usage 试调已删除（见 panel-page.ts modelsBody 注释），
   // 所以只留 token 管理用的零额度 validity probe；models.none / models.loading
@@ -259,6 +265,10 @@ export const en: typeof zh = {
   "quota.rowTokens": "{tokens} tokens",
   "quota.note": "Local scope: only calls this client made through this plugin are counted (desktop and web keep separate ledgers); clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
   "quota.unavailable": "Local counters could not be read this time (reason in the notices above)",
+  // See the zh entries: the local-counting producer depends on provider
+  // registration, so the panel states it instead of showing a bare zero.
+  "quota.countingOff": "Local counts come from calls made through this plugin's provider. \"Access as DSH models\" is off in the Models tab — counts start once it is on.",
+  "quota.countingPending": "\"Access as DSH models\" is on but the provider is not registered yet (see the Models tab); local counts start once registration takes effect.",
 
   // The catalog table and its per-row usage probe were removed (see the
   // panel-page.ts modelsBody comment), so models.none / models.loading were

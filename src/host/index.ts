@@ -145,7 +145,10 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   // 出图作业表：两段式工具靠它把 `jobId` 续上。**建在这里**（而不是在
   // draw-register 内部现建）= 下面的卸载清理拿得到引用；否则 `DrawJobs.dispose()`
   // 没有任何调用方，表随进程活到最后（2026-10-19 锐评实测）。
-  const drawJobs = createDrawJobs();
+  // 续查保护窗传**生效的总放弃线**（drawTimeoutMs）：作业年龄超过它的，带
+  // jobId 回来也只会换来「超过总预算」，淘汰时优先丢这些（2026-10-19 评审
+  // 落地，见 draw-jobs.ts 文件头的两级淘汰）。
+  const drawJobs = createDrawJobs({ resumeWindowMs: settings.drawTimeoutMs });
   // 用量面板的显示偏好（趋势图画多少天）。与 usageStore 分开：那是数据，这是偏好。
   const usagePrefsStore = createFileUsagePrefsStore({ profile, logger: ctx.logger });
   const publisher = createProviderPublisher({

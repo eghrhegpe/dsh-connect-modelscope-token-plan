@@ -359,6 +359,8 @@ let writeResponses = [];
 let defaultSnapshot = { body: null };   // §0e 之后指向 SNAPSHOT
 let holdSnapshots = 0;
 let holdWrites = 0;
+/** §17f 专用：让所有非快照 GET 失败——用来造「provider 兜底 GET 也失败」的真降级路径。 */
+let failNonSnapshotGets = false;
 
 /** 与真 fetch 一致：已作废的请求不返回结果，reject 一个 AbortError。 */
 const abortError = () => {
@@ -395,6 +397,7 @@ globalThis.fetch = async (url, init = {}) => {
   const nextDescriptor = () => {
     if (record.method === "POST") return writeResponses.length > 0 ? writeResponses.shift() : { body: { ok: true } };
     if (isSnapshot) return snapshotResponses.length > 0 ? snapshotResponses.shift() : defaultSnapshot;
+    if (failNonSnapshotGets) return { networkError: "fallback route is down" };
     return { body: { ok: true } };
   };
   if (isSnapshot && holdSnapshots > 0) {
@@ -1166,6 +1169,52 @@ assert.ok(bodyText().includes(tt("events.none")), "events:[] → 「暂无事件
 assert.ok(!bodyText().includes(tt("events.unreadable")), "真实空事件不得被画成「读不到」");
 renderer.unmount();
 await settle();
+
+// ── §17f 本地计数的生产者依赖：未接入时说出口，读不到时不断言 ──
+//
+// 2026-10-19 评审落地：四块本地计数的唯一生产者（usage-observer）只挂在注册
+// provider 后的适配器上，未接入时恒为 0/空——依赖必须渲染成界面事实。第三种
+// 情形（provider 块省略 + 兜底 GET 也失败）出**任何**结论都是替 Host 断言，
+// 那是伪造不是降级（与 balance 的 tokenKnownAbsent 同一条纪律）。
+{
+  snapshotResponses = [{ body: snapshotWith({ provider: { ...SNAPSHOT.provider, enabled: false, registered: false } }) }];
+  renderer.mount(PanelPage, { tt, localeSubscribe: null });
+  await settle();
+  assert.ok(bodyText().includes(tt("quota.countingOff")), "未开启接入：本地计数区块明示生产依赖");
+  assert.ok(!bodyText().includes(tt("quota.countingPending")), "没开启就不该说「已开启未注册」");
+  renderer.unmount();
+  await settle();
+
+  snapshotResponses = [{ body: snapshotWith({ provider: { ...SNAPSHOT.provider, enabled: true, registered: false } }) }];
+  renderer.mount(PanelPage, { tt, localeSubscribe: null });
+  await settle();
+  assert.ok(bodyText().includes(tt("quota.countingPending")), "开了但没注册成功：提示改说注册状态");
+  assert.ok(!bodyText().includes(tt("quota.countingOff")), "已开启时不该再教用户去开开关");
+  renderer.unmount();
+  await settle();
+
+  snapshotResponses = [{ body: snapshotWith({ provider: { ...SNAPSHOT.provider, enabled: true, registered: true } }) }];
+  renderer.mount(PanelPage, { tt, localeSubscribe: null });
+  await settle();
+  assert.ok(!bodyText().includes(tt("quota.countingOff")), "已接入且已注册：不该再提示依赖");
+  assert.ok(!bodyText().includes(tt("quota.countingPending")), "已注册：不该再提示注册状态");
+  renderer.unmount();
+  await settle();
+
+  const noProvider = { ...SNAPSHOT };
+  delete noProvider.provider;
+  snapshotResponses = [{ body: noProvider }];
+  failNonSnapshotGets = true;   // 快照没给 provider 块，兜底 GET 也失败 → 真降级路径
+  renderer.mount(PanelPage, { tt, localeSubscribe: null });
+  await settle();
+  assert.ok(
+    !bodyText().includes(tt("quota.countingOff")) && !bodyText().includes(tt("quota.countingPending")),
+    "provider 状态读不到（降级形状）时不得断言「未开启」——不知道 ≠ 没开"
+  );
+  renderer.unmount();
+  await settle();
+  failNonSnapshotGets = false;
+}
 
 globalThis.setInterval = realSetInterval;
 globalThis.clearInterval = realClearInterval;

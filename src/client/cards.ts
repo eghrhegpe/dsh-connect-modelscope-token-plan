@@ -88,8 +88,12 @@ export function BalanceCard({ balance, tt }: { balance: BalanceData | null; tt: 
  * 刻意**不画**「推算剩余/参考上限」进度条：官方已改为魔粒计费，「2000 次」
  * 是次数口径的社区快照，与魔粒余额并排展示是误导（README「三条事实」#2）。
  * 本地计数回答的是官方余额回答不了的问题：哪个模型在烧、何时撞的 429。
+ *
+ * `countingNote`（已翻译的提示文本，null = 不显示）由 PanelPage 给：本地计数的
+ * 唯一生产者挂在注册 provider 后的适配器上，未接入时这张卡恒为 0/空——那件事
+ * 必须说出口（2026-10-19 评审落地）。
  */
-export function LocalDailyCard({ snapshot, tt }: { snapshot: Snapshot; tt: Tt }): unknown {
+export function LocalDailyCard({ snapshot, countingNote = null, tt }: { snapshot: Snapshot; countingNote?: string | null; tt: Tt }): unknown {
   // 与 BalanceCard / ModelUsageTable / EventsList 同一纪律：形状不对渲染「空」，
   // 绝不抛。曾经这里是裸解构，quota 一旦缺失就TypeError——而本文件头部就写着
   // 「形状不对的数据渲染『空』，绝不抛」，自己没做到。
@@ -114,6 +118,8 @@ export function LocalDailyCard({ snapshot, tt }: { snapshot: Snapshot; tt: Tt })
     h("div", { style: S.poolName }, format(tt("quota.headline"), { calls: usedText, models: perModelUnknown ? "—" : count(perModelRows.length) })),
     unknownUsed || perModelUnknown ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("quota.unavailable")) : null,
     perModelUnknown ? null : h(ModelUsageTable, { rows: perModelRows, tt }),
+    // 生产者依赖提示（未接入 / 未注册时显示；颜色与「读不到」同一档警示）。
+    countingNote !== null ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, countingNote) : null,
     h("div", { style: S.trendLegend }, tt("quota.note"))
   );
 }

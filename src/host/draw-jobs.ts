@@ -26,7 +26,17 @@
  * FAILED），「我不记得这个 job」与「这张图还能取回来」本来就不能划等号。
  *
  * 容量有上限：每出一张图就多一条，无限增长会把长跑会话的内存慢慢吃成泄漏。
- * 淘汰最旧的（FIFO），与 `maxEvents` 那一类上限同一纪律。
+ * 淘汰分两级（2026-10-19 评审落地）：
+ *
+ *   1. **软上限**（`maxJobs`）只淘汰**已过续查保护窗**的作业——年龄 ≥
+ *      `resumeWindowMs` 的作业即便被 agent 找回来，也早已越过总放弃线，
+ *      续查只会换来「超过总预算」，留着没有意义；
+ *   2. **硬上限**（`hardMaxJobs`）保底：全是保护窗内的作业也绝不无界，
+ *      超过它淘汰最旧。保护窗回答「该不该留」，硬上限回答「最多留多少」。
+ *
+ * 保护窗的默认值 15 分钟 = 出图默认总放弃线（`drawTimeoutMs`）；装配处
+ * （`index.ts`）传 `settings.drawTimeoutMs` 覆盖，于是「还能续查」与工具侧
+ * 的放弃线是同一条线，不会出现「表还记得、工具已经放弃」的中间态。
  *
  * peer-free、不碰 I/O、不碰时间以外的环境——可进离线 `npm test`。
  *
@@ -53,6 +63,14 @@ export interface DrawJob {
 export interface DrawJobsOptions {
   /** 最多保留多少条作业，超出淘汰最旧的。 */
   maxJobs?: number;
+  /**
+   * 续查保护窗（毫秒）：年龄小于它的作业仍可能被 agent 带 jobId 续查，
+   * 软上限淘汰时优先跳过。默认 15 分钟（= 出图默认总放弃线 drawTimeoutMs；
+   * 装配处传 settings.drawTimeoutMs 覆盖，见文件头）。
+   */
+  resumeWindowMs?: number;
+  /** 硬上限（默认 2 × maxJobs）：超过它无条件淘汰最旧，保护窗不放弃有界性。 */
+  hardMaxJobs?: number;
 }
 
 /** 作业表。 */
@@ -67,16 +85,29 @@ export interface DrawJobs {
 
 /**
  * 建一张出图作业表。
- * @param {DrawJobsOptions} [options] - 容量上限。
+ * @param {DrawJobsOptions} [options] - 容量与保护窗参数。
  * @returns {DrawJobs} 作业表。
  */
 export function createDrawJobs(options: DrawJobsOptions = {}): DrawJobs {
   const maxJobs = Math.max(1, Math.floor(options.maxJobs ?? 64));
+  const resumeWindowMs = Math.max(1, Math.floor(options.resumeWindowMs ?? 900_000));
+  const hardMaxJobs = Math.max(maxJobs, Math.floor(options.hardMaxJobs ?? maxJobs * 2));
   /** @type {Map<string, DrawJob>} 插入顺序即淘汰顺序（Map 保序）。 */
   const jobs = new Map<string, DrawJob>();
 
-  const evictIfNeeded = (): void => {
-    while (jobs.size > maxJobs) {
+  /**
+   * 超容时的两级淘汰（判据见文件头「生命周期」）：
+   *   软上限只淘汰已过续查保护窗的（越过总放弃线，续查只换来「超过总预算」）；
+   *   硬上限保底——全是保护窗内的作业也绝不无界。
+   * @param {number} now - 当前墙钟毫秒（`create` 的 `now` 缝传进来，测试可造旧作业）。
+   */
+  const evictIfNeeded = (now: number): void => {
+    if (jobs.size <= maxJobs) return;
+    for (const [id, job] of jobs) {
+      if (jobs.size <= maxJobs) return;
+      if (now - job.submittedAt >= resumeWindowMs) jobs.delete(id);
+    }
+    while (jobs.size > hardMaxJobs) {
       const oldest = jobs.keys().next();
       if (oldest.done === true) return;
       jobs.delete(oldest.value);
@@ -86,12 +117,13 @@ export function createDrawJobs(options: DrawJobsOptions = {}): DrawJobs {
   return {
     create({ taskId, model, prompt, now }) {
       const jobId = taskId;
+      const at = typeof now === "number" && Number.isFinite(now) ? now : Date.now();
       const job: DrawJob = {
         jobId,
         taskId,
         model,
         prompt,
-        submittedAt: typeof now === "number" && Number.isFinite(now) ? now : Date.now(),
+        submittedAt: at,
         polls: 0
       };
       // 同一个 taskId 重复登记（理论上不会：taskId 由上游现发）→ 以新代旧，
@@ -99,7 +131,7 @@ export function createDrawJobs(options: DrawJobsOptions = {}): DrawJobs {
       const previous = jobs.get(jobId);
       if (previous !== undefined) job.polls = previous.polls;
       jobs.set(jobId, job);
-      evictIfNeeded();
+      evictIfNeeded(at);
       return { ...job };
     },
     get(jobId) {

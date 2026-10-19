@@ -174,6 +174,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"quota.rowTokens": "{tokens} token",
 			"quota.note": "本地口径：只统计本客户端经本插件的调用（桌面端与 Web 端各记各的）；直连魔搭的其它客户端不计入。消耗总量以官方魔粒余额为准。",
 			"quota.unavailable": "本地计数本次读不到（原因见上方提示）",
+			"quota.countingOff": "本地计数只统计接入后的调用：当前未开启「接入为 DSH 模型」（开关在「模型」tab），开启后开始记录。",
+			"quota.countingPending": "「接入为 DSH 模型」已开启但尚未注册成功（见「模型」tab 状态），注册生效后本地计数开始记录。",
 			"probe.validity": "验令牌（零额度）",
 			"probe.validOk": "令牌有效（HTTP {status}）",
 			"probe.fail": "失败：{error}",
@@ -326,6 +328,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"quota.rowTokens": "{tokens} tokens",
 			"quota.note": "Local scope: only calls this client made through this plugin are counted (desktop and web keep separate ledgers); clients calling ModelScope directly are not. Total consumption is governed by the official Magicube balance.",
 			"quota.unavailable": "Local counters could not be read this time (reason in the notices above)",
+			"quota.countingOff": "Local counts come from calls made through this plugin's provider. \"Access as DSH models\" is off in the Models tab — counts start once it is on.",
+			"quota.countingPending": "\"Access as DSH models\" is on but the provider is not registered yet (see the Models tab); local counts start once registration takes effect.",
 			"probe.validity": "Verify token (free)",
 			"probe.validOk": "Token valid (HTTP {status})",
 			"probe.fail": "Failed: {error}",
@@ -1518,8 +1522,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	* 刻意**不画**「推算剩余/参考上限」进度条：官方已改为魔粒计费，「2000 次」
 	* 是次数口径的社区快照，与魔粒余额并排展示是误导（README「三条事实」#2）。
 	* 本地计数回答的是官方余额回答不了的问题：哪个模型在烧、何时撞的 429。
+	*
+	* `countingNote`（已翻译的提示文本，null = 不显示）由 PanelPage 给：本地计数的
+	* 唯一生产者挂在注册 provider 后的适配器上，未接入时这张卡恒为 0/空——那件事
+	* 必须说出口（2026-10-19 评审落地）。
 	*/
-	function LocalDailyCard({ snapshot, tt }) {
+	function LocalDailyCard({ snapshot, countingNote = null, tt }) {
 		const quota = snapshot.quota;
 		const daily = quota?.daily ?? { usedLocal: null };
 		const perModel = quota?.perModel;
@@ -1536,7 +1544,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		} }, tt("quota.unavailable")) : null, perModelUnknown ? null : h(ModelUsageTable, {
 			rows: perModelRows,
 			tt
-		}), h("div", { style: S.trendLegend }, tt("quota.note")));
+		}), countingNote !== null ? h("div", { style: {
+			...S.formNote,
+			color: "var(--dsw-alias-state-warn-primary)"
+		} }, countingNote) : null, h("div", { style: S.trendLegend }, tt("quota.note")));
 	}
 	/** 今日单模型排行（相对最大者画条）。 */
 	function ModelUsageTable({ rows, tt }) {
@@ -2611,6 +2622,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				cancelled = true;
 			};
 		}, [hasDrawBlock, pollRevision]);
+		const countingNote = !(hasProviderBlock || fetchedProvider !== null) ? null : provider.enabled !== true ? tt("quota.countingOff") : provider.registered !== true ? tt("quota.countingPending") : null;
 		const [providerBusy, setProviderBusy] = useState(false);
 		const [providerError, setProviderError] = useState(null);
 		const writeErrorText = (reason, t) => reason instanceof Error && reason.name === "AbortError" ? t("common.timeout") : errorText(reason);
@@ -2761,6 +2773,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				tt
 			}, h(LocalDailyCard, {
 				snapshot: snap,
+				countingNote,
 				tt
 			})), h(SectionCard, {
 				title: format(tt("section.trend"), { days: snap.trend?.days ?? 0 }),

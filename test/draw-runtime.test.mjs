@@ -282,15 +282,48 @@ section("提交阶段 401/403 走账号态分诊", async () => {
   await assert.rejects(() => runDrawOnce({ fetchImpl: second.fetchImpl, ...BASE, ...FAST }), /邮箱验证/);
 });
 
-section("轮询阶段 HTTP 错误带出状态码分诊", async () => {
+section("轮询阶段 4xx 错误带出状态码分诊（终局：等下去也不会变）", async () => {
   const { fetchImpl } = scriptedFetch([
     res(200, { task_id: "t1" }),
-    res(503, "upstream down")
+    res(400, "bad id")
   ]);
-  await assert.rejects(() => runDrawOnce({ fetchImpl, ...BASE, ...FAST }), /上游服务异常/);
+  await assert.rejects(() => runDrawOnce({ fetchImpl, ...BASE, ...FAST }), /轮询请求失败/);
+  const unauthorized = scriptedFetch([
+    res(200, { task_id: "t1" }),
+    res(401, "unauthorized")
+  ]);
+  await assert.rejects(() => runDrawOnce({ fetchImpl: unauthorized.fetchImpl, ...BASE, ...FAST }), /令牌无效/);
 });
 
-section("非 2xx 的轮询不拿上一轮读数当终态证据（截止时间可能根本没到）", async () => {
+section("轮询 5xx/429 是瞬态不判死刑：同一个抖动不因表现为 503 就被杀掉", async () => {
+  // 2026-10-19 评审落地：传输层抛错（ECONNRESET）本来就「继续等」，而同一种
+  // CDN 边缘抖动以 5xx **响应**出现时，旧写法直接判作业死刑 + 进冷却——同一个
+  // 物理故障两种判法不成立（判据见 draw-runtime.ts 的 isTransientPollStatus）。
+  const { fetchImpl } = scriptedFetch([
+    res(200, { task_id: "t1" }),
+    res(503, "upstream down"),
+    res(429, "slow down"),
+    res(200, { task_status: "SUCCEED", output_images: ["u"] })
+  ]);
+  const out = await runDrawOnce({ fetchImpl, ...BASE, ...FAST });
+  assert.deepEqual(out.images, ["u"], "瞬态之后还要继续等，不能把作业杀掉");
+});
+
+section("全程瞬态不会永远转：耗尽等待预算后按 pending 收场（续查把手不丢）", async () => {
+  // scriptedFetch 把最后一步无限重复 → 整个预算都在 502 里度过。
+  const { fetchImpl } = scriptedFetch([res(200, { task_id: "t1" }), res(502, "bad gateway")]);
+  const awaited = await awaitDrawTask({
+    ...BASE,
+    taskId: "t1",
+    fetchImpl,
+    waitMs: 300,
+    pollIntervalMs: 1
+  });
+  assert.equal(awaited.kind, "pending", "瞬态持续 = 还没好，不是失败");
+  assert.ok(awaited.polls >= 2, `预算内应轮询多轮（实测 ${awaited.polls} 轮）`);
+});
+
+section("非 2xx（4xx）的轮询不拿上一轮读数当终态证据（截止时间可能根本没到）", async () => {
   // 旧写法把 `lastStatus`（上一轮的 RUNNING）塞进 taskStatus，于是 400 会被报成
   // 「任务停在 RUNNING（非终态），已超过截止时间」——这里的 waitMs 才 5s，第一轮
   // 轮询刚回来就报「超过截止时间」是凭空的因果。
@@ -539,6 +572,20 @@ section("pending 不进冷却：续查这条路不能被上一次「还没好」
   });
   const out = await def.execute({ prompt: "a cat" });
   assert.equal(out.status, "pending", "pending 若进冷却，这里会抛而不是返回");
+});
+
+section("工具层：全程瞬态 5xx 也返回 pending + jobId——边缘抖动不是出图失败", async () => {
+  // 与「pending 不进冷却」同族：agent 视角下这张图「还没好」，重新提交才是错解。
+  const jobs = createDrawJobs();
+  const { def } = makeTool({
+    jobs,
+    settings: { drawWaitMs: 300 },
+    steps: [res(200, { task_id: "t-flaky" }), res(503, "edge hiccup")]
+  });
+  const out = await def.execute({ prompt: "a cat" });
+  assert.equal(out.status, "pending", "上游边缘持续 5xx = 还没好，不是失败");
+  assert.equal(out.jobId, "t-flaky", "pending 必须交回 jobId（续查把手）");
+  assert.match(out.hint, /仍在生成中/);
 });
 
 section("真失败才进冷却（上游 FAILED）", async () => {
