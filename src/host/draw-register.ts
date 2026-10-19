@@ -64,7 +64,7 @@ async function resolveService(ctx: { get?: (key: string) => unknown }, service: 
  * 读一次开关，决定是否注册出图工具。
  * @param {object} ctx - Host 上下文。
  * @param {object} wiring - `{ settings, configError, tokenStore, inference, providerStore, publisher, logger }`。
- * @param {object} deps - 测试缝（`loadToolsModule`、`drawFetch`）。
+ * @param {object} deps - 测试缝（`loadToolsModule`、`drawFetch`、`pollIntervalMs`）。
  * @returns {Promise<void>}
  */
 export async function registerDrawTool(
@@ -152,6 +152,13 @@ export async function registerDrawTool(
           drawTimeoutMs: settings.drawTimeoutMs,
           drawWaitMs: settings.drawWaitMs
         },
+        // 作业表由 wiring 提供（index.ts 建、index.ts 的卸载清理销毁）。条件展开：
+        // 测试的 `wiringFor()` 不带这张表，缺省由 `defineDrawTool` 现建一张，
+        // 于是那条「注入作业表」的现成缝仍然照旧可用。
+        ...(wiring.drawJobs !== undefined ? { jobs: wiring.drawJobs } : {}),
+        // 轮询间隔同样是装配缝（`defineDrawTool` 的注释写着「离线测试要把它压到
+        // 毫秒级」）：默认 15s 会让本套件的每个 execute 至少睡一次 15s。
+        ...(deps.pollIntervalMs !== undefined ? { pollIntervalMs: deps.pollIntervalMs } : {}),
         isDisposed
       })
     );

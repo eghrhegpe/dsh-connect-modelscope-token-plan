@@ -344,7 +344,15 @@ export function describeDrawFailure(failure: {
   const tail = text === "" ? "" : `; body: ${text}`;
 
   if (status === 401 || status === 403) {
-    return `出图失败：HTTP ${status} —— 访问令牌无效、无权访问该模型，或账号未完成邮箱验证/实名（后者是实测遇到过的真实拦截）。请在面板确认令牌与账号状态${tail}`;
+    // 账号态（邮箱验证/实名）是**上游 body 里说的**，不是状态码的语义：同一个 401
+    // 也覆盖令牌过期或无权访问该模型（`docs/SPIKE-image-gen.md:74` 的匿名 401 只
+    // 证明端点存在）。所以这句只在 body 真写出账号态时才出现，否则给中性枚举——
+    // 把「实测遇到过一次」写成 401/403 的固定附注，等于编造上游未给的原因。
+    const accountState = /邮箱|实名|认证|email\s*verif|verif\w*\s*email|complete\s+your\s+profile/i.test(text);
+    const reason = accountState
+      ? "访问令牌无效、无权访问该模型，或账号未完成邮箱验证/实名（上游 body 提到了账号态）"
+      : "访问令牌无效或无权访问该模型（上游未说明账号态）";
+    return `出图失败：HTTP ${status} —— ${reason}。请在面板确认令牌与账号状态${tail}`;
   }
   if (status === 404) {
     return `出图失败：HTTP 404 —— 端点或模型不存在（检查 apiBase 与模型 id）${tail}`;

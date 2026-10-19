@@ -44,6 +44,13 @@ export interface HostDeps {
   /** 出图的 fetch 缝；缺省全局 `fetch`。同样**实际在用**。 */
   drawFetch?: (url: string, options: object) => Promise<unknown>;
   /**
+   * 出图轮询间隔的装配缝（`draw-register.ts` → `defineDrawTool`）；缺省 15s。
+   *
+   * 与 `drawFetch` 同性质，但它管的是**时间**：默认 15s 意味着任何走真装配链的
+   * 离线用例都要睡满一个间隔（`draw-register.test.mjs` 会从 10s 级掉到 10ms 级）。
+   */
+  pollIntervalMs?: number;
+  /**
    * provider 适配器工厂模块的加载缝（publisher 的 `loadAdapterModule`，缺省真
    * `import("./llm-adapter.ts")`）。真模块 import 的 peer（`@deepseek-ai/dsh-llm-pi-ai`）
    * 只在 Host 进程里存在，离线测试进程加载必败——测试注入假模块（返回
@@ -84,6 +91,15 @@ export interface Wiring {
    * 「给 agent 一个出图工具」。分开是有意的（见 draw-store.ts 头注）。
    */
   drawStore: ReturnType<typeof import("./draw-store.ts").createFileDrawStore>;
+  /**
+   * 出图作业表（纯进程内，不落盘）：两段式工具靠它把 `jobId` 续上。
+   *
+   * 它必须挂在 wiring 上、由 `index.ts` 建与销毁，**不能**在 `draw-register.ts`
+   * 里现建：那样没有任何人持有它的引用，`DrawJobs.dispose()` 永远走不到（2026-10-19
+   * 锐评实测：`dispose()` 的调用方只剩测试）。表随插件卸载清空是安全的——工具无法
+   * 从 peer registry 注销，但 `execute` 的 `isDisposed` 闸已在拒绝卸载后的调用。
+   */
+  drawJobs: ReturnType<typeof import("./draw-jobs.ts").createDrawJobs>;
   /**
    * 用量面板的显示偏好持久层（目前只有趋势图的显示窗口）。
    *

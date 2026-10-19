@@ -26,6 +26,7 @@ import { createFileUsageStore } from "./usage-store.ts";
 import { createInferenceClient } from "./inference-client.ts";
 import { createFileProviderStore } from "./provider-store.ts";
 import { createFileDrawStore } from "./draw-store.ts";
+import { createDrawJobs } from "./draw-jobs.ts";
 import { createFileUsagePrefsStore } from "./usage-prefs-store.ts";
 import { registerDrawTool } from "./draw-register.ts";
 import { resetDrawToolNote } from "./draw-tool-state.ts";
@@ -93,6 +94,10 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
 
   // 出图开关的持久层。（与 provider 开关同一个 profile 分段纪律；两个开关独立。）
   const drawStore = createFileDrawStore({ profile, logger: ctx.logger });
+  // 出图作业表：两段式工具靠它把 `jobId` 续上。**建在这里**（而不是在
+  // draw-register 内部现建）= 下面的卸载清理拿得到引用；否则 `DrawJobs.dispose()`
+  // 没有任何调用方，表随进程活到最后（2026-10-19 锐评实测）。
+  const drawJobs = createDrawJobs();
   // 用量面板的显示偏好（趋势图画多少天）。与 usageStore 分开：那是数据，这是偏好。
   const usagePrefsStore = createFileUsagePrefsStore({ profile, logger: ctx.logger });
   const publisher = createProviderPublisher({
@@ -147,6 +152,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     inference,
     providerStore,
     drawStore,
+    drawJobs,
     usagePrefsStore,
     publisher,
     reconcile,
@@ -194,6 +200,10 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
       // 缺席原因 + 「本次是否注册上」一起清：下一个生命周期从干净的「未登记、
       // 未注册」开始（否则一次成功挂载后会残留上一轮的缺席原因或注册位）。
       resetDrawToolNote();
+      // 作业表只对本进程、本次挂载有意义：撤下插件时清空，别把「哪些 jobId 还能
+      // 续查」留成悬挂状态。卸载后 `execute` 已被 `isDisposed` 闸住，所以这一步
+      // 只防内存滞水，不改用户可见行为。
+      drawJobs.dispose();
       // 顺序承重：先 dispose（闸住后续 publish，不再注册进已撤下本插件的 Host），
       // 再 release（摘掉已注册的 provider 对）。
       publisher.dispose();

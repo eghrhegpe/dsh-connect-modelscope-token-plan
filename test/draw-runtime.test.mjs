@@ -27,6 +27,7 @@ import {
   defineDrawTool
 } from "../src/host/draw-runtime.ts";
 import { createDrawJobs } from "../src/host/draw-jobs.ts";
+import { DRAW_TIMEOUT_MAX_MS } from "../src/host/host-config.ts";
 import { drawCandidates, resolveDrawModelChoice } from "../src/host/llm-models.ts";
 
 const checks = [];
@@ -289,6 +290,23 @@ section("轮询阶段 HTTP 错误带出状态码分诊", async () => {
   await assert.rejects(() => runDrawOnce({ fetchImpl, ...BASE, ...FAST }), /上游服务异常/);
 });
 
+section("非 2xx 的轮询不拿上一轮读数当终态证据（截止时间可能根本没到）", async () => {
+  // 旧写法把 `lastStatus`（上一轮的 RUNNING）塞进 taskStatus，于是 400 会被报成
+  // 「任务停在 RUNNING（非终态），已超过截止时间」——这里的 waitMs 才 5s，第一轮
+  // 轮询刚回来就报「超过截止时间」是凭空的因果。
+  const { fetchImpl } = scriptedFetch([
+    res(200, { task_id: "t1" }),
+    res(200, { task_status: "RUNNING" }),
+    res(400, '{"errors":{"message":"invalid task id"}}')
+  ]);
+  const err = await runDrawOnce({ fetchImpl, ...BASE, ...FAST }).then(() => null, (e) => e);
+  assert.ok(err !== null, "非 2xx 轮询要报错，不能静默继续等");
+  assert.match(err.message, /轮询请求失败/, "要说清是「本轮没读到」，而不是「任务卡住了」");
+  assert.match(err.message, /400/, "状态码必须带出来");
+  assert.match(err.message, /上一轮读到 RUNNING/, "上一轮读数只作为上下文出现");
+  assert.doesNotMatch(err.message, /已超过截止时间/, "截止时间没到就不能这么说");
+});
+
 section("未知状态继续等，不误判失败", async () => {
   const { fetchImpl, calls } = scriptedFetch([
     res(200, { task_id: "t1" }),
@@ -414,9 +432,48 @@ section("abort 立即中断轮询中的 sleep（不必等满间隔）", async ()
   assert.equal(calls.length, 0, "sleep 被中断，第一轮轮询都没发出");
 });
 
+section("abort 也取消在途的轮询请求，不只在 sleep 里", async () => {
+  const controller = new AbortController();
+  const calls = [];
+  // 慢档上游：请求发出去就不回。只有拿到 signal 才可能被取消。
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return await new Promise((_, reject) => {
+      // 兜底：万一 signal 没传进来（回归），2s 后自己失败，测试红在断言上而不是挂死。
+      const fallback = setTimeout(() => reject(new Error("stub: 上游没回")), 2_000);
+      options.signal?.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(fallback);
+          reject(new Error("aborted"));
+        },
+        { once: true }
+      );
+    });
+  };
+  const started = Date.now();
+  setTimeout(() => controller.abort(), 20);
+  const out = await awaitDrawTask({
+    ...BASE,
+    taskId: "t1",
+    fetchImpl,
+    waitMs: 60_000,
+    pollIntervalMs: 1,
+    signal: controller.signal
+  });
+  const elapsed = Date.now() - started;
+  assert.equal(
+    calls[0].options.signal,
+    controller.signal,
+    "轮询请求必须带上 signal，否则在途请求取消不了（2026-10-19 之前这里是 undefined）"
+  );
+  assert.equal(out.kind, "pending", "abort 是「还没好」，不是失败");
+  assert.ok(elapsed < 1_500, `abort 必须中断在途请求（实测 ${elapsed}ms）`);
+});
+
 // ── 两段式工具：一次调用不再阻塞整轮对话 ──────────────────────────────────────
 /** 装配一个工具（捕获 peer 的 defineTool 入参，直接调它的 execute）。 */
-function makeTool({ steps, settings = {}, jobs, getEntries, cooldown }) {
+function makeTool({ steps, settings = {}, jobs, getEntries, cooldown, isDisposed }) {
   const { fetchImpl, calls } = scriptedFetch(steps);
   let def = null;
   defineDrawTool({
@@ -433,6 +490,7 @@ function makeTool({ steps, settings = {}, jobs, getEntries, cooldown }) {
     },
     ...(jobs !== undefined ? { jobs } : {}),
     ...(cooldown !== undefined ? { cooldown } : {}),
+    ...(isDisposed !== undefined ? { isDisposed } : {}),
     pollIntervalMs: 1
   });
   return { def, calls };
@@ -522,6 +580,78 @@ section("工具硬护栏按 waitMs 设，不再是 15 分钟的总放弃线", as
     `一次调用最多只能占住 waitMs 量级（实测 ${def.timeoutMs}ms）；等于总放弃线 = 又把 agent 卡回 15 分钟`
   );
   assert.ok(DRAW_WAIT_BUDGET_MS >= 60_000, "默认等待预算应能一次拿完实测最快那一档（61s）");
+});
+
+section("硬护栏恒不超过 DRAW_TIMEOUT_MAX_MS（含 wait == timeout 的边界）", async () => {
+  // 配置允许 `drawWaitMs == drawTimeoutMs`（上限 DRAW_TIMEOUT_MAX_MS）。旧写法
+  // `waitMs + 10_000` 在边界上让护栏到 1_810_000——越过 host-config 声明的上限，
+  // 且「等待循环先返回」退化成「用户不会把两个值设成相等」的运气。现在 waitMs
+  // 自己让出这段余量，不变式是 waitMs + margin <= timeoutMs <= MAX。
+  const edge = makeTool({
+    steps: [res(200, { task_id: "t1" })],
+    settings: { drawTimeoutMs: DRAW_TIMEOUT_MAX_MS, drawWaitMs: DRAW_TIMEOUT_MAX_MS }
+  });
+  assert.ok(
+    edge.def.timeoutMs <= DRAW_TIMEOUT_MAX_MS,
+    `护栏 ${edge.def.timeoutMs}ms 越过 DRAW_TIMEOUT_MAX_MS (${DRAW_TIMEOUT_MAX_MS}ms)`
+  );
+  const huge = makeTool({ steps: [res(200, { task_id: "t1" })], settings: { drawTimeoutMs: 9_999_999, drawWaitMs: 5 } });
+  assert.ok(
+    huge.def.timeoutMs <= DRAW_TIMEOUT_MAX_MS,
+    `直接传入超限的 drawTimeoutMs 也必须被夹住（实测 ${huge.def.timeoutMs}ms）`
+  );
+});
+
+section("挂载被撤下：等待立即以 pending 收场并交回 jobId", async () => {
+  let disposed = false;
+  const { def, calls } = makeTool({
+    // 提交成功那一刻插件被撤下（用户关了开关 / 热重载）：紧接着的等待必须立刻收场。
+    steps: [
+      (url, options) => {
+        if (options.method === "POST") {
+          disposed = true;
+          return res(200, { task_id: "t1" });
+        }
+        return res(200, { task_status: "RUNNING" });
+      }
+    ],
+    settings: { drawWaitMs: 3_000 },
+    isDisposed: () => disposed
+  });
+  const started = Date.now();
+  const out = await def.execute({ prompt: "a cat" });
+  const elapsed = Date.now() - started;
+  assert.equal(out.status, "pending", "撤下不是失败：任务还在上游，jobId 要交回去");
+  assert.equal(out.jobId, "t1");
+  assert.equal(calls.length, 1, "abort 立即生效，等待循环一次轮询都没发出");
+  assert.ok(elapsed < 1_000, `撤下后不该继续占住调用（实测 ${elapsed}ms）`);
+});
+
+section("等待进行中被撤下：下一轮巡检就收场，不等预算耗尽", async () => {
+  let disposed = false;
+  const { def, calls } = makeTool({
+    // 撤下发生在**等待进行中**（用户关开关 / 热重载），而不是提交刚回来那一刻：
+    // 这只有等待循环里的巡检看得见——信号只能表达「已经中止」，问不出「刚刚被撤下」。
+    steps: [
+      res(200, { task_id: "t1" }),
+      (url, options) => {
+        void url;
+        void options;
+        disposed = true;
+        return res(200, { task_status: "RUNNING" });
+      },
+      res(200, { task_status: "SUCCEED", output_images: ["https://oss/a.png"] })
+    ],
+    settings: { drawWaitMs: 60_000 },
+    isDisposed: () => disposed
+  });
+  const started = Date.now();
+  const out = await def.execute({ prompt: "a cat" });
+  const elapsed = Date.now() - started;
+  assert.equal(out.status, "pending", "撤下不是失败，也不是「已生成」");
+  assert.equal(out.jobId, "t1", "jobId 要交回去：插件重挂后还能续查");
+  assert.equal(calls.length, 2, "第二轮轮询不该发出（撤下后每轮先巡检）");
+  assert.ok(elapsed < 2_000, `撤下后不该继续占住调用（实测 ${elapsed}ms，预算 60s）`);
 });
 
 // ── 工具定义 ──────────────────────────────────────────────────────────────────

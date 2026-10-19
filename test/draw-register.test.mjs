@@ -18,6 +18,7 @@ import { registerDrawTool } from "../src/host/draw-register.ts";
 import { drawToolNote, setDrawToolNote } from "../src/host/draw-tool-state.ts";
 import { DRAW_TOOL_NAME } from "../src/host/draw-runtime.ts";
 import { DRAW_TIMEOUT_MS, DRAW_WAIT_BUDGET_MS } from "../src/host/draw.ts";
+import { createDrawJobs } from "../src/host/draw-jobs.ts";
 import { CONFIG_DEFAULTS, name } from "../src/host/host-config.ts";
 
 const IMAGE_ENTRY = { id: "Qwen/Qwen-Image-Edit", tasks: ["image-to-image"] };
@@ -407,6 +408,45 @@ async function mount({ wiring = wiringFor(), tools = toolsService, deps = {}, ge
   });
   await assert.rejects(() => registered[0].execute({}), /prompt is required/, "prompt 是必需参数，缺了要当场拒");
   assert.equal(calls.length, 0, "缺 prompt 不发请求");
+}
+
+{
+  // 作业表由 wiring 提供（`index.ts` 建、`index.ts` 的卸载清理销毁）。缺这条线的话
+  // `DrawJobs.dispose()` 一个调用方都没有——2026-10-19 锐评正是从「谁调用 dispose」
+  // 这个问题挖出来的。这里钉住**工具用的就是接线那张表**：提交后 pending 的记录留在
+  // 表里，续查也读同一张（否则用户手里的 jobId 在新装配里查不到）。
+  const jobs = createDrawJobs();
+  const calls = [];
+  const { registered } = await mount({
+    wiring: onWiring({ drawJobs: jobs, settings: { ...onWiring().settings, drawWaitMs: 5 } }),
+    deps: {
+      // 默认 15s 的间隔会让每个 execute 至少睡一次 15s——这条缝就是为此存在的。
+      pollIntervalMs: 1,
+      drawFetch: (url, options) => {
+        calls.push({ url, options });
+        if (options.method === "POST") {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            text: async () => '{"task_id":"t-wired"}',
+            json: async () => ({ task_id: "t-wired" })
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: async () => '{"task_status":"RUNNING"}',
+          json: async () => ({ task_status: "RUNNING" })
+        });
+      }
+    }
+  });
+  const out = await registered[0].execute({ prompt: "a cat" });
+  assert.equal(out.status, "pending", "等不到终态就该 pending（这一节只借它验作业表接线）");
+  assert.ok(jobs.get("t-wired") !== null, "工具必须写进 wiring 上那张表：index.ts 才销毁得到");
+  const resumed = await registered[0].execute({ jobId: "t-wired" });
+  assert.equal(resumed.status, "pending", "续查读的也是同一张表（两张表就会「jobId 查不到」）");
+  assert.ok(calls.length >= 2, "续查只发 GET 轮询，不重新提交");
 }
 
 console.log("draw-register.test.mjs: all checks passed");

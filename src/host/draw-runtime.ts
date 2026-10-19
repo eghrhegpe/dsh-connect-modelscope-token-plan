@@ -46,6 +46,7 @@ import {
 } from "./draw.ts";
 import { isImageGenModel, imageGenModelIds, resolveDrawModelChoice, KNOWN_T2I_MODEL_ID } from "./llm-models.ts";
 import { createDrawJobs, type DrawJob, type DrawJobs } from "./draw-jobs.ts";
+import { DRAW_TIMEOUT_MAX_MS } from "./host-config.ts";
 import { str } from "./util.ts";
 
 /** agent 工具名。带插件前缀，避免与 `dsh-draw-router` 的 `draw_image` 撞名。 */
@@ -57,6 +58,14 @@ export { KNOWN_T2I_MODEL_ID };
 
 /** 一次失败的冷却窗：出图慢，失败后立刻重试既易撞限流又白等。 */
 const DRAW_FAILURE_COOLDOWN_MS = 60_000;
+
+/**
+ * 工具级硬护栏比单次等待预算多出的余量。
+ *
+ * 它保证**等待循环先返回**：护栏若与等待预算同值，正常路径会以 peer 的超时错误
+ * 结束，而不是带 `jobId` 的 `pending`——那会把续查这条唯一的把手换成一个死胡同。
+ */
+const DRAW_TOOL_TIMEOUT_MARGIN_MS = 10_000;
 
 /** fetch 的最小形状（只声明本模块用到的字段，不绑死运行时类型）。 */
 export interface DrawFetchResponse {
@@ -227,6 +236,9 @@ export type DrawAwait =
  * @param {string} options.taskId - 上游任务 id。
  * @param {number} [options.waitMs] - 本次调用的等待预算。
  * @param {number} [options.pollIntervalMs] - 轮询间隔（测试可缩短）。
+ * @param {() => boolean} [options.shouldStop] - 每轮轮询前问一次「还要不要继续」
+ *   （撤下闸）。`signal` 只能表达**已经**中止，问不出「刚刚被撤下」——等待循环是
+ *   本模块唯一的循环，撤下只有在这里能被周期性看见。
  * @returns {Promise<DrawAwait>} 三种结局之一。
  */
 export async function awaitDrawTask({
@@ -236,7 +248,8 @@ export async function awaitDrawTask({
   taskId,
   waitMs = DRAW_WAIT_BUDGET_MS,
   pollIntervalMs = DRAW_POLL_INTERVAL_MS,
-  signal
+  signal,
+  shouldStop
 }: {
   fetchImpl: DrawFetch;
   apiBase: string;
@@ -245,6 +258,7 @@ export async function awaitDrawTask({
   waitMs?: number;
   pollIntervalMs?: number;
   signal?: AbortSignal;
+  shouldStop?: () => boolean;
 }): Promise<DrawAwait> {
   const headers = {
     Authorization: `Bearer ${apiKey}`,
@@ -256,6 +270,9 @@ export async function awaitDrawTask({
   let lastStatus: string | undefined;
   for (;;) {
     if (Date.now() >= deadline) return { kind: "pending", polls };
+    // 撤下巡检（每轮一次）：只在等待循环里能看见「刚刚被撤下」。这里也**顺带**给
+    // signal 找机会中止——调用方把两者接在同一个闸上（见 defineDrawTool 的 shouldStop）。
+    if (shouldStop?.() === true) return { kind: "pending", polls };
     try {
       await sleep(interval, signal);
     } catch {
@@ -268,19 +285,30 @@ export async function awaitDrawTask({
       polled = await fetchImpl(buildTasksEndpoint(apiBase, taskId), {
         method: "GET",
         // 缺这个头 = 上游一律回 task not found + FAILED（假失败）。承重。
-        headers: { ...headers, [TASK_TYPE_HEADER]: TASK_TYPE_IMAGE_GENERATION }
+        headers: { ...headers, [TASK_TYPE_HEADER]: TASK_TYPE_IMAGE_GENERATION },
+        // abort 必须能取消**在途请求**，不只是 sleep：否则停止信号要等上游响应回来
+        // 才生效（慢档实测可达分钟级）。条件展开：exactOptionalPropertyTypes 下
+        // `signal: undefined` 不满足可选属性。
+        ...(signal !== undefined ? { signal } : {})
       });
     } catch {
+      // abort 是「停止」，不是抖动：立刻按 pending 返回，交给调用方决定下一步。
+      if (signal?.aborted === true) return { kind: "pending", polls };
       continue; // 传输层抖动：不升级为终局，等下一轮
     }
     const pollText = await safeText(polled);
     if (!polled.ok) {
+      // 本轮**没读到**状态：`lastStatus` 是上一轮的读数，不能当本轮的终态证据。
+      // 旧写法把它塞进 `taskStatus`，于是一个 400/402 会被报成「任务停在 RUNNING
+      // （非终态），已超过截止时间」——而截止时间根本没到。改用 `cause` 陈述事实；
+      // 分诊里 401/403/404/429/5xx 各有专条，仍优先于这句。
+      const previous = lastStatus !== undefined ? `（上一轮读到 ${lastStatus}）` : "";
       return {
         kind: "failed",
         message: describeDrawFailure({
           ...(polled.status !== undefined ? { status: polled.status } : {}),
           ...(pollText !== "" ? { bodyText: pollText } : {}),
-          ...(lastStatus !== undefined ? { taskStatus: lastStatus } : {})
+          cause: `轮询请求失败：HTTP ${polled.status ?? "未知"}，本轮未读到任务状态${previous}`
         })
       };
     }
@@ -520,27 +548,48 @@ export function defineDrawTool({
   pollIntervalMs?: number;
   isDisposed?: () => boolean;
 }) {
-  /** 总放弃线：从提交算起，跨多次调用累计。 */
-  const timeoutMs = Math.max(30_000, Math.floor(Number(settings?.drawTimeoutMs) > 0 ? Number(settings?.drawTimeoutMs) : DRAW_TIMEOUT_MS));
+  /**
+   * 总放弃线：从提交算起，跨多次调用累计。
+   *
+   * 上下界与 `host-config.resolveSettings` 同源，这里再夹一次是为了让本函数的
+   * 不变式**自足**：`waitMs + margin <= timeoutMs <= DRAW_TIMEOUT_MAX_MS`（见下面
+   * `waitMs` 与工具定义里的 `timeoutMs`）。直接调用本函数（不经配置层）时也成立。
+   */
+  const timeoutMs = Math.min(
+    DRAW_TIMEOUT_MAX_MS,
+    Math.max(30_000, Math.floor(Number(settings?.drawTimeoutMs) > 0 ? Number(settings?.drawTimeoutMs) : DRAW_TIMEOUT_MS))
+  );
   /**
    * 单次调用愿意等的时间。
    *
-   * 只夹**上界**（不该超过总放弃线，超过它的等待没有意义）；下界交给
-   * `host-config` 的 `drawWaitMs` clamp——同一个数在两处各夹一次，上限/下限就会
-   * 各说一套话（`drawTimeoutMs` 的 clamp 早已是本仓库的教训）。
+   * 上界是 `timeoutMs - margin`，**不是** `timeoutMs`：工具的硬护栏取
+   * `waitMs + margin`，若允许两者相等，护栏就会越过 `DRAW_TIMEOUT_MAX_MS`
+   * （配置允许 `drawWaitMs == drawTimeoutMs`，上限 1_800_000 → 护栏 1_810_000），
+   * 且「等待循环先返回」从结构保证退化成「用户不会把两个值设成相等」的运气。
+   * 下界交给 `host-config` 的 `drawWaitMs` clamp——同一个数在两处各夹一次，上限/
+   * 下限就会各说一套话（`drawTimeoutMs` 的 clamp 早已是本仓库的教训）。
    */
   const waitMs = Math.min(
-    timeoutMs,
+    Math.max(1, timeoutMs - DRAW_TOOL_TIMEOUT_MARGIN_MS),
     Math.max(1, Math.floor(Number(settings?.drawWaitMs) > 0 ? Number(settings?.drawWaitMs) : DRAW_WAIT_BUDGET_MS))
   );
   const apiBase = str(settings?.apiBase, "https://api-inference.modelscope.cn/v1");
 
   // AbortController：插件 dispose 时立即中断轮询中的 sleep，而不是等它自然结束。
   // 默认 15s 的间隔意味着用户点「停止」后最多要等 15s 才真正停——abort 让停止
-  // 信号立即生效。每次进入等待前检查一次；等待循环本身在 abort 时返回 pending。
+  // 信号立即生效。两条路合起来才盖得住：
+  //   ① 进入等待前问一次（`abortIfDisposed`）——撤下已发生；
+  //   ② 等待循环每轮问一次（`shouldStop`）——撤下发生在等待**进行中**。缺了 ②，
+  //      15s 间隔 × 90s 预算的等待会一直轮询到预算耗尽才回头。
+  // 提交那一段没有循环可以挂巡检，撤下发生在提交进行中时本轮提交仍会跑完（HTTP
+  // 提交本身是短请求，长尾都在轮询）。
   const abortController = new AbortController();
   const abortIfDisposed = () => {
     if (isDisposed()) abortController.abort();
+  };
+  const shouldStop = () => {
+    abortIfDisposed();
+    return isDisposed();
   };
 
   /**
@@ -563,7 +612,8 @@ export function defineDrawTool({
       taskId: job.taskId,
       waitMs,
       pollIntervalMs,
-      signal: abortController.signal
+      signal: abortController.signal,
+      shouldStop
     });
     if (awaited.kind === "failed") {
       // 终态失败：这张图不会再出，作业出表（留着只占容量）。
@@ -660,8 +710,9 @@ export function defineDrawTool({
       render: (_args: unknown, result: { hint?: unknown } | null | undefined) => [{ type: "text", text: result?.hint || "图片已生成" }]
     },
     // 硬护栏：一次调用只允许占住 waitMs（+ 一点余量），不再是总放弃线。它兜的是
-    // 「实现里出现了意外的等待」，正常情况下等待循环自己会在 waitMs 处返回。
-    timeoutMs: waitMs + 10_000,
+    // 「实现里出现了意外的等待」，正常情况下等待循环自己会在 waitMs 处返回——
+    // `waitMs` 已让出这段余量，所以「先返回」是结构保证（见它的头注）。
+    timeoutMs: waitMs + DRAW_TOOL_TIMEOUT_MARGIN_MS,
     async execute(params: Record<string, unknown> | undefined): Promise<DrawToolResult> {
       if (abortController.signal.aborted || isDisposed()) throw new Error("modelscope draw tool is no longer mounted");
       // 令牌两条路径都要（续查也要带 Authorization），所以提到分支之前。

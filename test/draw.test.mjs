@@ -248,9 +248,24 @@ section("describeDrawFailure 对非终态卡住给不同说法", () => {
   assert.match(msg, /截止时间/);
 });
 
-section("describeDrawFailure 的 401/403 指向令牌与账号态", () => {
+section("describeDrawFailure 的 401/403 不替上游编造账号态", () => {
   assert.match(describeDrawFailure({ status: 401 }), /令牌无效/);
-  assert.match(describeDrawFailure({ status: 403 }), /邮箱验证/, "实测真遇到过的拦截是邮箱未验证");
+  const neutral = describeDrawFailure({ status: 403 });
+  assert.match(neutral, /令牌无效/);
+  // 这条断言在 2026-10-19 之前是反的（要求 /邮箱验证/ 必须出现）。当时的依据是
+  // 「实测真遇到过的拦截是邮箱未验证」——但那次实测的 401 只证明端点存在
+  // （docs/SPIKE-image-gen.md:74），body 里没有任何账号态线索。把一次偶遇写成
+  // 状态码的语义，等于对每一个 401 都断言「你没实名」。
+  assert.ok(
+    !/邮箱验证/.test(neutral),
+    `body 没提账号态时不得替上游断言账号态：${neutral}`
+  );
+});
+
+section("describeDrawFailure 只在 body 真的提到账号态时才说账号态", () => {
+  const body = '{"errors":{"message":"please complete your profile via email verification"}}';
+  assert.match(describeDrawFailure({ status: 403, bodyText: body }), /邮箱验证/, "上游自己说了就照说");
+  assert.match(describeDrawFailure({ status: 401, bodyText: "账号未完成实名认证" }), /实名/, "中文口径同样认");
 });
 
 section("describeDrawFailure 分诊 404 / 429 / 5xx", () => {
