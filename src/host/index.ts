@@ -1,23 +1,71 @@
 /**
- * dsh-connect-modelscope-token-plan — Host 半边（thin router）。
+ * dsh-connect-modelscope-token-plan — Host 半边（装配入口）。
  *
- * 读魔搭 API-Inference 的**本地用量**，并把它与官方魔粒余额一起经一条只读 /api
- * 路由喂给 Client 面板。口径分工：推理响应**不携带**额度头（SPIKE.md §结论 1），但
- * 官方另有魔粒余额端点（`GET {siteBase}/openapi/v1/magicubes/balance`，SPIKE.md
- * 文首后记，2026-10-04 实测可用），面板头条读的是它；本文件下的兄弟模块只负责本地
- * 计数那一半（按模型分布 / 本地趋势 / 429 事件流），回答官方余额答不了的问题。
- * 重活都在专注的兄弟模块里，本文件
- * 只保留 Cordis 入口（name/inject/apply）、wiring 装配与卸载副作用：
+ * 本插件的定位是**额度 + provider + 出图 + 上下文窗口策展**的多功能集成（见
+ * AGENTS.md「定位变更」），不再是「只做额度信息」的那一版。口径分工：推理响应
+ * **不携带**额度头（SPIKE.md §结论 1），但官方另有魔粒余额端点
+ * （`GET {siteBase}/openapi/v1/magicubes/balance`，SPIKE.md 文首后记，2026-10-04
+ * 实测可用），面板头条读的是它；本文件下的兄弟模块只负责本地计数那一半（按模型
+ * 分布 / 本地趋势 / 429 事件流），回答官方余额答不了的问题。
  *
- *   - `host-config.ts`        配置契约 + isAdmitted 信任围栏
- *   - `routes.ts`             四条路由的门面（snapshot/models/token/probe）
- *   - `ms-auth.ts`            访问令牌存取（静态钥匙，无登录流）
- *   - `inference-client.ts`   模型目录（零额度）+ probe 调用（带分诊）
- *   - `usage-store.ts`        本地计数：天桶/单模型/事件流（原子写、版本守卫）
- *   - `snapshot-aggregate.ts` 快照聚合（软失败）
- *   - `state-store.ts`        状态文件原子原语
+ * 重活都在专注的兄弟模块里，本文件只保留 Cordis 入口（name/inject/apply）、
+ * wiring 装配与卸载副作用。兄弟模块按域分组：
+ *
+ *   **配置与凭据**
+ *   - `host-config.ts`        配置契约 + isAdmitted 信任围栏 + 夹取常量
+ *   - `switch-precedence.ts`  开关优先级：面板值 > patch 默认
+ *   - `ms-auth.ts`            访问令牌存取（静态钥匙，无登录流；唯一凭据出口）
+ *
+ *   **路由（7 条，`routes.ts` 是门面，`routes/` 下各域一份）**
+ *   - `routes/snapshot.ts`    面板轮询的唯一只读路由
+ *   - `routes/models.ts`      模型目录
+ *   - `routes/token.ts`       令牌保存/忘掉/验证
+ *   - `routes/probe.ts`       零额度鉴权探针
+ *   - `routes/provider.ts`    provider 开关/清单/窗口/重置
+ *   - `routes/draw.ts`        出图开关/模型/重置
+ *   - `routes/usage-prefs.ts` 趋势显示窗口
+ *   - `routes/http.ts`        CORS / JSON / 错误脱敏的公共辅助
+ *   - `routes/paths.ts`       路由路径常量
+ *
+ *   **数据层（`state-store.ts` 是共用原语）**
+ *   - `state-store.ts`        原子写/版本守卫/读缓存/写队列（四个 store 共用）
+ *   - `usage-store.ts`        本地计数：天桶/单模型/事件流
+ *   - `provider-store.ts`     开关 + 允许清单 + 窗口覆盖的持久化
+ *   - `draw-store.ts`         出图开关 + 模型偏好
+ *   - `usage-prefs-store.ts`  趋势显示窗口偏好 + `resolveWindowDays` 夹取
+ *   - `inference-client.ts`   HTTP 出口：模型目录 + 魔粒余额 + 探针
+ *   - `coalesced-fetch.ts`    有界并发缓存（目录/余额/标签共用）
+ *   - `context-catalog.ts`    内置上下文窗口策展表（models.dev 交叉真值）
+ *
+ *   **Provider 注册**
+ *   - `llm-models.ts`         目录 → descriptor 映射（peer-free）
+ *   - `llm-adapter.ts` / `llm-adapter-core.ts`  适配器装配（core 为三族共享）
+ *   - `provider-publish.ts`   发布状态机：队列/disposed 闸/回滚
+ *   - `provider-reconcile.ts` desired-state 收敛器（轮询 + 路由统一触发）
+ *   - `publish-core.ts`       三族共享的发布原语
+ *
+ *   **观测与纠正**
+ *   - `usage-observer.ts`     真实对话 → 本地计数/事件（观察流出口）
+ *   - `llm-error-fix.ts`      429 误判纠正（QUOTA → RATE_LIMIT）
+ *   - `llm-retry.ts`          重试策略（按 code 决定退避）
  *   - `codes.ts`              错误分类单一真源
- *   - `usage-observer.ts`     真实对话 → 本地计数/事件（观察流出口，见该文件头）
+ *
+ *   **出图工具**
+ *   - `draw.ts`               协议纯逻辑半边（peer-free）
+ *   - `draw-register.ts`      工具注册（挂载时一次性，不可撤销）
+ *   - `draw-runtime.ts`       运行时（两段式：提交 → 轮询）
+ *   - `draw-jobs.ts`          作业表（本次挂载内有效）
+ *   - `draw-tool-state.ts`    缺席原因 + 本次挂载注册位（内存）
+ *
+ *   **聚合与工具**
+ *   - `snapshot-aggregate.ts` 快照聚合（软失败，绝不白屏）
+ *   - `doctor.ts`             只读盘点工具
+ *   - `util.ts`               通用工具（脱敏/错误消息/类型守卫）
+ *   - `types.ts`              Host 侧类型定义
+ *
+ * 完整的「文件 → 一句话职责 → 关键导出」表在 AGENTS.md 的代码地图里，由
+ * test/docs.test.mjs §14 门禁守着（每个 src/*.ts 都必须登记）。本注释只做入口
+ * 处的分组索引——**新增兄弟模块时两处都要改**，别让这里再落后一轮。
  *
  * @module dsh-connect-modelscope-token-plan
  */

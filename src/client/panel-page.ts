@@ -389,8 +389,16 @@ export function PanelPage({ tt, localeSubscribe }: {
               "span",
               { style: S.cluster },
               data !== null ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: isoTime(new Date(updatedAt).toISOString()) })) : null,
-              failure !== null && data !== null
+              // 失败时**必须**显出来，哪怕 data 还在。这里曾经要求 `data !== null`
+              // 才显示——于是首屏成功过、Host 随后挂掉时，界面是「上一轮的数字 +
+              // 完好的 cluster + 一句沉默」：故障窗口越长，面板越像可信实时读数
+              // （胶囊有 stale 标，面板没有，同一语义两种待遇）。现在错误行按
+              // `failure` 显示，并在 data 还在时补一句「下面是上次读到的数据」。
+              failure !== null
                 ? h("span", { style: S.error, role: "status", title: failure.message }, format(tt("panel.error"), { error: failure.message }))
+                : null,
+              failure !== null && data !== null
+                ? h("span", { style: S.updated }, tt("panel.staleData"))
                 : null,
               h("button", { type: "button", style: S.button, onClick: () => void load() }, tt("panel.refresh"))
             )

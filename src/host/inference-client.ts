@@ -401,6 +401,11 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
         );
       }
       if (response.status >= 500) {
+        // 弃权与下面成功分支同款：这里只看 status，body 一个字节都不读，
+        // 不 cancel 就会占住 undici 连接直到 GC（见 discardBody 的注释）。
+        // 探针恰恰是「上游持续 5xx」时被反复触发的路径——漏这一条，连接池
+        // 会被一条条挂起的响应吃满。
+        discardBody(response);
         throw pluginError(CODE.UPSTREAM_ERROR, "modelscope returned HTTP " + String(response.status) + " (validity probe)");
       }
       // 其余（含 200 空壳与 400 校验层拒绝）都判**令牌好**：probe 的成功判据是

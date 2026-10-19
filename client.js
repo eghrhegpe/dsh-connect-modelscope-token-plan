@@ -29,7 +29,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"events",
 			"trend",
 			"models",
-			"provider",
 			"shapeWarnings",
 			"quotaError"
 		]);
@@ -140,6 +139,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"panel.updated": "更新于 {time}",
 			"panel.loading": "加载中…",
 			"panel.error": "读取失败：{error}",
+			"panel.staleData": "（下面是上次读到的数据）",
 			"panel.configError": "插件配置有误：{error}",
 			"panel.networkError": "无法连接本机 Host，通常是临时故障，下一轮自动刷新即可恢复。",
 			"panel.timeout": "请求超时，下一轮自动刷新即可恢复。",
@@ -291,6 +291,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"panel.updated": "Updated {time}",
 			"panel.loading": "Loading…",
 			"panel.error": "Read failed: {error}",
+			"panel.staleData": "(showing the last data read successfully)",
 			"panel.configError": "Plugin misconfiguration: {error}",
 			"panel.networkError": "Cannot reach the local Host — usually transient, the next auto-refresh will recover.",
 			"panel.timeout": "Request timed out; the next auto-refresh will recover.",
@@ -2870,11 +2871,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				...activeTab === "access" ? S.tabActive : {}
 			},
 			onClick: () => setActiveTab("access")
-		}, tt("tab.access"))), h("span", { style: S.spacer }), h("span", { style: S.cluster }, data !== null ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: isoTime(new Date(updatedAt).toISOString()) })) : null, failure !== null && data !== null ? h("span", {
+		}, tt("tab.access"))), h("span", { style: S.spacer }), h("span", { style: S.cluster }, data !== null ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: isoTime(new Date(updatedAt).toISOString()) })) : null, failure !== null ? h("span", {
 			style: S.error,
 			role: "status",
 			title: failure.message
-		}, format(tt("panel.error"), { error: failure.message })) : null, h("button", {
+		}, format(tt("panel.error"), { error: failure.message })) : null, failure !== null && data !== null ? h("span", { style: S.updated }, tt("panel.staleData")) : null, h("button", {
 			type: "button",
 			style: S.button,
 			onClick: () => void load()

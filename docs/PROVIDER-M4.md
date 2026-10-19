@@ -411,13 +411,20 @@ roster），失败给降级形状（`enabled:false, error, roster:[]`），**绝
 
 ## 13. 测试与验证
 
-- 新增离线套件（裸 node + strip-types，风格对齐现有 `test/*.test.mjs`）：
-  - `test/provider-store.test.mjs`：开关读写/优先级/损坏即忽略/ADR-006 拒绝；
-  - `test/llm-models.test.mjs`：`normalizeEntry`/`isVisionModel`/`isChatModel`/
-    `toPiDescriptor`/`buildDescriptors`/roster 去重/哨兵；
-  - `test/publish-core.test.mjs`：队列串行、disposed 闸、swapRegistration 失败
-    恢复旧对；
-  - `test/provider-routes.test.mjs`：GET/POST 开关、roster 保存、哨兵、信任围栏。
+> **落地修正（2026-10-19）**：本节原计划新增四个离线套件，实际落地时**没有按模块
+> 拆新文件**，而是并入既有的三个套件（下方点名）。原文点名的
+> `provider-store.test.mjs` / `llm-models.test.mjs` / `publish-core.test.mjs`
+> **从未存在**——那是「幽灵测试引用」，与 IMPLEMENTATION.md 记过的同名事故同款，
+> 且 §11 引用门禁的射程不含 docs/，所以它全绿存活了很久。契约行为本身都有测试
+> 承重，缺的只是名字。
+
+- 实际承重套件（裸 node + strip-types，风格对齐现有 `test/*.test.mjs`）：
+  - `test/provider.test.mjs`：provider-store 读写/优先级/损坏即忽略/ADR-006 拒绝、
+    `llm-models` 的 `normalizeEntry`/`isVisionModel`/roster 去重/哨兵、
+    `publish-core` 的队列串行/disposed 闸/swapRegistration 失败恢复旧对；
+  - `test/provider-routes.test.mjs`：GET/POST 开关、roster 保存、哨兵、信任围栏；
+  - `test/reconcile.test.mjs`：收敛器与 `publish-core` 的接线（含 unavailableIds
+    生产者，§15）。
 - `npm test` 现有套件必须仍绿（wire/config/routes/panel/doctor）。
 - 改完跑 `npm run typecheck`、`npm run build`（`tsdown` 重出 `lib/` 与根
   `client.js`——**两者已入库**，见 sensenova AGENTS.md，M4 同样要提交产物）。

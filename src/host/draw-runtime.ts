@@ -654,6 +654,18 @@ export function defineDrawTool({
         })
       );
     }
+    // pending 的文案必须与**这一刻的真实状态**一致：
+    //  - 作业表还在（正常两段式）→ 承诺带 jobId 可续查；
+    //  - 已经 dispose（用户在等待期撤下插件，`drawJobs.dispose()` 清空了表，
+    //    见 index.ts:206）→ **不许**再承诺续查，否则模型照着那句话带 jobId 回来，
+    //    只会撞上 :728-735 的「不在本次会话的作业表里」。19e747b 修了错误分支的
+    //    诚实性，漏的正是这条提示分支。
+    const stillResumable = jobs.get(job.jobId) !== null;
+    const resumeHint = stillResumable
+      ? `稍后带 jobId ${job.jobId} 再调用本工具即可继续查询（只查询、不会重复出图；` +
+        `作业表只在本次挂载内有效，重启 DSH 或重挂插件后要重新提交）`
+      : `本次挂载已撤下（插件被卸载/重载），作业表已清空——这一轮之后**不能**再带 jobId 续查；` +
+        `上游任务可能仍在生成，但结果不保证还能取回，重新出图请去掉 jobId 再调用`;
     return {
       source: "modelscope",
       status: "pending",
@@ -663,8 +675,7 @@ export function defineDrawTool({
       prompt: job.prompt,
       hint:
         `仍在生成中（已等 ${Math.round(elapsedMs / 1000)}s，${polls} 次轮询，task ${job.taskId}）：` +
-        `上游排队通常 1–15 分钟。稍后带 jobId ${job.jobId} 再调用本工具即可继续查询` +
-        `（只查询、不会重复出图；作业表只在本次挂载内有效，重启 DSH 或重挂插件后要重新提交）`
+        `上游排队通常 1–15 分钟。${resumeHint}`
     };
   };
 

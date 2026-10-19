@@ -82,12 +82,32 @@ assert.match(cfgView.guidance ?? "", /插件配置有误/);
   assert.deepEqual(panel.interpretSnapshot(complete).missingKeys, [], "完整 body 没有缺失键");
 
   // 逐个删键：都必须被认出来 + 补出可安全解引用的空形状。
+  //
+  // **可选块例外**：`provider` / `draw` 不在 `SNAPSHOT_REQUIRED_KEYS` 里，省略它们
+  // 是 Host 的合法形状（软失败即省略，见 wire.ts），不算契约漂移。删掉它们必须
+  // 得到「missingKeys 为空」——这条反向断言是 53c9902 那次修复的护栏：当初清单里
+  // 留着 `provider`，客户端于是补出假块、`hasProviderBlock` 为 true、路由兜底
+  // 一次都没跑。测试若只钉「缺键必须被认出来」，就会把那个 bug 钉成正确行为。
+  const OPTIONAL_BLOCK_KEYS = ["provider"];
   for (const key of Object.keys(complete)) {
     if (key === "ok") continue;   // ok 缺失不是契约漂移，是非法载荷（下面单独断言）
     const broken = { ...complete };
     delete broken[key];
     const r = panel.interpretSnapshot(broken);
     assert.notEqual(r.data, null, `缺 ${key} 仍应给出可渲染的 data`);
+    if (OPTIONAL_BLOCK_KEYS.includes(key)) {
+      assert.deepEqual(
+        r.missingKeys ?? [],
+        [],
+        `缺可选块 ${key} 不是契约漂移——Host 软失败即省略，补键会让路由兜底永远不跑`
+      );
+      assert.equal(
+        r.data?.[key],
+        undefined,
+        `缺可选块 ${key} 时不得补出假块（补了 = 替 Host 表态「块在」）`
+      );
+      continue;
+    }
     assert.ok((r.missingKeys ?? []).includes(key), `缺 ${key} 必须被认出来`);
     // 补出的空形状必须与 Host 软失败时**同构**：三态块补成 null（红线 3 的
     // 「读不到」），不得补成 []（那是「确实一次都没有」这个事实断言）。
@@ -116,6 +136,20 @@ assert.match(cfgView.guidance ?? "", /插件配置有误/);
   assert.ok(
     driftView.shapeWarnings.some((w) => /顶层键/.test(w) && /models/.test(w)),
     "缺失键进入 shapeWarnings（经字典翻译）"
+  );
+
+  // 反向：Host 按契约省略 provider（软失败）时，用户**不该**看到任何漂移警告。
+  // 上面那条钉「真漂移要说」，这条钉「合法省略别说」——两条都在，53c9902 那次
+  // 「兜底被架空 + 假警告」的回归才拦得住。
+  const omitted = { ...complete };
+  delete omitted.provider;
+  const omittedRead = panel.interpretSnapshot(omitted);
+  const omittedView = panel.viewOf(omittedRead.data, null, (key) => zh[key], omittedRead.missingKeys);
+  assert.deepEqual(omittedRead.missingKeys ?? [], [], "省略 provider 不算契约破裂");
+  assert.equal(
+    omittedView.shapeWarnings.some((w) => /顶层键/.test(w)),
+    false,
+    "省略 provider 不得触发「顶层键缺失」警告——那是 Host 的合法软失败形状"
   );
 
   // ok 缺失是另一回事：不是「少了个块」，而是整个载荷不合法。曾经返回裸英文

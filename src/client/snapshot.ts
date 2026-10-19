@@ -80,7 +80,15 @@ function emptyBlock(key: string): unknown {
     case "models":
       return { available: false, count: 0, sample: [], error: null };
     case "provider":
-      // 与 DEGRADED_PROVIDER 同源；用同一个常量避免两处漂移。
+      // 兜底两侧同源：旧 Host 真缺这个键时（它不是必给键，见 wire.ts），
+      // 补出来必须与 `providerOf(null)` 同源，避免两处漂移。
+      //
+      // **注意补出来之后 `panel-page` 的 `hasProviderBlock` 会变成 true**，
+      // 兜底 `GET /provider` 因此不再尝试——那是旧 Host 的语义（它本来也
+      // 没有那条路由）。新 Host 的「软失败即省略」不走这里：省略是合法形状，
+      // `provider` 不在 `SNAPSHOT_REQUIRED_KEYS` 里，所以不算 missingKeys，
+      // `withEmptyBlocks` 也不会被调用，`hasProviderBlock` 保持 false，兜底
+      // 照常跑。53c9902 的修复靠的正是这条区分——别把它再放回必给清单。
       return DEGRADED_PROVIDER;
     case "shapeWarnings":
     case "quotaError":
@@ -142,8 +150,10 @@ export function interpretSnapshot(body: unknown): SnapshotRead {
   }
   const raw = payload as unknown as Record<string, unknown>;
   const missingKeys = SNAPSHOT_REQUIRED_KEYS.filter((key) => raw[key] === undefined);
-  // provider 块原样透传：它就是 body 上的顶层字段，裸 cast 已经带上；缺失时由
-  // providerOf(null) 给出 DEGRADED_PROVIDER，两条路不会互相漂移。
+  // 可选块（`provider` / `draw`）**不补**：它们不在必给清单里，省略是合法形状。
+  // 补了就等于替 Host 表态「块在」，`panel-page` 的 `hasProviderBlock` 随之为
+  // true，兜底 `GET /provider` 再也不发——53c9902 修的正是这件事。缺或不缺都
+  // 原样透传，让 `providerOf(undefined)` / `providerOf(null)` 去降级。
   const filled = missingKeys.length === 0 ? raw : withEmptyBlocks(raw, missingKeys);
   return { data: filled as unknown as Snapshot, error: null, missingKeys };
 }

@@ -225,17 +225,6 @@ export function temporaryOf(dir: string, base: string, now = Date.now) {
 }
 
 /**
- * Write one state file atomically: a 0600 temporary file, then a rename.
- *
- * The payload string is written with a trailing newline, exactly as every
- * store wrote before this module existed. Failures PROPAGATE — the callers
- * decide whether a read-only Home breaks their flow.
- * @param {string} file - the final file path.
- * @param {string} payload - the serialized body (JSON text).
- * @param {{temporary: string}} options - the temp path to write first.
- * @returns {Promise<void>}
- */
-/**
  * 写一个状态文件：一个 0600 临时文件，然后 rename。
  *
  * 载荷串以换行结尾，与本模块存在前每个 store 的写法一致。失败**向上传播** ——

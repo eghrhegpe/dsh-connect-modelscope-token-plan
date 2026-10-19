@@ -370,7 +370,11 @@ export function describeDrawFailure(failure: {
   }
 
   const cause = str(failure.cause, "");
-  if (cause !== "") return `出图失败：${cause}${tail}`;
+  // `cause` 同样过脱敏：它是 `draw-runtime` 从上游 `error.message` 原样抄来的
+  // （draw-runtime.ts:195），而 `tail` 里那份 bodyText 早在上面就脱过——两条
+  // 通向工具错误文本的路必须是同一个收口。上游 4xx/5xx 的 message 若回带请求
+  // 内容（Authorization 头形状 / prompt 里像密钥的串），漏这一条就原样上屏。
+  if (cause !== "") return `出图失败：${redactSecrets(cause)}${tail}`;
 
   const taskStatus = str(failure.taskStatus, "");
   if (taskStatus === "FAILED") {
