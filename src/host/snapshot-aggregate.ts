@@ -178,12 +178,21 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     // 已由 fetchModels 在归一前打上覆盖/策展标记（contextSource 随行透传），
     // 这里不再二次加工。
     const contextWindow = await providerStore.contextWindow().catch(() => null);
+    // 目录读不到时**必须替操作者说出原因**：wire.ts 的 ProviderStatus 承诺「目录
+    // 读不到时 modelCount 为 0、roster 为空、error 说明原因」，而 provider-reconcile
+    // 在目录 fetch 失败时只 `logger.warn`、不写 `publisher.state.error`（那份 error
+    // 只记 publish 失败）。2026-10-19 锐评实测：目录宕机那一刻面板呈现「已注册 +
+    // 0 个模型 + 没有任何原因」，而旧 roster 其实还在服务——这正是红线 3
+    // （读不到 ≠ 0）在 provider 块上的漏点。publish 自己的 error 优先（它更具体），
+    // 没有再退回目录原因。**不复用 models 的 shapeWarnings 抑制规则**：那条抑制是
+    // 为了不往形状漂移横幅里塞网络抖动，而这里正是用户在看的那个块。
+    const catalogNote = models.ok ? null : `模型目录读不到：${models.error}`;
     return {
       enabled,
       source,
       llmAvailable: publisher.state.llmAvailable === true,
       registered: publisher.state.registered === true,
-      error: typeof publisher.state.error === "string" ? publisher.state.error : null,
+      error: typeof publisher.state.error === "string" ? publisher.state.error : catalogNote,
       modelCount: roster.length,
       enabledCount,
       allowed: allowedList.mode,

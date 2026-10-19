@@ -2,8 +2,8 @@
 //
 // 纯文件读取：无网络、无 peer 依赖、干净检出即可跑。
 //
-// 守住两条纪律，都来自 agnes 仓库的实测事故（见姊妹仓 test/docs.test.mjs:549
-// 与 test/package.test.mjs:58）：
+// 守住两条纪律，都来自姊妹仓 agnes 的实测事故（见 agnes:test/docs.test.mjs:549
+// 与 agnes:test/package.test.mjs:58）：
 //
 //   SCREENSHOTS screenshots.json 声明的每一张图都真实存在于磁盘、且是图片、
 //               条目数在市场允许的 1–8 张内。

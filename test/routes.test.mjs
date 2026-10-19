@@ -808,6 +808,15 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
     drawStore: { enabled: async () => true, modelId: async () => "Owner/Vanished", versionNote: async () => null }
   });
   assert.equal(unreadable.draw?.preferredInCatalog, null, "目录读不到 → null（不知道），不是 false（红线 3）");
+  // 目录读不到时 provider.error **必须说明原因**：wire.ts 的 ProviderStatus 承诺
+  // 「目录读不到时 modelCount 为 0、roster 为空、error 说明原因」，而
+  // provider-reconcile 在目录 fetch 失败时只 warn、不写 publisher.state.error
+  // （那份 error 只记 publish 失败）。2026-10-19 锐评实测：旧写法下面板呈现
+  // 「已注册 + 0 个模型 + 没有任何原因」，正是红线 3（读不到 ≠ 0）的漏点。
+  assert.equal(unreadable.provider?.modelCount, 0, "目录读不到 → 0 个模型");
+  assert.equal(typeof unreadable.provider?.error, "string", "目录读不到必须在 provider.error 里说明原因");
+  assert.match(unreadable.provider.error, /catalog refused/, "原因里要带上真实的失败文本");
+  assert.equal(inCatalog.provider?.error, null, "目录读得到时不报目录故障——软失败不许误报");
 
   // 没设首选 → null，不是 false。
   const auto = await buildSnapshotBody({

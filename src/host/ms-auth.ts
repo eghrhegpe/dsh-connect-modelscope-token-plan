@@ -124,7 +124,13 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
 
   return {
     /**
-     * 把面板输入的令牌存成引用；原样存（不 trim），空白值视为没输入。
+     * 把面板输入的令牌存成引用；**两端空白先 trim**，空白值视为没输入。
+     *
+     * **为什么 trim 而不是原样存**：校验用的是 `value.trim()`，落库却曾是原值——
+     * 校验与落库必须是**同一个值**，否则「通过校验的值」与「发出去的值」不是一个东西。
+     * 实测（2026-10-19）：`save("  ms-3f2a…  ")` 会把带着前后空格的串存进凭据服务，
+     * 而它拼出的请求头是 `Bearer   ms-…  `——用户粘进一个空格就换来一个语焉不详的
+     * 401，面板却显示「已保存」。只 trim 两端，令牌中间的形状（分段连字符）不动。
      *
      * **形状校验**：只接受 `ms-` + 至少 16 位十六进制（可含连字符分段）。这不是
      * 洁癖——`redactSecrets` 的脱敏闸是**正则**，只能遮它认识的形状；一个
@@ -137,11 +143,11 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
      * 真机请求换来一个语焉不详的 401。
      */
     async save(token: string) {
-      const value = verbatim(token, "");
-      if (typeof value !== "string" || value.trim() === "") {
+      const value = verbatim(token, "").trim();
+      if (value === "") {
         throw new Error("a ModelScope token is required");
       }
-      if (!isPlausibleToken(value.trim())) {
+      if (!isPlausibleToken(value)) {
         // 形状闸是本插件自己的判据，不是上游的。魔搭若改了令牌格式，合法令牌会
         // 在这里被拒——错误消息必须留一条「确认令牌正确就找维护者」的出路，否则
         // 用户只会反复怀疑自己复制错了。

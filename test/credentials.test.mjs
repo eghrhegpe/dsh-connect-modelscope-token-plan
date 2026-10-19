@@ -94,6 +94,30 @@ for (let hexLen = 12; hexLen <= 80; hexLen += 4) {
   assert.equal(state.present, true, "合法令牌已存下");
 }
 
+// ── §3b 两端空白被规整：校验用的值与落库/发出的值必须是同一个 ──
+//
+// 2026-10-19 锐评实测：旧写法校验 `value.trim()` 却存原值，`save("  ms-…  ")`
+// 会把带空格的串落进凭据服务，拼出的请求头是 `Bearer   ms-…  `——用户粘进一个
+// 空格就换来一个语焉不详的 401，而面板显示「已保存」。
+{
+  const written = [];
+  const fake = {
+    resolve: async () => ({ value: null }),
+    set: async (_key, value) => { written.push(value); },
+    unset: async () => {}
+  };
+  const store = createTokenStore({ credentials: () => fake, env: {} });
+  await store.save("  ms-3f2a1b8c1111222233334444555566  ");
+  assert.equal(written[0], "ms-3f2a1b8c1111222233334444555566", "落库的是 trim 后的值，不是原值");
+  const again = await createTokenStore({ credentials: () => ({ resolve: async () => ({ value: written[0] }) }), env: {} }).resolve();
+  assert.equal(again.value, "ms-3f2a1b8c1111222233334444555566", "解析回来同样没有空白（拼出来的 Bearer 头不会多空格）");
+
+  // 只有空白仍是「没输入」，不是「存了一个空白令牌」。
+  const blank = createTokenStore({ credentials: () => fake, env: {} });
+  await assert.rejects(() => blank.save("\t  \n "), /required/i, "全空白 = 没输入");
+  assert.equal(written.length, 1, "被拒的 save 不许落库");
+}
+
 // ── §4 forget 的失败必须传播（安全动作不许谎报）──
 {
   let unsetCalls = 0;

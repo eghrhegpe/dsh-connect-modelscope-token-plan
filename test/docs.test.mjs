@@ -475,6 +475,9 @@ const FACTS = [
 // （幽灵 / 从未存在 / 无此文件 / 缺口声明 / 该契约测试在…）时放行——与 §3
 // SAFE_CONTEXT 同一套段落判据先例（中文文档折行，标记可能落在引用的另一行上）。
 // 该例外不给 src/test：代码注释声称覆盖，必须真有文件。
+// 另一条例外（2026-10-19 收紧）：引用前面显式署名了**别的仓库**（`agnes:test/…`）
+// 时放行——那条路径不由本仓提供。**行号本身不再是免检牌**：旧判据「带行号即整体
+// 跳过」让幽灵引用挂个行号就能复活（详见下面 check 的注释）。
 {
   const refRe = /\btest\/[A-Za-z0-9_.-]+\.test\.mjs(?::\d+)?\b/g;
   // docs 侧缺口声明段落标记：段内带这些词 = 该引用被明确声明为已知缺口（§3 先例）。
@@ -487,21 +490,38 @@ const FACTS = [
     // 2026-10-19 射程扩展：非归档 docs 也查（docFiles() 已排除 vendored spec，归档另排）。
     ...docFiles().filter((f) => !inArchive(f)),
   ];
+  // 跨仓引用必须**显式署名**：`<仓名>:test/xxx.test.mjs:58`（仓名限定为小写 slug，
+  // 免得中文散文里的一个冒号就成了免检牌）。行号本身不再是免检牌——见 check 的注释。
+  const foreignRef = (text, index) => /[a-z][a-z0-9-]*:\s*$/.test(text.slice(Math.max(0, index - 40), index));
   for (const file of scanned) {
     const isDoc = file.startsWith("docs/");
-    const check = (full, para) => {
-      // 带行号的引用是**跨仓库**的精确定位（如 release.test.mjs 引用姊妹仓
-      // agnes 的 test/package.test.mjs:58 事故溯源），指向的是另一个仓库的文件，
-      // 不是本仓的覆盖声称。本仓的声称形如「由 test/xxx.test.mjs 钉死」，不带行号。
-      if (/:\d+$/.test(full)) return;
+    const check = (full, para, foreign) => {
+      // 带行号的引用**曾经整体免检**（旧判据 `if (/:\\d+$/.test(full)) return`），理由是
+      // 「带行号 = 跨仓精确定位」。但行号只说明引用更精确，不说明这条路径不必存在：
+      // 2026-10-19 锐评变异实证——在本仓 src 里注入
+      // `test/__ghost_probe__.test.mjs:42`，本门禁**静默通过**（同一条引用去掉行号
+      // 就被点名）。幽灵引用带上一个行号就复活了，而 §11 守的正是「注释声称有覆盖」。
+      // 现在行号只是被**剥掉**、不改判据；跨仓引用必须自己署名（`agnes:test/…`）。
+      if (foreign) return;
+      const bare = full.replace(/:\d+$/, "");
       if (isDoc && para !== null && GAP_DECL.test(para)) return;
       assert.ok(
-        existsSync(join(root, full)),
-        `${file}: 引用了 ${full}，但该测试文件不存在——声称有测试覆盖其实没有。` +
+        existsSync(join(root, bare)),
+        `${file}: 引用了 ${bare}，但该测试文件不存在——声称有测试覆盖其实没有。` +
           (isDoc
-            ? ` 要么实现它，要么把引用放进带缺口声明标记（幽灵/从未存在/无此文件/缺口声明）的段落。`
-            : ` 要么实现它，要么把注释改成明确的缺口声明并记进 docs/ROADMAP.md 的 Backlog。`)
+            ? ` 要么实现它，要么把引用放进带缺口声明标记（幽灵/从未存在/无此文件/缺口声明）的段落，`
+            : ` 要么实现它，要么把注释改成明确的缺口声明并记进 docs/ROADMAP.md 的 Backlog，`) +
+          `要么在引用前写明是哪个仓库的（如 agnes:${bare}）。`
       );
+      // 行号也要真在文件里：指向一个 20 行文件的第 549 行，同样是「声称有覆盖其实没有」。
+      const lineNo = /:(\d+)$/.exec(full);
+      if (lineNo !== null) {
+        const total = read(bare).split(/\r?\n/).length;
+        assert.ok(
+          Number(lineNo[1]) <= total,
+          `${file}: 引用了 ${full}，但 ${bare} 只有 ${total} 行——行号指向文件外。`
+        );
+      }
     };
     if (isDoc) {
       // 文档侧按段落判：段落 = 一段非空行（与 §3 同一套「按整段」约定）。
@@ -515,9 +535,10 @@ const FACTS = [
         }
       }
       if (cur.length) paras.push(cur.join("\n"));
-      for (const p of paras) for (const m of p.matchAll(refRe)) check(m[0], p);
+      for (const p of paras) for (const m of p.matchAll(refRe)) check(m[0], p, foreignRef(p, m.index));
     } else {
-      for (const m of read(file).matchAll(refRe)) check(m[0], null);
+      const body = read(file);
+      for (const m of body.matchAll(refRe)) check(m[0], null, foreignRef(body, m.index));
     }
   }
 }

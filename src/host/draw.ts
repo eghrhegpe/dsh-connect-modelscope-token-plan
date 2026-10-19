@@ -19,9 +19,11 @@
  *    缺这个头的实现会在第一次轮询就误判失败并放弃一张已经能出的图。
  * 2. **提交响应的 `task_status` 不可信**：实测每次提交都回 `SUCCEED`，包括最终确实
  *    `FAILED` 的那次。所以提交只认 `task_id`，**成功与否只看轮询终态**。
- * 3. **`FAILED` 没有可分诊的形状**：`errors.code` 实测为 `0`、`errors.message` 为
- *    空串，没有顶层 `message`。任何「从错误里读出原因」的承诺都是编造——本模块的
- *    `describeDrawFailure` 因此**明确承认原因不可知**，只报可确定的形态差异。
+ * 3. **`FAILED` 常常没有可分诊的形状**：实测样本 `errors.code` 为 `0`、
+ *    `errors.message` 为空串、没有顶层 `message`。所以不能承诺「一定读得出原因」——
+ *    本模块的 `describeDrawFailure` 只报**这个 body 里确实写着**的东西：读得到
+ *    `errors.message` 就报它，读不到就明说原因不可知（2026-10-19 修补：旧写法把
+ *    「实测样本为空」当成了「永远为空」，非空原因会被一并报成「未给出原因」）。
  *
  * 关于两个小工具（`str` / `redactSecrets`）：它们曾以**本地私有副本**的形式活在
  * 本文件里，理由是「避免为 3 行代码引 util 的依赖面」。那条理由不成立——util.ts
@@ -317,13 +319,36 @@ export function normalizeImageUrlInput(value: unknown): string | null {
 }
 
 /**
+ * 从上游 body 里取第一句**可引用的原因**：`errors.message`，退回顶层 `message`。
+ *
+ * 取的是**未截断**的原文——`describeDrawFailure` 的 tail 会截到 300 字符，截断后的
+ * JSON 解析不出来。解析不出来（非 JSON / 字段为空 / 字段不是字符串）一律返回 `""`：
+ * 这里**不猜**，没有原因就说没有原因。
+ */
+function upstreamMessageOf(raw: string): string {
+  if (raw === "") return "";
+  try {
+    const parsed = JSON.parse(raw) as { errors?: { message?: unknown }; message?: unknown };
+    for (const candidate of [parsed?.errors?.message, parsed?.message]) {
+      if (typeof candidate === "string" && candidate.trim() !== "") return candidate.trim();
+    }
+  } catch {
+    // 非 JSON body：没有结构化原因可引用，交给 tail 原样呈现。
+  }
+  return "";
+}
+
+/**
  * 把一次失败转成 agent 与面板都能读的一句话。
  *
- * **关于魔搭 `FAILED` 的诚实边界**：实测唯一的失败样本是
- * `{"errors":{"code":0,"message":""}, "task_status":"FAILED"}`——**原因不可知**。
- * 所以这里只报「可确定的形态事实」（HTTP 码 / 轮询未出终态 / 明确的原因文本），
- * **不从空错误里编造原因**，并在原因确实拿不到时明说「上游未给出原因」。这是本仓库
- * README「诚实声明」的要求。
+ * **关于魔搭 `FAILED` 的诚实边界**：实测见过的失败样本是
+ * `{"errors":{"code":0,"message":""}, "task_status":"FAILED"}`——那一份**原因不可知**。
+ * 但样本量是 1，不是恒定形态：上游也可能给出非空的 `errors.message`
+ * （2026-10-19 锐评实测 `sensitive content detected`、
+ * `image_url is required for model MusePublic/Qwen-Image-Edit` 这类原因会被旧写法
+ * 一并报成「未给出失败原因」，且 body 被丢掉，2/2 误报）。所以判据是**逐个 body 判**：
+ * 有原因就报原因，确实没有才明说「上游未给出原因」；任何情况下都不从空错误里编造
+ * 原因，两种情况**都附脱敏后的 body**。这是本仓库 README「诚实声明」的要求。
  *
  * 凭据永不入消息：body 文本可能回显 `ms-` 令牌，过 `redactSecrets` 后再截断。
  * @param {object} failure - 失败信息。
@@ -339,7 +364,8 @@ export function describeDrawFailure(failure: {
   taskStatus?: string;
   cause?: string;
 }): string {
-  const text = redactSecrets(typeof failure.bodyText === "string" ? failure.bodyText : "").slice(0, 300);
+  const raw = typeof failure.bodyText === "string" ? failure.bodyText : "";
+  const text = redactSecrets(raw).slice(0, 300);
   const status = Number.isFinite(failure.status) ? Number(failure.status) : 0;
   const tail = text === "" ? "" : `; body: ${text}`;
 
@@ -378,8 +404,12 @@ export function describeDrawFailure(failure: {
 
   const taskStatus = str(failure.taskStatus, "");
   if (taskStatus === "FAILED") {
-    // 实测形态：errors.code=0、message 为空串，没有顶层 message。诚实报「未知」。
-    return "出图失败：上游任务 FAILED，但未给出失败原因（实测 errors.code=0、message 为空），换模型或稍后重试";
+    // 原因**逐个 body 判**，不是恒定结论：上游偶尔真会给一句原因（见函数头注）。
+    // 有就报出来；没有才说不知道。两种情况都附 tail——本函数其余每个分支都附，
+    // 这里曾经是唯一例外，于是「上游说了什么」和「body 长什么样」一起丢了。
+    const upstream = upstreamMessageOf(raw);
+    if (upstream !== "") return `出图失败：上游任务 FAILED —— ${redactSecrets(upstream)}${tail}`;
+    return `出图失败：上游任务 FAILED，但未给出失败原因（上游 errors.message 为空），换模型或稍后重试${tail}`;
   }
   if (taskStatus !== "") {
     return `出图失败：任务停在 ${taskStatus}（非终态），已超过截止时间`;

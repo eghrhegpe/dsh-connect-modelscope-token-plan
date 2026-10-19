@@ -2967,10 +2967,17 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	* ——失败退避或页面被挂起都会这样。取 3 个声明周期而不是 1 个：一次偶发失败就会
 	* 拉长间隔，卡在 1 个周期上会让每一次抖动都把读数打成陈旧的。
 	*
-	* `updatedAt === 0` 表示**从没读到过**，那不是「陈旧」而是「还没有」——调用方据此
-	* 决定不标；本函数只在有读数的前提下判断，故返回 false。
+	* **`hasReading` 是承重输入**：`updatedAt > 0` 只说明**曾经**读到过，不说明屏幕上
+	* 此刻有数字——读失败时轮询 hook 会 `setData(null)` 却保留 `updatedAt`
+	* （`use-snapshot-polling.ts`），只看 updatedAt 就会在两个读数都是「—」时挂上
+	* 「上次数据」，描述一份不在屏幕上的数据（2026-10-19 锐评实测）。调用方必须把
+	* 「本帧有没有读数」传进来。
+	*
+	* `hasReading === false` 表示**从没读到过 / 这一帧没有读数**，那不是「陈旧」而是
+	* 「还没有」——调用方据此不标；本函数据此返回 false。
 	*/
 	function staleOf(input) {
+		if (!input.hasReading) return false;
 		if (input.error !== null && input.error !== void 0) return input.updatedAt > 0;
 		return input.updatedAt > 0 && input.now - input.updatedAt > input.cadenceMs * STALE_CADENCES;
 	}
@@ -3004,6 +3011,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const cadenceMs = statedCadenceMs(data?.pollSeconds, DEFAULT_CADENCE_MS);
 		const stale = staleOf({
 			error,
+			hasReading: data !== null,
 			updatedAt,
 			now: Date.now(),
 			cadenceMs

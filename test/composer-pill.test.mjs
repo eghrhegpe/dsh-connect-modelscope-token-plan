@@ -166,16 +166,19 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
   assert.ok(readingText(null, null, ttZh).startsWith("— 魔粒"), "两段同时读不到时仍是两段");
 
   // 陈旧判定：从没读到过不算陈旧（没有「上次」可谈）；读到过之后，失败或超过
-  // 3 个声明周期才算。
+  // 3 个声明周期才算。`hasReading` 是承重输入——`updatedAt > 0` 只说明**曾经**
+  // 读到过，读失败时轮询 hook 会清空 data 却保留 updatedAt（2026-10-19 锐评实测：
+  // 只看 updatedAt 会在两个读数都是「—」时挂上「上次数据」）。
   const cadence = 30_000;
-  assert.equal(staleOf({ error: null, updatedAt: 0, now: 1_000_000, cadenceMs: cadence }), false, "从没读到 ≠ 陈旧");
-  assert.equal(staleOf({ error: "boom", updatedAt: 0, now: 1_000_000, cadenceMs: cadence }), false, "没有读数就没有陈旧读数");
-  assert.equal(staleOf({ error: null, updatedAt: 1_000, now: 1_000 + cadence, cadenceMs: cadence }), false, "刚读过不陈旧");
-  assert.equal(staleOf({ error: null, updatedAt: 1_000, now: 1_000 + cadence * 3, cadenceMs: cadence }), false, "整 3 个周期仍算边界内（严格大于）");
-  assert.equal(staleOf({ error: null, updatedAt: 1_000, now: 1_001 + cadence * 3, cadenceMs: cadence }), true, "超过 3 个周期算陈旧");
-  assert.equal(staleOf({ error: "boom", updatedAt: 1_000, now: 1_100, cadenceMs: cadence }), true, "读失败即陈旧（屏幕上留着上一轮的数）");
+  assert.equal(staleOf({ error: null, hasReading: false, updatedAt: 0, now: 1_000_000, cadenceMs: cadence }), false, "从没读到 ≠ 陈旧");
+  assert.equal(staleOf({ error: "boom", hasReading: false, updatedAt: 0, now: 1_000_000, cadenceMs: cadence }), false, "没有读数就没有陈旧读数");
+  assert.equal(staleOf({ error: "boom", hasReading: false, updatedAt: 1_000, now: 1_100, cadenceMs: cadence }), false, "本帧没读数（data 被清空）→ 不标陈旧，屏幕上没有「上次的数」可留");
+  assert.equal(staleOf({ error: null, hasReading: true, updatedAt: 1_000, now: 1_000 + cadence, cadenceMs: cadence }), false, "刚读过不陈旧");
+  assert.equal(staleOf({ error: null, hasReading: true, updatedAt: 1_000, now: 1_000 + cadence * 3, cadenceMs: cadence }), false, "整 3 个周期仍算边界内（严格大于）");
+  assert.equal(staleOf({ error: null, hasReading: true, updatedAt: 1_000, now: 1_001 + cadence * 3, cadenceMs: cadence }), true, "超过 3 个周期算陈旧");
+  assert.equal(staleOf({ error: "boom", hasReading: true, updatedAt: 1_000, now: 1_100, cadenceMs: cadence }), true, "有读数 + 读失败即陈旧（屏幕上留着上一轮的数）");
   // Host 改声明周期，「多久算陈旧」必须跟着改。
-  assert.equal(staleOf({ error: null, updatedAt: 1_000, now: 1_000 + 100_000, cadenceMs: 60_000 }), false, "cadence 60s 时 100s 还不算陈旧");
+  assert.equal(staleOf({ error: null, hasReading: true, updatedAt: 1_000, now: 1_000 + 100_000, cadenceMs: 60_000 }), false, "cadence 60s 时 100s 还不算陈旧");
 }
 
 // ── §4 字典与样式族 ────────────────────────────────────────────────────────

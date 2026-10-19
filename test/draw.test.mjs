@@ -236,10 +236,45 @@ section("normalizeImageUrlInput 拒绝本地路径等上游取不到的形态", 
 
 // ── 失败分诊：原因不可知就明说不可知 ──────────────────────────────────────────
 section("describeDrawFailure 对空错误明确承认原因不可知", () => {
-  // 实测唯一失败样本：errors.code=0、message 空串，没有顶层 message。
+  // 实测唯一样本：errors.code=0、message 空串，没有顶层 message。
   const msg = describeDrawFailure({ taskStatus: "FAILED", bodyText: '{"errors":{"code":0,"message":""}}' });
   assert.match(msg, /未给出失败原因/);
   assert.match(msg, /FAILED/);
+});
+
+section("describeDrawFailure 报出上游真的写了的 FAILED 原因（不再一律说不可知）", () => {
+  // 2026-10-19 锐评实测：旧写法把「唯一的实测样本 message 为空」当成了恒定形态，
+  // 于是带非空 errors.message 的 FAILED 也被报成「未给出失败原因」，且 body 被丢掉
+  //（2/2 误报；对照 404 分支正常附 `; body:`）。这是本函数唯一不附 tail 的分支。
+  const withErrors = describeDrawFailure({
+    taskStatus: "FAILED",
+    bodyText: '{"errors":{"code":0,"message":"sensitive content detected"}}'
+  });
+  assert.match(withErrors, /sensitive content detected/, "上游写了原因就报原因");
+  assert.doesNotMatch(withErrors, /未给出失败原因/, "有原因就别说不知道");
+  assert.match(withErrors, /; body: /, "FAILED 分支同样要附脱敏后的 body（本函数统一纪律）");
+
+  const topLevel = describeDrawFailure({
+    taskStatus: "FAILED",
+    bodyText: '{"message":"image_url is required for model MusePublic/Qwen-Image-Edit"}'
+  });
+  assert.match(topLevel, /image_url is required/, "顶层 message 同样认");
+
+  // 取不到原因时仍说不可知，但**body 照样附上**——「说了什么」与「长什么样」都不丢。
+  const empty = describeDrawFailure({ taskStatus: "FAILED", bodyText: '{"errors":{"code":0,"message":"   "}}' });
+  assert.match(empty, /未给出失败原因/, "只有空白的原因不算原因");
+  assert.match(empty, /; body: /, "空原因也要附 body");
+
+  const notJson = describeDrawFailure({ taskStatus: "FAILED", bodyText: "upstream said nothing" });
+  assert.match(notJson, /未给出失败原因/, "非 JSON 没有结构化原因可引用 → 承认不可知");
+  assert.match(notJson, /; body: upstream said nothing/, "非 JSON 的原文更不能丢");
+
+  // 新开的「报出上游原因」这条路同样过脱敏闸——上游把令牌回显进 message 是可达状态。
+  const leaked = describeDrawFailure({
+    taskStatus: "FAILED",
+    bodyText: '{"errors":{"code":0,"message":"rejected token ms-3f2a1b8c1111222233334444555566"}}'
+  });
+  assert.doesNotMatch(leaked, /ms-3f2a1b8c1111222233334444555566/, "FAILED 原因里的令牌必须被遮住");
 });
 
 section("describeDrawFailure 对非终态卡住给不同说法", () => {
