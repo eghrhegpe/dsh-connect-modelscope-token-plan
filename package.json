@@ -8,7 +8,7 @@
     "url": "https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan/issues"
   },
   "author": "eghrhegpe",
-  "description": "Bring the ModelScope language and image-generation models into DSH as default-off switches, with image recognition and context windows filled in automatically. The card also shows the free Magicube balance, links each model to its ModelScope page, and records local call counts, a daily trend and rate-limit events. All of it needs only an API key, with no account sign-in.",
+  "description": "One-tap connect ModelScope language and image-generation models into DSH (off by default), with image recognition and context window filled in automatically. You can also see the free Magicube balance, jump to a model's info page, and record local call counts, trends and rate-limit events, with a usage pill beside the input box showing the balance and today's local count. All of it needs only an API key, with no account sign-in.",
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",
