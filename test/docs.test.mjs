@@ -718,6 +718,18 @@ function readCodeMap() {
 // （含被推翻的旧宣称），按 §6② 同款政策本就不进集合。
 {
   const SCOPE_FILES = ["README.md", "AGENTS.md", "cordis.patch.yml", "docs/PROVIDER-M4.md", "src/client/i18n.ts"];
+  // 反向断言：封闭集合的**成员清单本身**不许缩水。§15 的立论是「同一次更正散在
+  // 五个表面上，靠人记同步防不住」——删掉一个表面就等于回到没有门禁，而原判据
+  // （只扫集合内文件、只查存在性）对删成员完全无感：2026-10-19 评审实测删掉
+  // cordis.patch.yml 后 exit 0 全绿。新增规范性表面时**加**进来，不许减；确需
+  // 移除某个表面，先在注释里写清理由并同步改 REQUIRED_SCOPE_FILES（明示放弃射程）。
+  const REQUIRED_SCOPE_FILES = ["README.md", "AGENTS.md", "cordis.patch.yml", "docs/PROVIDER-M4.md", "src/client/i18n.ts"];
+  assert.ok(
+    REQUIRED_SCOPE_FILES.every((f) => SCOPE_FILES.includes(f)),
+    `口径封闭集合被删减了：${REQUIRED_SCOPE_FILES.filter((f) => !SCOPE_FILES.includes(f)).join("、")}——\n` +
+      `2026-10-17 那次更正漏的正是 cordis.patch.yml 与 PROVIDER-M4.md，集合缩水等于那类漏同步重新变成可能。\n` +
+      `要移除某个表面，先在 §15 注释里写清理由并同步改 REQUIRED_SCOPE_FILES（即明示放弃一处射程）。`
+  );
   // 容忍强调符与折行的旧宣称指纹：覆盖 (**)(换行/缩进) 全部 (换行) DSH 魔搭 调用
   const STALE_CLAIM = /覆盖[\s*]{0,4}全部[\s*]{0,8}DSH[\s*]{0,4}魔搭[\s*]{0,4}调用/i;
   const HISTORY_MARK = /更正|~~|曾|历史|当时|推翻|证伪|收窄/;
@@ -791,7 +803,20 @@ function readCodeMap() {
     "src/host/draw-store.ts": /不继承|没有 legacy|不搬/ // 裁定：不继承不搬，doctor 以 shared (legacy) 报出
   };
   const GENERIC = /legacy|继承|不搬/;
-  const headerOf = (text) => text.slice(0, text.indexOf("*/") + 2);
+  // 反向断言：四个裁定侧指纹一个都不许少。原判据只遍历 Object.keys(SIDE)，
+  // 删掉一个键 = 少一道检查而全绿（2026-10-19 评审实测：删 draw-store.ts 指纹后
+  // exit 0）。上面 stores 结构集合已有反向断言（:795 那段），指纹集合却没有对称
+  // 的保护——注释自称「四个已知成员必须在射程内」，实现只保证了一半。
+  assert.deepEqual(
+    Object.keys(SIDE).sort(),
+    ["src/host/draw-store.ts", "src/host/provider-store.ts", "src/host/usage-prefs-store.ts", "src/host/usage-store.ts"].sort(),
+    "SIDE 裁定侧指纹集合被删减了——四个状态 store 的 legacy 继承裁定各一份，少一个就等于那个 store 的头注没人盯"
+  );
+  const headerOf = (text) => {
+    const end = text.indexOf("*/");
+    if (end < 0) throw new Error(`头注解析失败：找不到块注释结尾 */——裁定必须写在首个 import 之前的块注释里，行注释不算（见 §17 判据）`);
+    return text.slice(0, end + 2);
+  };
   for (const known of Object.keys(SIDE)) {
     assert.ok(
       stores.includes(known),
