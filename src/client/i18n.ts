@@ -4,9 +4,22 @@
  */
 import type { Tt } from "./runtime.ts";
 
-/** 简体中文（键集的真源）。 */
+/**
+ * 简体中文（键集的真源）。
+ *
+ * 这里**刻意没有** `panel.title`。插件名只有一个来源：`locale/<lang>.json` 的
+ * `meta.title`（外壳自己的查表，同族插件（商汤）把它记作 PITFALLS §27；本仓还没有
+ * 这份清单，事实与出处见外：外壳 `resources/app.asar` 里的
+ * `.detailSections { display:flex; flex-direction:column; gap:32px; margin-top:32px }`
+ * ——插件卡由「外壳的标题区」和「插件自己渲染的区域」两段组成，那 32px 由外壳
+ * 统一给所有插件，插件不该去抵消它）——外壳在插件区**正上方**打印它，
+ * 中间隔着 `.detailSections { margin-top: 32px }` 那段固定间隔。卡内再放一个
+ * 读 `panel.title` 的 `h1`，同一个字符串就在一屏出现两次、中间一段空白，读起来
+ * 像一个断成两半的表头。`test/panel.test.mjs` 钉「字典里不得再有这个键」，
+ * `test/dom-render.test.mjs` 钉另一半「卡内不得复述插件名」——只删键不删调用点，
+ * `tt()` 会把裸键名渲染上屏，那是同一族坑的另一种长相。
+ */
 export const zh = {
-  "panel.title": "魔搭模型接入",
   "panel.refresh": "刷新",
   "panel.updated": "更新于 {time}",
   "panel.loading": "加载中…",
@@ -201,7 +214,6 @@ export const zh = {
 
 /** English dictionary, key-parity pinned by the type. */
 export const en: typeof zh = {
-  "panel.title": "ModelScope Model Access",
   "panel.refresh": "Refresh",
   "panel.updated": "Updated {time}",
   "panel.loading": "Loading…",

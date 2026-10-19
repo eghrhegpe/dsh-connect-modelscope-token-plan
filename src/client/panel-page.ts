@@ -349,25 +349,16 @@ export function PanelPage({ tt, localeSubscribe }: {
   return h(
     "div",
     { style: S.page, "data-dsh-plugin": PANEL_ID },
-    h(
-      "div",
-      { style: S.headerBar },
-      h(
-        "div",
-        { style: S.header },
-        h("h1", { style: S.title }, tt("panel.title")),
-        h("span", { style: S.spacer }),
-        h(
-          "span",
-          { style: S.cluster },
-          data !== null ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: isoTime(new Date(updatedAt).toISOString()) })) : null,
-          failure !== null && data !== null
-            ? h("span", { style: S.error, role: "status", title: failure.message }, format(tt("panel.error"), { error: failure.message }))
-            : null,
-          h("button", { type: "button", style: S.button, onClick: () => void load() }, tt("panel.refresh"))
-        )
-      )
-    ),
+    // 没有头部行、也没有自己的内边距。插件名由外壳在插件区正上方打印
+    // （`locale/<lang>.json` 的 `meta.title`），中间那段间隔是外壳
+    // `.detailSections` 的 32px；页尾的 48px 也是外壳给的。卡内再放一个读
+    // `panel.title` 的 `h1`，同一个字符串就会在一屏出现两次、中间一段空白，
+    // 读起来像一个断成两半的表头。
+    //
+    // 「更新于 / 刷新」原先独占一行、左半边空着，现并进 tab 行右侧——那一行
+    // 本来就有位置。`S.scroll` 留着是为了 slot 给出**确定高度**的场合（外壳
+    // `.detailSection` 今天是 auto-height，于是这个容器随内容长、滚动归外壳
+    // 的页面）：没有这条 flex 链，确定高度的 slot 会把折线以下全部截掉。
     h(
       "div",
       { style: S.scroll },
@@ -377,12 +368,32 @@ export function PanelPage({ tt, localeSubscribe }: {
         h(
           "div",
           null,
+          // 一行装两样东西：左边 tab 条，右边**当前 tab 的**状态簇（更新于 /
+          // 出错横幅 / 刷新——刷新服务整张卡，所以随所有 tab 一起出现）。
+          // 这一行承担 tab 条下方那条分隔线：`alignItems: "stretch"` 让每个
+          // tab 撑满行高，2px 的激活下划线于是正好压在线上（状态簇换行时也
+          // 一样）。`role="tablist"` 里只留 tab——把刷新按钮和「更新于」塞进去
+          // 是无障碍上的错误。
           h(
             "div",
-            { style: S.tabBar, role: "tablist" },
-            h("button", { type: "button", role: "tab", "aria-selected": activeTab === "quota", style: { ...S.tab, ...(activeTab === "quota" ? S.tabActive : {}) }, onClick: () => setActiveTab("quota") }, tt("tab.quota")),
-            h("button", { type: "button", role: "tab", "aria-selected": activeTab === "models", style: { ...S.tab, ...(activeTab === "models" ? S.tabActive : {}) }, onClick: () => setActiveTab("models") }, tt("tab.models")),
-            h("button", { type: "button", role: "tab", "aria-selected": activeTab === "access", style: { ...S.tab, ...(activeTab === "access" ? S.tabActive : {}) }, onClick: () => setActiveTab("access") }, tt("tab.access"))
+            { style: S.tabRow },
+            h(
+              "div",
+              { style: S.tabBar, role: "tablist" },
+              h("button", { type: "button", role: "tab", "aria-selected": activeTab === "quota", style: { ...S.tab, ...(activeTab === "quota" ? S.tabActive : {}) }, onClick: () => setActiveTab("quota") }, tt("tab.quota")),
+              h("button", { type: "button", role: "tab", "aria-selected": activeTab === "models", style: { ...S.tab, ...(activeTab === "models" ? S.tabActive : {}) }, onClick: () => setActiveTab("models") }, tt("tab.models")),
+              h("button", { type: "button", role: "tab", "aria-selected": activeTab === "access", style: { ...S.tab, ...(activeTab === "access" ? S.tabActive : {}) }, onClick: () => setActiveTab("access") }, tt("tab.access"))
+            ),
+            h("span", { style: S.spacer }),
+            h(
+              "span",
+              { style: S.cluster },
+              data !== null ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: isoTime(new Date(updatedAt).toISOString()) })) : null,
+              failure !== null && data !== null
+                ? h("span", { style: S.error, role: "status", title: failure.message }, format(tt("panel.error"), { error: failure.message }))
+                : null,
+              h("button", { type: "button", style: S.button, onClick: () => void load() }, tt("panel.refresh"))
+            )
           ),
           data !== null && shapeWarnings.length > 0
             ? h("div", { style: S.formError, role: "status" }, format(tt("panel.shapeDrift"), { detail: shapeWarnings.join("; ") }))

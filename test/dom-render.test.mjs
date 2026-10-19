@@ -474,6 +474,8 @@ if (SRC_MODE) {
   zh = panel.dictionaries.zh;
 }
 const tt = (key) => zh[key];
+/** 插件名的唯一来源：`locale/<lang>.json` 的 `meta.title`（外壳自己的查表）。 */
+const LOCALE_TITLE = JSON.parse(readFileSync(new URL("../locale/zh.json", import.meta.url), "utf8")).meta.title;
 /** 与 `src/client/format.ts` 的 format 同一个 `{key}` 模板语义（测试侧自带，不依赖被测物）。 */
 const fillTemplate = (template, vars) => Object.entries(vars).reduce((text, [key, value]) => text.split(`{${key}}`).join(String(value)), template);
 
@@ -585,6 +587,74 @@ const tokenLine = fillTemplate(tt("quota.rowTokens"), { tokens: "1.2k" });
 assert.ok(bodyText().includes(tokenLine), `单模型行显示紧凑 token 数（期望含「${tokenLine}」）`);
 assert.ok(!bodyText().includes("1,200"), "token 不再印千分位长串");
 assert.ok(bodyText().includes(fillTemplate(tt("quota.rowCalls"), { calls: "5" })), "调用次数仍走 count()（小数值原样）");
+
+// ══════════════════════════════════════════════════════════════════════════
+// §1a 插件卡的信息架构：名字只印一处、状态簇与 tab 同行、内外边距归零
+//
+// 这一节钉的是一组**排版契约**——`typecheck` 与其余套件都看不见它们（语法合法、
+// 类型也对，只是版式被挤坏），而它们在真界面上的症状很贵：
+//
+//   ① 「魔搭模型接入」出现两次。外壳在插件区**正上方**打印插件名（来自
+//      `locale/<lang>.json` 的 `meta.title`），中间隔着 `.detailSections` 的 32px
+//      固定间隔；卡内那个读 `panel.title` 的 `h1` 又把同一个字符串印了一遍，
+//      于是看起来像一个断成两半的表头。名字的唯一来源是 locale 文件。
+//   ② 「更新于 / 刷新」原先独占一行，左半边空着。状态簇与三个 tab 同处一行，
+//      tab 条那 1px 分隔线改由**整行**承担（tab 用 stretch 撑满，2px 激活
+//      下划线正好压在线上）。
+//   ③ 卡内自带 `6px 0 56px`（外加已删头部行留下的 `16px 0 12px`）：外壳已经给了
+//      32px 段间距与 48px 页底，两相叠加，描述到 tab 之间多空了一截、页尾多出
+//      一倍空白。卡内的水平内边距一直是 0（外壳负责横向留白），这里一并钉住，
+//      防止有人「顺手」把纵向补回来。
+//
+// `role="tablist"` 只装 tab：刷新按钮与「更新于」必须在它**外面**（把非 tab
+// 元素塞进 tablist 是无障碍上的错误，读屏会把它们当成 tab 念出来）。
+// ══════════════════════════════════════════════════════════════════════════
+{
+  assert.ok(LOCALE_TITLE && typeof LOCALE_TITLE === "string", "locale/zh.json 必须给出 meta.title（插件名的唯一来源）");
+  const pageRoot = q(`[data-dsh-plugin="${SLUG}"]`);
+  assert.ok(pageRoot, "页根在（下面的断言都挂在它上面）");
+
+  // ① 名字只由外壳印，卡内不复述。
+  assert.equal(qa("h1").length, 0, "卡内不得有 h1 —— 插件名由外壳在插件区上方打印，卡内再印一次就是同一个字符串出现两遍");
+  assert.ok(!pageRoot.textContent.includes(LOCALE_TITLE), `卡内文本不得复述插件名「${LOCALE_TITLE}」`);
+  assert.ok(!pageRoot.textContent.includes("panel.title"), "字典键不得以裸键名上屏（删键不删调用点时的形态）");
+
+  // ② 一行两样东西：tab 条 + 状态簇；分隔线由整行承担。
+  const tablist = q('[role="tablist"]');
+  const tabRow = tablist?.parentElement ?? null;
+  assert.ok(tabRow, "tablist 有父行（tab 行）");
+  assert.equal(tablist.style.borderBottom, "", "tab 条自己不再画分隔线——移到整行上");
+  assert.equal(tabRow.style.borderBottom, "1px solid var(--dsw-alias-border-l1)", "tab 行承担 tab 条下方那条分隔线");
+  assert.equal(tabRow.style.alignItems, "stretch", "tab 撑满行高，2px 激活下划线才压在行的分隔线上");
+
+  const refreshBtn = byText("button", tt("panel.refresh"));
+  assert.ok(refreshBtn, "刷新按钮在");
+  assert.equal(refreshBtn.parentElement?.parentElement, tabRow, "「更新于 / 刷新」状态簇与 tab 条同行（不再独占一行）");
+  assert.ok(!tablist.contains(refreshBtn), "刷新按钮必须在 tablist 之外（非 tab 元素塞进 tablist 是无障碍错误）");
+  assert.equal(q('[role="tablist"] [role="tab"]') === null, false, "tab 仍在 tablist 里");
+  assert.equal(qa('[role="tablist"] [role="tab"]').length, 3, "tablist 下恰三个 tab");
+
+  // ③ 卡内不再自带内边距：纵向归零、横向一直是 0。
+  //
+  // 不能只看 `tabRow.parentElement` —— tab 行与渲染体之间还夹着告警条之类的中间
+  // 节点，内边距挂在渲染体上（本文件最初就是这么写错的：断言绿着，因为它检查的
+  // 是另一个元素）。沿祖先链一路上行，每个节点都必须没有纵向内边距。
+  const ancestors = [];
+  for (let el = tabRow.parentElement; el; el = el.parentElement) ancestors.push(el);
+  assert.ok(ancestors.length >= 3, `tab 行的祖先链够长（实际 ${ancestors.length} 层，卡片结构变了要重看这段）`);
+  // 只认**真的数值**，不认字面形态：内联 `padding: 0` 经 jsdom 序列化回来是
+  // `padding-top: 0px`（不是空串），把「0px」判成有内边距会误伤正确写法。
+  const nonZero = (value) => /(^|\s)-?\d*[1-9]\d*(\.\d+)?(px|em|rem|%|vh|vw|pt|ch)?(\s|$)/.test(String(value ?? ""));
+  for (const el of ancestors) {
+    assert.ok(!nonZero(el.style.paddingTop), `卡内祖先节点不得有上内边距（外壳已给 32px 段间距），实际 ${JSON.stringify(el.style.padding)}`);
+    assert.ok(!nonZero(el.style.paddingBottom), `卡内祖先节点不得有下内边距（外壳已给 48px 页底），实际 ${JSON.stringify(el.style.padding)}`);
+    // 水平方向一直由外壳负责，卡内任何一层都不得自己加——`padding: "0 16px"`
+    // 这种简写会让 paddingTop 读回空串，所以横向另判一次。
+    assert.ok(!nonZero(el.style.paddingLeft), `卡内祖先节点不得有左内边距，实际 ${JSON.stringify(el.style.padding)}`);
+    assert.ok(!nonZero(el.style.paddingRight), `卡内祖先节点不得有右内边距，实际 ${JSON.stringify(el.style.padding)}`);
+    assert.ok(!nonZero(el.style.padding), `卡内祖先节点不得用带值的 padding 简写，实际 ${JSON.stringify(el.style.padding)}`);
+  }
+}
 
 // ══════════════════════════════════════════════════════════════════════════
 // §1b 趋势指标切换（次数 / token）：真点击 → 真重渲染 → 柱高按新指标重算

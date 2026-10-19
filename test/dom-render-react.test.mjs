@@ -182,13 +182,18 @@ assert.ok(activeCss().length > 0, "选中 tab 的 style 真的进了 CSSOM（对
 assert.notEqual(activeCss(), idleCss(), "选中与未选中的 tab 样式必须不同（styles.ts 的 tabActive 真的生效）");
 
 // §2 重渲染复用同一批 DOM 节点（mini 替身这里实测 false）
+//
+// 三个引用刻意取在**不同深度**：页根（插件渲染的最外层）、tab 行里第一个 tab
+// （卡内布局的最深处）、以及趋势图那一棵 svg 子树。卡内曾经还有一个 `h1` 标题，
+// 它随「名字只由外壳印」一并删除，这里的第三个采样点换成 tab —— 采样点本身不
+// 承重，承重的是「重渲染之后还是同一批对象」。
 const pageRef = q(`[data-dsh-plugin="${SLUG}"]`);
-const titleRef = pageRef.querySelector("h1");
+const tabRef = pageRef.querySelector('[role="tab"]');
 const svgRef = pageRef.querySelector("svg");
-assert.ok(pageRef && titleRef && svgRef, "先拿到节点引用");
+assert.ok(pageRef && tabRef && svgRef, "先拿到节点引用");
 await act(async () => { byText("button", tt("panel.refresh")).click(); });
 assert.equal(q(`[data-dsh-plugin="${SLUG}"]`), pageRef, "页根：重渲染后仍是同一个 DOM 对象");
-assert.equal(pageRef.querySelector("h1"), titleRef, "标题节点被就地复用");
+assert.equal(pageRef.querySelector('[role="tab"]'), tabRef, "tab 节点被就地复用");
 assert.equal(pageRef.querySelector("svg"), svgRef, "svg 节点被就地复用");
 
 // §3 重渲染不丢焦点（面板每 30s 自动重渲染一次，正在打字的人不该被打断）

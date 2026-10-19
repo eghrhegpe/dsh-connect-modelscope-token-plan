@@ -348,6 +348,24 @@ for (const suffix of new Set(clientSuffixes)) {
     "locale/en.json 与 zh.json 的 key 集合必须一致");
 }
 
+// §6e 插件名只有一个家。*历史*：卡内曾有一个读 `panel.title` 的 `h1`，而外壳在
+// 插件区正上方打印的是 `locale/<lang>.json` 的 `meta.title`（外壳自己的查表）。
+// 两条路径当时都被测试钉着「必须相等」——那条钉子本意是防漂移，实际效果却是让
+// 重复永久合法化：同一个字符串在一屏上出现两次，中间隔着外壳 `.detailSections`
+// 的 32px 固定间隔，读起来像一个断成两半的表头。
+//
+// 现在名字只住 locale 文件一处；本节钉它的**缺席**。渲染面的另一半（卡内不得复述
+// 插件名）在 `test/dom-render.test.mjs` §1a —— 只删键不删调用点，`tt()` 会把裸键名
+// 「panel.title」直接渲染上屏，那是同一族坑的另一种长相。
+{
+  const zhJson = JSON.parse(readFileSync(new URL("../locale/zh.json", import.meta.url), "utf8"));
+  const enJson = JSON.parse(readFileSync(new URL("../locale/en.json", import.meta.url), "utf8"));
+  assert.ok(zhJson?.meta?.title && enJson?.meta?.title,
+    `插件名由 locale 文件提供：zh=${zhJson?.meta?.title} en=${enJson?.meta?.title}`);
+  assert.equal(zh["panel.title"], undefined, "中文词典不得再有 panel.title——卡内复述插件名的入口");
+  assert.equal(en["panel.title"], undefined, "英文词典不得再有 panel.title——同上");
+}
+
 // §7 apply()：把字典与卡注册进 slots。
 {
   const registered = [];

@@ -136,7 +136,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	var zh, en;
 	var init_i18n = __esmMin((() => {
 		zh = {
-			"panel.title": "魔搭模型接入",
 			"panel.refresh": "刷新",
 			"panel.updated": "更新于 {time}",
 			"panel.loading": "加载中…",
@@ -288,7 +287,6 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"composer.stale": "上次数据"
 		};
 		en = {
-			"panel.title": "ModelScope Model Access",
 			"panel.refresh": "Refresh",
 			"panel.updated": "Updated {time}",
 			"panel.loading": "Loading…",
@@ -573,30 +571,23 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				fontSize: 14,
 				lineHeight: "22px"
 			},
-			headerBar: {
-				flex: "none",
-				background: "var(--dsw-alias-bg-base)",
-				position: "relative",
-				zIndex: 1
-			},
-			header: {
-				display: "flex",
-				alignItems: "center",
-				gap: 12,
-				padding: "16px 0 12px"
-			},
 			scroll: {
 				flex: 1,
 				minHeight: 0,
 				overflowY: "auto",
 				overflowX: "hidden"
 			},
-			content: { padding: "6px 0 56px" },
-			tabBar: {
+			content: { padding: 0 },
+			tabRow: {
 				display: "flex",
-				gap: 4,
+				alignItems: "stretch",
+				gap: 12,
 				borderBottom: "1px solid var(--dsw-alias-border-l1)",
 				marginBottom: 4
+			},
+			tabBar: {
+				display: "flex",
+				gap: 4
 			},
 			tab: {
 				appearance: "none",
@@ -607,18 +598,14 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				fontSize: 13,
 				color: "var(--dsw-alias-label-secondary)",
 				cursor: "pointer",
-				outlineOffset: -2
+				outlineOffset: -2,
+				display: "flex",
+				alignItems: "center"
 			},
 			tabActive: {
 				color: "var(--dsw-alias-label-primary)",
 				fontWeight: 600,
 				borderBottom: `2px solid ${BRAND}`
-			},
-			title: {
-				margin: 0,
-				fontSize: 20,
-				fontWeight: 600,
-				lineHeight: "28px"
 			},
 			updated: {
 				color: "var(--dsw-alias-label-secondary)",
@@ -630,7 +617,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				alignItems: "center",
 				gap: 12,
 				flexWrap: "wrap",
-				justifyContent: "flex-end"
+				justifyContent: "flex-end",
+				alignSelf: "center"
 			},
 			button: BUTTON,
 			sectionTitle: {
@@ -2852,15 +2840,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		return h("div", {
 			style: S.page,
 			"data-dsh-plugin": PANEL_ID
-		}, h("div", { style: S.headerBar }, h("div", { style: S.header }, h("h1", { style: S.title }, tt("panel.title")), h("span", { style: S.spacer }), h("span", { style: S.cluster }, data !== null ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: isoTime(new Date(updatedAt).toISOString()) })) : null, failure !== null && data !== null ? h("span", {
-			style: S.error,
-			role: "status",
-			title: failure.message
-		}, format(tt("panel.error"), { error: failure.message })) : null, h("button", {
-			type: "button",
-			style: S.button,
-			onClick: () => void load()
-		}, tt("panel.refresh"))))), h("div", { style: S.scroll }, h("div", { style: S.content }, h("div", null, h("div", {
+		}, h("div", { style: S.scroll }, h("div", { style: S.content }, h("div", null, h("div", { style: S.tabRow }, h("div", {
 			style: S.tabBar,
 			role: "tablist"
 		}, h("button", {
@@ -2890,7 +2870,15 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				...activeTab === "access" ? S.tabActive : {}
 			},
 			onClick: () => setActiveTab("access")
-		}, tt("tab.access"))), data !== null && shapeWarnings.length > 0 ? h("div", {
+		}, tt("tab.access"))), h("span", { style: S.spacer }), h("span", { style: S.cluster }, data !== null ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: isoTime(new Date(updatedAt).toISOString()) })) : null, failure !== null && data !== null ? h("span", {
+			style: S.error,
+			role: "status",
+			title: failure.message
+		}, format(tt("panel.error"), { error: failure.message })) : null, h("button", {
+			type: "button",
+			style: S.button,
+			onClick: () => void load()
+		}, tt("panel.refresh")))), data !== null && shapeWarnings.length > 0 ? h("div", {
 			style: S.formError,
 			role: "status"
 		}, format(tt("panel.shapeDrift"), { detail: shapeWarnings.join("; ") })) : null, activeTab === "quota" ? quotaBody() : activeTab === "models" ? modelsBody() : accessBody()))));
