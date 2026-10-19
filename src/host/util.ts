@@ -1,25 +1,27 @@
 /**
  * Host 半边共用的小读取器与错误构造器（与姊妹插件 util.ts 同源，受控复制）。
- * 集中一份防漂移；相对 sensenova 版本的差异只有一处：redactSecrets 增加了对
- * 魔搭访问令牌裸值（`ms-` + UUID）的脱敏——本插件的凭据就是它。
+ * 集中一份防漂移；相对 sensenova 版本的差异有两处：redactSecrets 增加了对
+ * 魔搭访问令牌裸值（`ms-` + UUID）的脱敏——本插件的凭据就是它；读取器签名
+ * 已类型窄化（`any` → 具体类型/泛型回退），sensenova 仍留 `any`。两处都是
+ * 「本仓先动、姊妹后随」的单向漂移，不是分家。
  * @module dsh-connect-modelscope-token-plan/util
  */
 import type { PluginError } from "./types.ts";
 import type { CodeValue } from "./codes.ts";
 
-/** 读一个有限的正数，否则回退值。 */
-export function num(value: any, fallback?: any): any {
+/** 读一个有限的正数，否则回退值（调用方一律传 number 回退，返回值不再 any）。 */
+export function num(value: unknown, fallback: number = 0): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-/** 读一个非空字符串，否则回退值。 */
-export function str(value: any, fallback?: any): string {
+/** 读一个非空字符串，否则回退值（调用方一律传 string 回退，返回值收窄为 string）。 */
+export function str(value: unknown, fallback: string = ""): string {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : fallback;
 }
 
-/** 读一个普通对象，否则 `{}`。 */
-export function obj(value?: any): any {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+/** 读一个普通对象，否则 `{}`（返回值给具体形状：点号访问合法、赋值不再绕过检查）。 */
+export function obj(value?: unknown): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : {};
 }
 
 /** catch 点统一的一行错误消息。 */
@@ -34,7 +36,7 @@ export function numOrNull(value: unknown) {
 }
 
 /** 原样读字符串（凭据专用：trim 是用户看不见的改动）。 */
-export function verbatim(value: any, fallback?: any): string {
+export function verbatim(value: unknown, fallback: string = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
