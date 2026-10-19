@@ -412,9 +412,10 @@ async function mount({ wiring = wiringFor(), tools = toolsService, deps = {}, ge
 
 {
   // 作业表由 wiring 提供（`index.ts` 建、`index.ts` 的卸载清理销毁）。缺这条线的话
-  // `DrawJobs.dispose()` 一个调用方都没有——2026-10-19 锐评正是从「谁调用 dispose」
-  // 这个问题挖出来的。这里钉住**工具用的就是接线那张表**：提交后 pending 的记录留在
-  // 表里，续查也读同一张（否则用户手里的 jobId 在新装配里查不到）。
+  // `DrawJobs.dispose()` 一个调用方都没有（2026-10-19 锐评实锤，经过档案见
+  // docs/archive/2026-10-19-0.6.3-process.md §七 作业表 2）。这里钉住**工具用的
+  // 就是接线那张表**：提交后 pending 的记录留在表里，续查也读同一张（否则用户手里
+  // 的 jobId 在新装配里查不到）。
   const jobs = createDrawJobs();
   const calls = [];
   const { registered } = await mount({

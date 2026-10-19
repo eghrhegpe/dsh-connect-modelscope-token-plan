@@ -465,7 +465,7 @@ section("abort 也取消在途的轮询请求，不只在 sleep 里", async () =
   assert.equal(
     calls[0].options.signal,
     controller.signal,
-    "轮询请求必须带上 signal，否则在途请求取消不了（2026-10-19 之前这里是 undefined）"
+    "轮询请求必须带上 signal，否则在途请求取消不了（修过：docs/archive/2026-10-19-0.6.3-process.md §七 表行 1）"
   );
   assert.equal(out.kind, "pending", "abort 是「还没好」，不是失败");
   assert.ok(elapsed < 1_500, `abort 必须中断在途请求（实测 ${elapsed}ms）`);

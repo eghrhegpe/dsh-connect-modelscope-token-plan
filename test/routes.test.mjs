@@ -624,11 +624,8 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
 }
 
 // ── 单模型排行 / 事件流读不到：透传 null，不是空数组 ──
-//
-// 2026-10-18 补的最后一块拼图（§6d 的聚合层姊妹篇）：trend 有专属断言，perModel /
-// events 却没有——`perModel.ok ? perModel.value : []` 曾把「读不到」画成空排行，
-// 同一份坏文件在今日头条画「—」、在排行画「还没有本地调用记录。」。这里钉死三条
-// 路（抛错 / store 自报 null / 真实空数组）汇聚到同一个 wire 值，与 trend 逐字对齐。
+// 背景（trend 有专属断言、perModel / events 没有；同一份坏文件两处印法不一致）：
+// usage-store.test.mjs:101 同族事故 + 本节判据与 trend 逐字对齐。
 {
   const base = {
     settings: resolveSettings({}).settings,
@@ -811,8 +808,8 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   // 目录读不到时 provider.error **必须说明原因**：wire.ts 的 ProviderStatus 承诺
   // 「目录读不到时 modelCount 为 0、roster 为空、error 说明原因」，而
   // provider-reconcile 在目录 fetch 失败时只 warn、不写 publisher.state.error
-  // （那份 error 只记 publish 失败）。2026-10-19 锐评实测：旧写法下面板呈现
-  // 「已注册 + 0 个模型 + 没有任何原因」，正是红线 3（读不到 ≠ 0）的漏点。
+  // （那份 error 只记 publish 失败）。背景与旁证（catalogError 半截降级链）：
+  // docs/archive/2026-10-19-0.6.3-process.md §十一 ②。
   assert.equal(unreadable.provider?.modelCount, 0, "目录读不到 → 0 个模型");
   assert.equal(typeof unreadable.provider?.error, "string", "目录读不到必须在 provider.error 里说明原因");
   assert.match(unreadable.provider.error, /catalog refused/, "原因里要带上真实的失败文本");

@@ -5,8 +5,9 @@
 // 承诺，不试图理解语义。宁可窄而硬。每段上线前都用变异测试验过真的会红
 // （注入违规 → 变红 → 恢复 → 全绿）。
 //
-// 事故溯源见 docs/IMPLEMENTATION.md（0.1.0/M4 期）与 docs/archive/
-// 2026-10-05-closeout.md（0.2.0 十二轮收口）——本文件只留判据，不复述历史。
+// 事故溯源按版本住 docs/archive/ 各过程档案（最早两轮见 docs/IMPLEMENTATION.md
+// 与 docs/archive/2026-10-05-closeout.md）；本文件**尽量**只留判据与判据的形状
+// 理由，不复述完整事故经过——已被过程档案收录的故事只留一行指针。
 
 import { strict as assert } from "node:assert";
 import { readFileSync, existsSync, readdirSync } from "node:fs";

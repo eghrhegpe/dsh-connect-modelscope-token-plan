@@ -5,9 +5,10 @@
 // `writeStateFile` 是**四个 store 共同的唯一写入口**（usage / provider / catalog /
 // throttle），所以它的失败模式会被放大到所有状态文件上。它的临时文件
 // 名字是 `<base>.<pid>.<ts>.<uuid>.tmp`，而全仓原本无任何 unlink——任何一步失败后留在原地，
-// `state/<profile>/<name>/` 就会慢慢堆满垃圾。第一次修只补了 rename 失败那条路
-// （Windows 上目标文件被占用最常见）；2026-10-18 统一成为：**try 覆盖到 rename
-// 成功为止，catch 里删临时文件再重抛**——writeFile / open / fsync / rename 四条路都覆盖。
+// `state/<profile>/<name>/` 就会慢慢堆满垃圾。现行纪律：**try 覆盖到 rename
+// 成功为止，catch 里删临时文件再重抛**——writeFile / open / fsync / rename 四条路都覆盖
+// （从「只补 rename 失败一条路」扩到四条路的经过见
+// docs/archive/2026-10-18-0.6.1-process.md 病灶四）。
 //
 // fsync 那一条是**崩溃一致性**（rename 本身只保证并发原子性，不保证断电安全）：
 // 没有它，断电/内核崩溃时 rename 可能把一个空或半截文件立到目标路径上，而

@@ -167,8 +167,9 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
 
   // 陈旧判定：从没读到过不算陈旧（没有「上次」可谈）；读到过之后，失败或超过
   // 3 个声明周期才算。`hasReading` 是承重输入——`updatedAt > 0` 只说明**曾经**
-  // 读到过，读失败时轮询 hook 会清空 data 却保留 updatedAt（2026-10-19 锐评实测：
-  // 只看 updatedAt 会在两个读数都是「—」时挂上「上次数据」）。
+  // 读到过，读失败时轮询 hook 会清空 data 却保留 updatedAt（只看 updatedAt 会在
+  // 两个读数都是「—」时挂上「上次数据」，标签描述一份不在屏幕上的数据；完整经过
+  // 见 docs/archive/2026-10-19-0.6.3-process.md §十一 ⑤）。
   const cadence = 30_000;
   assert.equal(staleOf({ error: null, hasReading: false, updatedAt: 0, now: 1_000_000, cadenceMs: cadence }), false, "从没读到 ≠ 陈旧");
   assert.equal(staleOf({ error: "boom", hasReading: false, updatedAt: 0, now: 1_000_000, cadenceMs: cadence }), false, "没有读数就没有陈旧读数");

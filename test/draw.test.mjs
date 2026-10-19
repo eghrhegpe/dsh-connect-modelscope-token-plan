@@ -243,9 +243,8 @@ section("describeDrawFailure 对空错误明确承认原因不可知", () => {
 });
 
 section("describeDrawFailure 报出上游真的写了的 FAILED 原因（不再一律说不可知）", () => {
-  // 2026-10-19 锐评实测：旧写法把「唯一的实测样本 message 为空」当成了恒定形态，
-  // 于是带非空 errors.message 的 FAILED 也被报成「未给出失败原因」，且 body 被丢掉
-  //（2/2 误报；对照 404 分支正常附 `; body:`）。这是本函数唯一不附 tail 的分支。
+  // 背景（旧写法 2/2 误报、丢 body；判据改为逐 body 判 + 两种情况都附 tail）：
+  // docs/archive/2026-10-19-0.6.3-process.md §十一 ③。
   const withErrors = describeDrawFailure({
     taskStatus: "FAILED",
     bodyText: '{"errors":{"code":0,"message":"sensitive content detected"}}'
