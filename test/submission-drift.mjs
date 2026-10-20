@@ -120,11 +120,11 @@ function summarise(lines) {
   }
 }
 
-/** A skip is an environment fact, not a marketplace signal. It exits 0 — the
- *  same shape as every other environment skip in this repository (a missing
- *  API key, a missing dsh CLI) — but it prints the exact URL and the exact
- *  error, and annotates the run, so a green scheduled job that never reached
- *  anything is visible as such instead of passing for a clean bill. */
+/** A skip is an environment fact, not a marketplace signal. It exits 0, the
+ *  same shape as every other environment skip in this repository, but it
+ *  prints the exact URL and the exact error and annotates the run, so a green
+ *  scheduled job that never reached anything is visible as such instead of
+ *  passing for a clean bill. */
 function skip(reason, detail) {
   const lines = [
     `${SKIP_TAG} — ${reason}`,
