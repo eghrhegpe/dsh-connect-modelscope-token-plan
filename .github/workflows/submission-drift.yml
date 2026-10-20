@@ -52,6 +52,9 @@ on:
       # script compares — it has to wake this workflow up too, or a parser change
       # would land without ever being checked against the live entry.
       - 'test/helpers/submission-entry.mjs'
+      # The parser's version range is declared here, so this file decides which
+      # version of the market's parser actually reads the entry.
+      - 'package.json'
       - '.github/workflows/submission-drift.yml'
 
 jobs:
@@ -63,8 +66,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      # No dependencies to install (peerDependencies only, as in ci.yml), and no
-      # secret: the upstream repository is public and raw.githubusercontent.com
+      # One dependency, and it is not ours: the marketplace parses entries with
+      # js-yaml, and this script reads the entry with that same parser so that
+      # what we compare is what the market sees. `--legacy-peer-deps` keeps npm
+      # from dragging in the fourteen peer packages it would otherwise resolve;
+      # `--no-save` keeps package.json untouched. The range is the one
+      # package.json declares (^5.3.0), which is also the one upstream uses.
+      #
+      # No secret: the upstream repository is public and raw.githubusercontent.com
       # needs no auth. This is deliberately NOT a `*.test.mjs` line, so it stays
       # out of test/run-all.mjs's suite glob and every suite-count pin.
       #
@@ -73,5 +82,7 @@ jobs:
       # comparison logic, the ledger protocol and the exit codes are covered
       # offline on every push. This workflow adds the one thing offline cannot
       # see: what the marketplace entry says right now.
+      - name: Install the market's YAML parser
+        run: npm install --no-save --no-audit --no-fund --legacy-peer-deps js-yaml@^5.3.0
       - name: Compare the draft with the live entry
         run: node test/submission-drift.mjs

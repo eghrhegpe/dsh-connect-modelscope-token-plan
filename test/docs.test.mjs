@@ -1002,16 +1002,24 @@ function readCodeMap() {
     // 解析器与联网那一半（test/submission-drift.mjs）共用一份：
     // test/helpers/submission-entry.mjs。两处各写一份、只靠一句注释要求
     // 「Keep identical」治不住漂移——共用实现，「相同」才是结构事实。
+    //
+    // 它用的是市场同款的真 YAML 解析器（js-yaml），所以这里判的是「这份稿子
+    // 市场能不能读」，不是「它是不是我们习惯的那种写法」：市场的模板本身就是
+    // 无引号 plain scalar（contributing.md 第 16 行），强制单引号只会让合法
+    // 的稿子被自己的门禁判红。
     const draft = parseEntry(read(draftRel));
 
+    assert.ok(draft.ok, `投稿副本不是合法 YAML，市场会直接拒收：${draft.error}`);
+    const draftEn = draft.get("description.en");
+    const draftZh = draft.get("description.zh");
     assert.ok(
-      draft["description.en"] !== undefined && draft["description.zh"] !== undefined,
-      "投稿副本缺 description.en / description.zh 之一，或不是上游解析器认的单引号标量"
+      draftEn !== undefined && draftZh !== undefined,
+      "投稿副本缺 description.en / description.zh 之一"
     );
-    assert.equal(draft.url, repoUrl, "投稿副本里的 url 指向别的仓库");
-    assert.equal(draft.name, slug, "投稿副本的 name 不是本仓的 owner/repo");
-    assert.equal(draft["description.en"], en, "改一处就改两处——市场介绍与卡片是同一句话（英文）");
-    assert.equal(draft["description.zh"], zh, "改一处就改两处——市场介绍与卡片是同一句话（中文）");
+    assert.equal(draft.get("url"), repoUrl, "投稿副本里的 url 指向别的仓库");
+    assert.equal(draft.get("name"), slug, "投稿副本的 name 不是本仓的 owner/repo");
+    assert.equal(draftEn, en, "改一处就改两处——市场介绍与卡片是同一句话（英文）");
+    assert.equal(draftZh, zh, "改一处就改两处——市场介绍与卡片是同一句话（中文）");
   }
 }
 

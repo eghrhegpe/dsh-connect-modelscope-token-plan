@@ -35,6 +35,7 @@ npm run doctor                  # 只读盘点状态文件
 - **撞了封闭集合检查，别绕过，按它的修法补进去**。仓库的高 ROI 门禁都是闭合清单，每条都能在 `test/docs.test.mjs` 里点出行号：**§14（:692）**`src/` 四目录文件登记表（每个 `.ts` 都得在地图里，且不许写幽灵行）、**§14b（:721）**地图第三列的关键导出名必须真的导得出、**§15（:797）**口径表面集合 `SCOPE_FILES`（新增规范性表面必须补进这个数组）、**§17（:873）**状态 store 头注裁定集合、**§13（:616）**根目录手册禁令、**§6（:156）**套件数与 runner 契约。被它拦住 = 你动了未登记成员，正确动作是把新成员补进清单（连代码带测试），不是放宽或删掉这条检查。
   - 判断「这条检查到底在哪」时**先跑命令再写进文档**：本文件曾把三条门禁写成「panel 的 tt 白名单 / degrade marker grep / 聚合器纯度断言」，2026-10-18 清点发现前两条在代码里查无此物（`test/panel.test.mjs` 只有 zh/en 键集一致 + 值域断言，没有白名单；degrade 留痕只有 `test/draw-store.test.mjs:211` 一处 warn 日志断言），第三条同样不存在。指导文档点名门禁时必须带**文件:行**。
 - **测试期望要对齐实现语义**：改测试前先读被测模块的注释——很多「看起来怪」的行为（如 `valid: null` 不是 `false`）是刻意的语义区分。
+- **投稿门禁要装依赖**：投稿副本与市场条目这两个门禁共用 `test/helpers/submission-entry.mjs`，它用 **js-yaml**——市场的同款解析器（上游 `scripts/lib/entries.mjs` 就用它），所以我们读到的是市场看到的那份条目。js-yaml 是 `devDependencies`，裸 checkout 上跑这两个套件会抛「js-yaml is not installed」：先 `npm install`。
 
 ---
 
@@ -307,7 +308,7 @@ test/
 ├── run-all.mjs              # 入口：跑全部测试
 ├── helpers/
 │   ├── peer-stub-loader.mjs # Node module hooks 拦截 peer 入口
-│   └── submission-entry.mjs # 投稿 YAML 的共享解析器（离线与联网两个门禁共用一份）
+│   └── submission-entry.mjs # 投稿 YAML 的共享解析器（js-yaml，市场同款；离线与联网两个门禁共用一份）
 ├── deps-wiring.test.mjs     # 每个 deps 缝不传时落回 ctx，产品零漂移
 ├── dom-render.test.mjs      # 产物 + jsdom + mini 替身 React
 ├── dom-render-react.test.mjs # 真 React 18.3.1 + jsdom

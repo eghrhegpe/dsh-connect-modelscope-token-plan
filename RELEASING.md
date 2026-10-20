@@ -246,8 +246,8 @@ gh release create vX.Y.Z \
 
 - 条目文件 `awesome-dsh-plugin-submission/eghrhegpe__dsh-connect-modelscope-token-plan.yml`，提 PR 时原样复制到对方仓库的 `data/plugins/` 下。不要在这里再维护第二份 yaml。
 - 截图声明在仓库根 `screenshots.json`；清单与资产由 `test/release.test.mjs` 绑在一起（改名必须同步清单）。
-- 市场线上那条条目会随上游维护者的改动漂移，`test/submission-drift.mjs` 每天联网对账一次（定时档在 `.github/workflows/submission-drift.yml`）。**它红了是信息，不是回归**：要么把上游措辞并进草稿，要么重开 PR；别去回滚提交把它刷绿。
-- 分歧台账在 `awesome-dsh-plugin-submission/pending-drift.json`：只有 `category` / `description.en` / `description.zh` 这三类**可声明分歧**能进台账，每条必须写清上游→草稿的确切取值，外加终结它的那条 PR 链接。台账**双向核对**——有分歧没声明判红，声明与现实不符（PR 已合、或上游挪了窝）同样判红；声明过期不清理，等于给分歧装了个静音键。`url` / `name` 是身份字段，永远不可声明，只能改草稿。
+- 市场线上那条条目会随上游维护者的改动漂移，`test/submission-drift.mjs` 每天联网对账一次（定时档在 `.github/workflows/submission-drift.yml`）。**它红了是信息，不是回归**：要么把上游措辞并进草稿，要么重开 PR；别去回滚提交把它刷绿。对账用的是**市场同款的 YAML 解析器**（js-yaml，和上游 `scripts/lib/entries.mjs` 一个），比的是**值**不是写法：两边引号风格不同（单引号 / 无引号 plain scalar / 双引号）而说的是同一句话，算一致；并上游措辞时保持语义即可，不必照抄他们的引号风格。
+- 分歧台账在 `awesome-dsh-plugin-submission/pending-drift.json`：只有 `category` / `description.en` / `description.zh` 这三类**可声明分歧**能进台账，每条必须写清上游→草稿的确切取值，外加终结它的那条 PR 链接。台账**双向核对**——有分歧没声明判红，声明与现实不符（PR 已合、或上游挪了窝）同样判红；声明过期不清理，等于给分歧装了个静音键。`url` / `name` 是身份字段，永远不可声明，只能改草稿。**「上游根本没这个字段」写 `"upstream": null`**——那是唯一能表达「缺席」的形状；没有它，一次缺席就红得没有出口。
 
 ## 常见问题
 

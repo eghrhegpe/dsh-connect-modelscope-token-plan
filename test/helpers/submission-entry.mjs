@@ -1,5 +1,5 @@
 /**
- * submission-entry.mjs — 投稿副本 YAML 的共享解析器。
+ * submission-entry.mjs — 投稿副本 YAML 的共享解析器（真 YAML）。
  *
  * 两个门禁读同一份字节：离线的 `docs.test.mjs`（投稿副本块，每次 push 都跑）与
  * 联网的 `test/submission-drift.mjs`（投稿 vs 市场线上条目）。它们必须对同一
@@ -7,75 +7,129 @@
  * 不住漂移（这正是 tools/dev/cross-repo-drift.mjs 头注治过的病），共用一份实
  * 现才能让「相同」成为结构事实而不是纪律。
  *
- * 逐行扫描，不用正则：模板字面量里的 `\s` 会被当成转义吃掉，写出来的正则静默
- * 变成 `^url:s*(S+)s*$`，永远不匹配——一个只会通过的门禁。
+ * ## 为什么用真 YAML 解析器（js-yaml）
  *
- * 单引号标量里引号靠重复转义（`model''s` 就是 `model's`），不反转义会把每个
- * 撇号都读成漂移。
+ * 市场的真值就是 YAML：上游仓库 `scripts/lib/entries.mjs` 第 8 行
+ * `import { load as yamlLoad } from 'js-yaml'`，第 86 行用它读每个条目文件，
+ * 解析失败时抛的提示原文是「A description containing ": " must be quoted」。
+ * 换句话说，**市场用 js-yaml 说话**，不是我们习惯的那种写法。
  *
- * 行尾注释：YAML 允许 `#` 起注释，但 `#` 前面必须是空白。旧实现用
- * `endsWith("'")` 判定标量，于是上游写成 `en: '…' # note` 时该行被判成
- * 「不是解析器认的标量」（undefined）——离线门禁红得指向一个假病因，联网门禁
- * 则把「上游带注释 vs 草稿不带」判成一次假 DRIFT。现在两侧都在闭引号之后只允
- * 许「空白 + #」收尾，并在比对前剥掉行尾注释。`'text'#note`（无空白）仍是
- * undefined：那不是 YAML 认的标量行，宁红不猜。
+ * 本文件从前是逐行扫描的自制解析器：只认单引号标量、只认第一处 `en: ` 匹配。
+ * 拿真解析器（js-yaml 5.5.0）当基准，量过 10 个构造场景——只有 4 个读数一致，
+ * 5 个不一致，而且**两个方向都不利**：
+ *
+ *   - **假红**（真值有值，自制读成 undefined → 判成一次漂移）：无引号 plain
+ *     scalar（市场自己的模板就是这种，`contributing.md` 第 16 行
+ *     `en: One-line description ending with a period.`）、双引号标量、语义相同
+ *     但带引号的 category。
+ *   - **假绿**（真值不同，自制却读到同一个值 → 真漂移被吞，EXIT=0）：上游在
+ *     `description:` 之前另有一行顶层 `en:` 时，自制取第一处匹配就绕过了真正
+ *     的 `description.en`。
+ *
+ * 还有一条更贵的：自制解析器读不出上游的 plain scalar 时，四条逃生通道（维持
+ * 现状 / 采纳上游文字 / 台账声明 upstream=null / 台账声明上游文字）**全部判红**
+ * ——门禁建议「采纳上游写法」，而采纳之后离线门禁又红。根因不是建议写错了，
+ * 是「读不出」和「读到了 undefined」不可区分。
+ *
+ * 换成真解析器后，比较的是**语义**（解析后的字符串），不是写法：上游用 plain
+ * scalar、本仓用单引号，说的是同一句话就算一致；上面那个假绿也随结构化读取
+ * 一起消失。
+ *
+ * ## 三态：读不出 ≠ 相同，也 ≠ 不同
+ *
+ * `parseEntry` 不把「读不出」和「读到了空」混成一件事：
+ *
+ *   ok=true  → YAML 合法；`get(field)` 返回字符串，或 undefined（键不存在/
+ *              不是字符串——是「读不出」）
+ *   ok=false → YAML 不合法；`error` 里是解析器的原话；此时任何 `get` 都是
+ *              undefined，但调用方必须先看 `ok`，否则又会退回「读不出＝相同」
+ *
+ * 字段级的 same / differs / unknown 是联网那一半（`test/submission-drift.mjs`）
+ * 的事：unknown 不是失败，是「不知道」——它要么被台账声明掉（`"upstream": null`
+ * 表示上游根本没这个字段），要么按字段类别硬错（市场要求存在的字段缺失 = 上游
+ * 条目坏了）。
  *
  * @module test/helpers/submission-entry
  */
 
-/** `#` 前必须是空白（或行首）才算注释起点——URL 片段 `#readme` 不受影响。 */
-function stripTrailingComment(raw) {
-  for (let i = 0; i < raw.length; i += 1) {
-    if (raw[i] !== "#") continue;
-    if (i === 0 || raw[i - 1] === " " || raw[i - 1] === "\t") return raw.slice(0, i).trimEnd();
-  }
-  return raw;
+import { createRequire } from "node:module";
+
+// 市场的解析器就是 js-yaml（上游 `scripts/lib/entries.mjs` 第 8 行）。本仓用
+// 同一个，免得我们说的和市场说的不是一件事。
+//
+// 用 createRequire 而不是 import，是为了让「依赖没装」有一句能读懂的诊断：
+// ESM 的静态 import 只会甩一句 ERR_MODULE_NOT_FOUND，而这里的读者多半是
+// 在别人的机器上第一次跑这个门禁。
+const require = createRequire(import.meta.url);
+
+let yaml;
+try {
+  yaml = require("js-yaml");
+} catch {
+  throw new Error(
+    "js-yaml is not installed. The marketplace parses entries with js-yaml " +
+      "(upstream scripts/lib/entries.mjs), and these gates read YAML with that same " +
+      "parser so that what we compare is what the market sees. Run `npm install`."
+  );
 }
 
-/** 闭引号之后的尾巴：空、纯空白，或「空白 + # 注释」。其它一律不是合法收尾。 */
-function tailAfterClosingQuote(rest) {
-  if (rest === "") return true;
-  const stripped = rest.replace(/^[ \t]+/, "");
-  if (stripped === rest) return false; // 没有前导空白：# 直接贴在引号后面，YAML 不接受
-  return stripped === "" || stripped.startsWith("#");
-}
-
-/** 单引号标量：找配对闭引号（跳过 `''` 转义），闭引号后只允许注释/空白收尾。 */
-function quotedScalar(line, key) {
-  const prefix = `${key}: '`;
-  if (!line.startsWith(prefix)) return undefined;
-  const body = line.slice(prefix.length);
-  let i = 0;
-  while (i < body.length) {
-    if (body[i] !== "'") {
-      i += 1;
-      continue;
+/**
+ * 从 YAML 文档里取一个字段的值。
+ *
+ * 字段名有两种形状：顶层键（url / name / category）与 `description.<locale>`
+ * （市场的结构是 `description:` 下面一个 locale 映射，上游
+ * `scripts/lib/entries.mjs` 第 192 行读的就是 `e.description?.[loc]`）。
+ *
+ * 取不到（键不存在、值不是字符串、description 不是映射）返回 undefined——
+ * 这是「读不出」，和「读到了空字符串」是两件事，别混。
+ */
+function readField(doc, field) {
+  if (field.startsWith("description.")) {
+    const locale = field.slice("description.".length);
+    const descriptions = doc.description;
+    if (!descriptions || typeof descriptions !== "object" || Array.isArray(descriptions)) {
+      return undefined;
     }
-    if (body[i + 1] === "'") {
-      i += 2; // '' 是转义的引号，不是收尾
-      continue;
-    }
-    if (!tailAfterClosingQuote(body.slice(i + 1))) return undefined;
-    return body.slice(0, i).replaceAll("''", "'");
+    const value = descriptions[locale];
+    return typeof value === "string" ? value : undefined;
   }
-  return undefined; // 没找到闭引号
+  const value = doc[field];
+  return typeof value === "string" ? value : undefined;
 }
 
-/** 无引号 field：剥掉「空白 + #」起的行尾注释，其余原样（URL 片段 # 不受影响）。 */
-function plainField(line, key) {
-  const prefix = `${key}: `;
-  if (!line.startsWith(prefix)) return undefined;
-  return stripTrailingComment(line.slice(prefix.length).trim()).trim();
-}
-
-/** 解析一份投稿 YAML，取出这个门禁比对的五个字段。 */
+/**
+ * 解析一份投稿 YAML。
+ *
+ * @param {string} text 文件全文
+ * @returns {{ ok: boolean, error: string | null, doc: object | null,
+ *             get: (field: string) => string | undefined }}
+ */
 export function parseEntry(text) {
-  const lines = String(text).split(/\r?\n/).map((line) => line.trim());
+  let doc;
+  try {
+    doc = yaml.load(String(text));
+  } catch (error) {
+    const reason = error?.reason ?? error?.message ?? String(error);
+    return {
+      ok: false,
+      error: `YAML 解析失败：${reason}`,
+      doc: null,
+      get: () => undefined,
+    };
+  }
+  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
+    const shape = doc === null ? "空" : Array.isArray(doc) ? "数组" : typeof doc;
+    return {
+      ok: false,
+      error: `顶层不是映射（读到 ${shape}）——市场要的是 url/name/category/description 四个键的映射`,
+      doc: null,
+      get: () => undefined,
+    };
+  }
   return {
-    url: plainField(lines.find((c) => c.startsWith("url: ")) ?? "", "url"),
-    name: plainField(lines.find((c) => c.startsWith("name: ")) ?? "", "name"),
-    category: plainField(lines.find((c) => c.startsWith("category: ")) ?? "", "category"),
-    "description.en": quotedScalar(lines.find((c) => c.startsWith("en: '")) ?? "", "en"),
-    "description.zh": quotedScalar(lines.find((c) => c.startsWith("zh: '")) ?? "", "zh"),
+    ok: true,
+    error: null,
+    doc,
+    get: (field) => readField(doc, field),
   };
 }

@@ -13,6 +13,11 @@
  * 临时 ROOT 里的那份跑各个场景——被测的就是发货的那份字节（不是重写的等价
  * 物），草稿、台账、fixture 全在临时目录里，一个字节都不碰本仓。
  *
+ * 临时 ROOT 放在 `<repo>/tmp/` 下，不放 `os.tmpdir()`：共享解析器要用
+ * `js-yaml`（市场的同款解析器），而 `require` 是按目录逐级上溯 `node_modules`
+ * 的——临时树要是落在仓外，从它到仓的 `node_modules` 之间断了一条链，模块就
+ * 找不到，报错还长得像「依赖没装」。`tmp/` 在 .gitignore 里，用完即删。
+ *
  * 场景对应的每一条都是已实证的缺陷或裁定（不钉住就会漂回去）：
  *
  *   - 台账协议：声明过的分歧放行；过期的声明（PR 落地了）判红；声明与现实不符
@@ -23,7 +28,16 @@
  *     → 0 且明说 SKIP；`--from` 指向没有该文件的 checkout → 1（不是问过上游的
  *     404）。
  *   - 解析器：行尾注释（`en: '…' # note`）两侧都剥掉，不该判成假 DRIFT；`''`
- *     转义要反转义；引号后无空白贴着 `#` 不是合法标量行 → 判红不猜。
+ *     转义要反转义；引号后无空白贴着 `#` 不是合法 YAML → 判红（现在报的是
+ *     「YAML 不合法」，不是猜出来的 DRIFT）。
+ *   - **真 YAML 语义**（换成市场同款解析器之前，这几条全都不成立）：
+ *     上游用无引号 plain scalar（市场的模板就是这样）、用双引号、category 带引号
+ *     但语义相同——都必须算「一致」，从前它们一律读成 undefined 判成假 DRIFT；
+ *     反过来，上游在 `description:` 之外另有一行顶层 `en:` 时，真漂移必须被抓
+ *     出来，从前取第一处匹配把它吞了。
+ *   - **三态**：一侧没有的字段是「读不出」，不是「相同」也不是「不同」。
+ *     `description.zh` 缺席合法（市场只要求 en），别的必填字段缺席 = 他们那份
+ *     坏了 = 红；台账可以用 `"upstream": null` 表达一次缺席。
  *   - 报告：长描述只报第一处差异附近的窗口，不倒 400 个字符。
  *
  * @module test/submission-drift.test
@@ -32,11 +46,11 @@
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO = join(HERE, "..");
 const SCRIPT = join(HERE, "submission-drift.mjs");
 const HELPER = join(HERE, "helpers", "submission-entry.mjs");
 
@@ -52,19 +66,25 @@ const EN =
   "Connect ModelScope models into DSH (off by default), with a model's info page and local call counts.";
 const ZH = "一键接入魔搭社区的模型到 DSH（默认关），可查看模型信息页与本地调用计数。";
 
-/** 造一份投稿副本。`enLine` / `zhLine` 可以整行替换（用来造行尾注释、
- *  非法标量这类边界），其余字段按 YAML 单引号标量规则转义成 `''`。 */
+/** 造一份投稿副本。`enLine` / `zhLine` 可以整行替换（用来造 plain scalar、
+ *  双引号、行尾注释、非法 YAML 这类边界），`drop` 可以整行去掉（造缺席），
+ *  其余字段按 YAML 单引号标量规则转义成 `''`。 */
 const draftOf = (over = {}) => {
   const o = { url: `https://github.com/${SLUG}`, name: SLUG, category: "model", en: EN, zh: ZH, ...over };
-  return [
+  const lines = [
     "# Submission draft for awesome-dsh-plugin.",
     `url: ${o.url}`,
     `name: ${o.name}`,
     `category: ${o.category}`,
     "description:",
-    `  en: ${o.enLine ?? `'${o.en.replaceAll("'", "''")}'`}`,
-    `  zh: ${o.zhLine ?? `'${o.zh.replaceAll("'", "''")}'`}`,
-  ].join("\n");
+  ];
+  if (!o.drop?.includes("en")) {
+    lines.push(`  en: ${o.enLine ?? `'${o.en.replaceAll("'", "''")}'`}`);
+  }
+  if (!o.drop?.includes("zh")) {
+    lines.push(`  zh: ${o.zhLine ?? `'${o.zh.replaceAll("'", "''")}'`}`);
+  }
+  return lines.join("\n");
 };
 
 const DEFAULT_PKG = { name: "example", repository: { url: `git+https://github.com/${SLUG}.git` } };
@@ -120,7 +140,11 @@ function run(root, args) {
   return { code: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
 }
 
-const tmpRoot = mkdtempSync(join(tmpdir(), "ms-submission-drift-"));
+// 临时树放在仓内：共享解析器要 require("js-yaml")，而 require 逐级上溯
+// node_modules——落在仓外就断了链，症状长得像「依赖没装」。
+const TMP_BASE = join(REPO, "tmp");
+mkdirSync(TMP_BASE, { recursive: true });
+const tmpRoot = mkdtempSync(join(TMP_BASE, "ms-submission-drift-"));
 let scenarioIndex = 0;
 
 /** 跑一个场景：建 ROOT、造 fixture、跑脚本、按期望断言退出码与输出。 */
@@ -258,10 +282,148 @@ try {
     includes: ["the draft and the live entry say the same thing"],
   });
 
-  scenario("引号后无空白贴着 # → 不是合法标量行，判红不猜", {
+  scenario("引号后无空白贴着 # → 整份不是合法 YAML，判红并说清是 YAML 的问题", {
     upstream: draftOf({ enLine: `'${EN.replaceAll("'", "''")}'#note` }),
     code: 1,
+    includes: ["the marketplace entry is not valid YAML"],
+  });
+
+  // ── 真 YAML 语义：写法不同不等于内容不同（换解析器之前全判错） ────────
+  scenario("上游用 plain scalar（市场的模板写法）且同文 → 一致", {
+    upstream: draftOf({ enLine: EN }),
+    code: 0,
+    includes: ["the draft and the live entry say the same thing"],
+  });
+
+  scenario("上游用双引号且同文 → 一致", {
+    upstream: draftOf({ enLine: `"${EN}"` }),
+    code: 0,
+    includes: ["the draft and the live entry say the same thing"],
+  });
+
+  scenario("category 带引号但语义相同 → 一致", {
+    upstream: draftOf({ category: "'model'" }),
+    code: 0,
+    includes: ["the draft and the live entry say the same thing"],
+  });
+
+  scenario("上游用 plain scalar 且内容不同 → 真 DRIFT（从前读成 undefined 而漏掉）", {
+    upstream: draftOf({ enLine: "A different description entirely." }),
+    code: 1,
     includes: ["description.en", "DRIFT"],
+  });
+
+  scenario("上游在 description 之外另有一行顶层 en: → 真漂移必须被抓（从前被吞）", {
+    upstream: [
+      "# Upstream copy.",
+      "url: https://github.com/example/example",
+      "name: example/example",
+      "category: model",
+      // 诱饵：内容与我们的草稿**相同**。从前解析器取第一处 `en: ` 匹配，读到
+      // 这行 → 与草稿相同 → 「一致」→ 真漂移被吞（EXIT=0）。真解析器按结构读
+      // description.en，读到的才是真值。
+      `en: '${EN.replaceAll("'", "''")}'`,
+      "description:",
+      "  en: 'Totally different upstream text.'",
+      "  zh: '完全不同的上游文案。'",
+    ].join("\n"),
+    code: 1,
+    includes: ["description.en", "DRIFT"],
+  });
+
+  scenario("上游用折行标量（>-）且同文 → 一致", {
+    upstream: [
+      "url: https://github.com/example/example",
+      "name: example/example",
+      "category: model",
+      "description:",
+      "  en: >-",
+      `    ${EN}`,
+      "  zh: '一键接入魔搭社区的模型到 DSH（默认关），可查看模型信息页与本地调用计数。'",
+    ].join("\n"),
+    code: 0,
+    includes: ["the draft and the live entry say the same thing"],
+  });
+
+  scenario("草稿自己用 plain scalar → 一致（我们自己的稿子也该被真解析器接受）", {
+    draft: draftOf({ enLine: EN }),
+    upstream: draftOf(),
+    code: 0,
+    includes: ["the draft and the live entry say the same thing"],
+  });
+
+  // ── 三态：读不出 ≠ 相同，也 ≠ 不同 ────────────────────────────────────
+  scenario("上游缺 description.en（必填）→ 判红并说是他们那份坏了", {
+    upstream: draftOf({ drop: ["en"] }),
+    code: 1,
+    includes: ["the marketplace entry has no description.en"],
+  });
+
+  scenario("上游缺 description.zh（可选，市场只要求 en）→ 不算分歧", {
+    upstream: draftOf({ drop: ["zh"] }),
+    code: 0,
+    includes: ["the draft and the live entry say the same thing"],
+  });
+
+  scenario("上游有 zh 而我们的草稿没有（维护者补的译文）→ 不算分歧", {
+    draft: draftOf({ drop: ["zh"] }),
+    upstream: draftOf(),
+    code: 0,
+    includes: ["the draft and the live entry say the same thing"],
+  });
+
+  scenario("台账用 \"upstream\": null 声明一次缺席 → 放行（唯一能表达「没有」的形状）", {
+    upstream: draftOf({ drop: ["en"] }),
+    ledger: {
+      entries: [
+        {
+          field: "description.en",
+          upstream: null,
+          draft: EN,
+          pr: "https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8208",
+          note: "Upstream file is missing the description; a PR restores it.",
+        },
+      ],
+    },
+    code: 0,
+    includes: ["declared: description.en"],
+  });
+
+  scenario("台账声明 upstream=null 但上游其实有 → 判红（声明与现实不符）", {
+    upstream: draftOf({ en: "Upstream says something else." }),
+    ledger: {
+      entries: [
+        {
+          field: "description.en",
+          upstream: null,
+          draft: EN,
+          pr: "https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8208",
+        },
+      ],
+    },
+    code: 1,
+    includes: ["declaration no longer describes reality: description.en"],
+  });
+
+  scenario("草稿缺必填字段 → 判红（是我们自己的稿子坏了）", {
+    draft: draftOf({ drop: ["en"] }),
+    upstream: draftOf(),
+    code: 1,
+    includes: ["the draft is missing description.en"],
+  });
+
+  // ── 非法 YAML：两份都得说清是谁的 YAML 不合法 ─────────────────────────
+  scenario("草稿不是合法 YAML（未加引号且含 ': '）→ 判红并说是我们的稿子", {
+    draft: draftOf({ enLine: "Vision toolkit: OCR, grounding and pixel diff." }),
+    upstream: draftOf(),
+    code: 1,
+    includes: ["the submission draft is not valid YAML"],
+  });
+
+  scenario("上游不是合法 YAML → 判红并说是他们那份", {
+    upstream: draftOf({ enLine: "Vision toolkit: OCR, grounding and pixel diff." }),
+    code: 1,
+    includes: ["the marketplace entry is not valid YAML"],
   });
 
   // ── 报告形状：长描述只报第一处差异附近的窗口 ──────────────────────────
