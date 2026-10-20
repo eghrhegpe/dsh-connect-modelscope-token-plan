@@ -97,7 +97,7 @@ npm run doctor                  # 只读盘点状态文件
 
 ## 进入代码库的读取顺序（AI 会话）
 
-约 59 个 src 文件（`.ts`）+ 38 个测试套件（`test/*.test.mjs`；连同 helpers 共 41 个 `.mjs`），乱序读会把时间花在「重新验证文档已写明的事实」上。
+约 59 个 src 文件（`.ts`）+ 39 个测试套件（`test/*.test.mjs`；连同 helpers 共 42 个 `.mjs`），乱序读会把时间花在「重新验证文档已写明的事实」上。
 
 1. **先文档，后代码**：本文件 → `README.md`（功能全貌 + 三条事实）→ `docs/PROVIDER-M4.md`（设计契约）。这些是判断「代码对不对」的坐标系。
 2. **git 先行**：`git log --oneline -15` + `git status --short`。并行会话常驻，优先读新鲜改动。
@@ -338,6 +338,7 @@ test/
 ├── switch-precedence.test.mjs # 开关优先级：面板值 > patch 默认
 ├── family-kernel.test.mjs   # 同族同源**宣称**的核对（数值重叠只报告，不判红）
 ├── env-hermetic.test.mjs    # 环境隔离
+├── host-range.test.mjs      # peer 范围 × 已发布版本宇宙的对齐（golden 冻结，零网络）
 ├── inference-vision.test.mjs # 视觉判定
 └── draw*.test.mjs           # 出图工具全套（draw.test.mjs / -jobs / -register / -routes / -runtime / -store）
 ```
