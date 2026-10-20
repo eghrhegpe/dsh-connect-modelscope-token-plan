@@ -133,7 +133,7 @@ function skip(reason, detail) {
     "",
     "Nothing was compared. This is not a statement about the marketplace entry;",
     "it is a statement about this environment. Re-run once the network is back,",
-    "or reproduce locally with `node test/submission-drift.mjs --from <checkout>`.",
+    "or reproduce locally with `node test/submission-drift.mjs --from <checkout>/data/plugins`.",
   ];
   summarise(lines);
   if (process.env.GITHUB_ACTIONS === "true") {
@@ -245,6 +245,23 @@ async function readUpstream(target) {
 const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
 const repoUrl = String(pkg.repository?.url ?? "").replace(/^git\+/, "").replace(/\.git$/, "");
 const slug = repoUrl.replace(/^https:\/\/github\.com\//, "");
+
+// Without this, a package.json whose repository is missing or is not on GitHub
+// would silently build the URL `<RAW_BASE>/.yml` and the run would report a
+// gone entry — blaming the marketplace for a local manifest bug.
+if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(slug)) {
+  summarise([
+    "submission-drift: package.json#repository is not a github.com owner/repo URL",
+    "",
+    `  repository: ${JSON.stringify(pkg.repository?.url ?? null)}`,
+    `  derived:    ${JSON.stringify(slug)}`,
+    "",
+    "The upstream path is derived from that field, so nothing sensible can be",
+    "asked. Fix the manifest before reading anything into this run.",
+  ]);
+  process.exit(1);
+}
+
 const file = slug.replace("/", "__");
 const draftRel = `awesome-dsh-plugin-submission/${file}.yml`;
 
@@ -269,17 +286,31 @@ const target = fetchTarget(file);
 const upstream = await readUpstream(target);
 
 if (upstream.kind === "gone") {
+  // Two very different failures share this shape, and conflating them sends the
+  // reader to the wrong place: a 404 from upstream means the listing is gone,
+  // while a missing file under `--from` means the path they typed is wrong (or
+  // that checkout predates the entry). Nothing was asked of the marketplace in
+  // the second case, so it must not claim an answer.
+  const local = target.kind === "file";
   summarise([
-    `submission-drift: the marketplace entry is GONE`,
+    `submission-drift: ${local ? "no such file in the checkout you pointed --from at" : "the marketplace entry is GONE"}`,
     "",
     `  asked:    ${upstream.label}`,
     `  draft:    ${draftRel}`,
     "",
-    "Upstream answered, and there is no file at that path. The entry was removed",
-    "or renamed — either way this repository's listing no longer exists in the",
-    "marketplace. Check the upstream repository's history for the removal, then",
-    "either re-submit the draft or delete it here so the offline gate stops",
-    "pinning text nobody reads.",
+    ...(local
+      ? [
+          "`--from` reads a local checkout, so nothing was asked of the marketplace.",
+          "Point it at `<checkout>/data/plugins` — the directory holding",
+          "`<owner>__<repo>.yml` — or drop the flag to ask upstream over the network.",
+        ]
+      : [
+          "Upstream answered, and there is no file at that path. The entry was removed",
+          "or renamed — either way this repository's listing no longer exists in the",
+          "marketplace. Check the upstream repository's history for the removal, then",
+          "either re-submit the draft or delete it here so the offline gate stops",
+          "pinning text nobody reads.",
+        ]),
   ]);
   process.exit(1);
 }
