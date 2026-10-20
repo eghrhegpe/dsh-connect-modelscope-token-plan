@@ -62,8 +62,8 @@
         # 适配器出去，每一次调用与每一条 429/错误事件都由 src/host/usage-observer.ts
         # 在流的出口记进同一个 usage-store。口径是**本客户端**：桌面端与 Web 端是
         # 两个 profile，各记各的账、互不可见（`npm run doctor` 并排列出各 profile），
-        # 别把它当跨端总量。直连魔搭的其它客户端同样不计入（本插件看不见它们），
-        # 消耗总量以官方魔粒余额为准。
+        # 口径的历史与裁定见 docs/PROVIDER-M4.md；别把它当跨端总量。直连魔搭的
+        # 其它客户端同样不计入（本插件看不见它们），消耗总量以官方魔粒余额为准。
         #
         # 偏差方向是**按流计次**：重试不在流内部发生，而是流被消费完后由
         # agent/request-error 瀑布决定重发，因而每次重试各记一次（按「魔搭按
@@ -103,7 +103,8 @@
         #     出图计数——那会变成拿 chat 的口径给生图记账。
         #
         # 生效时机：开关值立即保存，但**工具的挂载发生在下次 Host 启动**——
-        # peer 的 tools registry 没有 unregister，工具一旦注册就摘不下来。
+        # peer 的 tools registry 没有 unregister，工具一旦注册就摘不下来（机制与
+        # 后果的完整论述见 src/host/draw-register.ts 文件头注）。
         # 面板会就这一点给出提示（draw.restartHint）。
         drawEnabled: false
         # 出图默认模型（空 = 自动取目录里第一个出图模型）。

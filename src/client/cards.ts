@@ -564,7 +564,8 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
   // 源标注：面板保存的值 / patch 的默认。
   const sourceKey = status.source === "panel" ? "provider.source.panel" : "provider.source.config";
 
-  // 全局上下文窗口**覆盖**。放在卡片最底：插件自带策展表（19 个模型的交叉真值），
+  // 全局上下文窗口**覆盖**。放在卡片最底：插件自带策展表（19 个模型的交叉真值，
+  // 只收这几个的理由见 context-catalog.ts 头注），
   // 这个值只在目录未声明窗口时套用，却会盖过策展表——它是「覆盖」而不是「跟随」，
   // 所以不该出现在开关旁边冒充主流程。
   //
@@ -841,7 +842,8 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
  *
  * **与 ProviderCard 的关键差异，也是这张卡存在的主要理由**：provider 开关翻转会
  * 立即重注册，而出图工具的开关翻转**要等下次 Host 启动**——peer 的 tools registry
- * 没有 unregister。所以这张卡必须把这件事说出来（`draw.restartHint`），否则用户
+ * 没有 unregister（完整论述见 src/host/draw-register.ts 文件头注）。所以这张卡必须
+ * 把这件事说出来（`draw.restartHint`），否则用户
  * 翻开关后看不到任何变化，会以为坏了。
  *
  * 缺席原因是**分开渲染**的：`no-tools-service` 是「这个 Host 没提供该服务」（正常），

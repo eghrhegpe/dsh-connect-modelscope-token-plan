@@ -2130,7 +2130,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	*
 	* **与 ProviderCard 的关键差异，也是这张卡存在的主要理由**：provider 开关翻转会
 	* 立即重注册，而出图工具的开关翻转**要等下次 Host 启动**——peer 的 tools registry
-	* 没有 unregister。所以这张卡必须把这件事说出来（`draw.restartHint`），否则用户
+	* 没有 unregister（完整论述见 src/host/draw-register.ts 文件头注）。所以这张卡必须
+	* 把这件事说出来（`draw.restartHint`），否则用户
 	* 翻开关后看不到任何变化，会以为坏了。
 	*
 	* 缺席原因是**分开渲染**的：`no-tools-service` 是「这个 Host 没提供该服务」（正常），

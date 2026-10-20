@@ -12,7 +12,8 @@
  *
  * 一处**与 provider 路由不同**的地方必须说清：provider 开关翻转会**立即**重注册
  * （publish 是活的重建），而出图工具的开关翻转**要等下次 Host 启动**——peer 的
- * tools registry 没有 unregister，工具一旦注册就摘不下来。所以本路由保存成功后
+ * tools registry 没有 unregister，工具一旦注册就摘不下来（完整论述见
+ * draw-register.ts 文件头注）。所以本路由保存成功后
  * 不改挂载状态，只在响应里给出 `mountPending`，让面板能说清这件事，而不是让用户
  * 以为开关坏了。
  *

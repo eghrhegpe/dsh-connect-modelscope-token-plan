@@ -404,6 +404,13 @@ const isVendoredSpec = (rel) => rel.startsWith("docs/modelscope.cn-openapi/");
 // 已经付过：修一处错声明要同步改 4 个文件，因为同一错误声明的传播点散落在
 // README / docs / patch / src。判据机械：非归属文件若提到该事实，必须在**文件内**
 // 链回归属文件——指针可以，重述不行。docs/archive/** 豁免（冻结的历史允许逐字保留）。
+//
+// 2026-10-20 扩到 7 条，并把 AGENTS.md 拉进射程：它的「关键设计决策速查」表本就是
+// 纯指针表（「别在 AGENTS.md 里重复写答案」），但此前只靠人守。加入后是**前向**
+// 保护——AGENTS.md 已含全部 7 个 pointer，对其中 4 条事实的 needle 命中（出图 /
+// profile / 策展表 / 顺序不可反），另 3 条它没重述、无需判红；日后谁在 AGENTS.md
+// 新增重述而忘带指针，这条会立刻红。取舍原则见各条注释——needle 必须是**该论述
+// 的机制核心**，不是结论。
 const FACTS = [
   {
     id: "reasoning_effort 档位表不可行（既不校验值也不保证生效）",
@@ -428,11 +435,43 @@ const FACTS = [
     needles: [/顺序不可反/, /改写先于观察/],
     canonical: "src/host/usage-observer.ts",
     pointer: "usage-observer.ts"
+  },
+  {
+    id: "出图工具注册不可撤销：peer 的 tools registry 没有 unregister，开关翻转要下次 Host 启动",
+    // 用机制核心「没有 unregister」当指纹，不用结论「下次启动才生效」——结论各文件
+    // 都换成了自己的写法（cordis 说「挂载发生在下次 Host 启动」，routes/draw 说「要
+    // 等下次 Host 启动」，cards 说「开关翻转要等下次 Host 启动」），机制只有一种写法。
+    needles: [/没有 unregister/],
+    canonical: "src/host/draw-register.ts",
+    pointer: "draw-register.ts"
+  },
+  {
+    id: "按 profile 分段：桌面端与 Web 端各记各的账、互不可见",
+    // 与 §15 正交：§15 管「每个规范性表面都必须带口径限定词」（复制方向），本条管
+    // 「提到这条论述的文件必须链回归属」（归属方向）。
+    needles: [/各记各的账/],
+    canonical: "docs/PROVIDER-M4.md",
+    pointer: "PROVIDER-M4.md"
+  },
+  {
+    id: "上下文窗口策展表只收 19 个模型（models.dev 交叉真值）",
+    needles: [/19 个/],
+    canonical: "src/host/context-catalog.ts",
+    pointer: "context-catalog.ts"
+  },
+  {
+    id: "本地计数与官方余额是两个数：官方只给总额度余额，不给 per-model 限频",
+    // 登记时零违规（README 与 IMPLEMENTATION 都已链回 usage-observer.ts）——价值在
+    // 第一段断言：归属文件丢了这条论述会立刻红，不用等到下一次重复才暴露。
+    needles: [/官方只给总额度余额/],
+    canonical: "src/host/usage-observer.ts",
+    pointer: "usage-observer.ts"
   }
 ];
 {
   const scanned = [
     "README.md",
+    "AGENTS.md",
     "cordis.patch.yml",
     ...docFiles(),
     ...tsFiles("src/host"),
