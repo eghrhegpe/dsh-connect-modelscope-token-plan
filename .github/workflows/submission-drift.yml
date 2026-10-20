@@ -36,7 +36,7 @@ name: Submission drift
 
 on:
   schedule:
-    # 03:41 UTC = 11:41 CST: after the upstream maintainers' day has produced
+    # 03:49 UTC = 11:49 CST: after the upstream maintainers' day has produced
     # whatever edits it was going to, early enough for this one to be read.
     # Staggered by two minutes from the sibling repositories so five mails do
     # not arrive at once and get skimmed as one.
@@ -48,6 +48,10 @@ on:
     paths:
       - 'awesome-dsh-plugin-submission/**'
       - 'test/submission-drift.mjs'
+      # The parser lives in a shared helper now, so changing it changes what this
+      # script compares — it has to wake this workflow up too, or a parser change
+      # would land without ever being checked against the live entry.
+      - 'test/helpers/submission-entry.mjs'
       - '.github/workflows/submission-drift.yml'
 
 jobs:
@@ -62,6 +66,12 @@ jobs:
       # No dependencies to install (peerDependencies only, as in ci.yml), and no
       # secret: the upstream repository is public and raw.githubusercontent.com
       # needs no auth. This is deliberately NOT a `*.test.mjs` line, so it stays
-      # out of the three-way roster pin in test/package.test.mjs.
+      # out of test/run-all.mjs's suite glob and every suite-count pin.
+      #
+      # "Not a suite" does not mean "never executed": test/submission-drift.test.mjs
+      # copies this file into a temp tree and drives it with --from, so the
+      # comparison logic, the ledger protocol and the exit codes are covered
+      # offline on every push. This workflow adds the one thing offline cannot
+      # see: what the marketplace entry says right now.
       - name: Compare the draft with the live entry
         run: node test/submission-drift.mjs

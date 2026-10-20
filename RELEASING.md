@@ -242,10 +242,12 @@ gh release create vX.Y.Z \
 
 规则只认上游原文，本仓副本在 `awesome-dsh-plugin-submission/contributing.md`——**别在本文件转述规则**（本节此前那张「硬门槛」表就是转述，已经漂移过）。
 
-本仓只有三件事实：
+本仓只有四件事实：
 
 - 条目文件 `awesome-dsh-plugin-submission/eghrhegpe__dsh-connect-modelscope-token-plan.yml`，提 PR 时原样复制到对方仓库的 `data/plugins/` 下。不要在这里再维护第二份 yaml。
 - 截图声明在仓库根 `screenshots.json`；清单与资产由 `test/release.test.mjs` 绑在一起（改名必须同步清单）。
+- 市场线上那条条目会随上游维护者的改动漂移，`test/submission-drift.mjs` 每天联网对账一次（定时档在 `.github/workflows/submission-drift.yml`）。**它红了是信息，不是回归**：要么把上游措辞并进草稿，要么重开 PR；别去回滚提交把它刷绿。
+- 分歧台账在 `awesome-dsh-plugin-submission/pending-drift.json`：只有 `category` / `description.en` / `description.zh` 这三类**可声明分歧**能进台账，每条必须写清上游→草稿的确切取值，外加终结它的那条 PR 链接。台账**双向核对**——有分歧没声明判红，声明与现实不符（PR 已合、或上游挪了窝）同样判红；声明过期不清理，等于给分歧装了个静音键。`url` / `name` 是身份字段，永远不可声明，只能改草稿。
 
 ## 常见问题
 

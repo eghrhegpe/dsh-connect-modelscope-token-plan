@@ -14,6 +14,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { parseEntry } from "./helpers/submission-entry.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(join(root, rel), "utf8");
@@ -998,31 +999,19 @@ function readCodeMap() {
   const draftRel = `awesome-dsh-plugin-submission/${slug.replace("/", "__")}.yml`;
 
   if (existsSync(join(root, draftRel))) {
-    const draft = read(draftRel);
-    // 逐行扫描，不用正则：模板字面量里的 `\s` 会被当成转义吃掉，写出来的正则
-    // 静默变成 `^url:s*(S+)s*$`，永远不匹配——一个只会通过的「门禁」。
-    // 单引号标量里引号靠重复转义（`model''s` 就是 `model's`），不反转义会把
-    // 每个撇号都读成漂移。
-    const lines = draft.split("\n").map((line) => line.trim());
-    const scalar = (key) => {
-      const prefix = `${key}: '`;
-      const line = lines.find((c) => c.startsWith(prefix) && c.endsWith("'"));
-      return line === undefined ? undefined : line.slice(prefix.length, -1).replaceAll("''", "'");
-    };
-    const field = (key) => {
-      const prefix = `${key}: `;
-      const line = lines.find((c) => c.startsWith(prefix));
-      return line === undefined ? undefined : line.slice(prefix.length).trim();
-    };
+    // 解析器与联网那一半（test/submission-drift.mjs）共用一份：
+    // test/helpers/submission-entry.mjs。两处各写一份、只靠一句注释要求
+    // 「Keep identical」治不住漂移——共用实现，「相同」才是结构事实。
+    const draft = parseEntry(read(draftRel));
 
     assert.ok(
-      scalar("en") !== undefined && scalar("zh") !== undefined,
+      draft["description.en"] !== undefined && draft["description.zh"] !== undefined,
       "投稿副本缺 description.en / description.zh 之一，或不是上游解析器认的单引号标量"
     );
-    assert.equal(field("url"), repoUrl, "投稿副本里的 url 指向别的仓库");
-    assert.equal(field("name"), slug, "投稿副本的 name 不是本仓的 owner/repo");
-    assert.equal(scalar("en"), en, "改一处就改两处——市场介绍与卡片是同一句话（英文）");
-    assert.equal(scalar("zh"), zh, "改一处就改两处——市场介绍与卡片是同一句话（中文）");
+    assert.equal(draft.url, repoUrl, "投稿副本里的 url 指向别的仓库");
+    assert.equal(draft.name, slug, "投稿副本的 name 不是本仓的 owner/repo");
+    assert.equal(draft["description.en"], en, "改一处就改两处——市场介绍与卡片是同一句话（英文）");
+    assert.equal(draft["description.zh"], zh, "改一处就改两处——市场介绍与卡片是同一句话（中文）");
   }
 }
 

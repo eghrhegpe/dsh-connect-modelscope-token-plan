@@ -46,7 +46,7 @@
  *   node test/submission-drift.mjs                 # fetch upstream (needs the network)
  *   node test/submission-drift.mjs --from <dir>    # read data/plugins/*.yml from a checkout
  *
- * `--from` is not a test hook: when this reds at 03:43 you will want to
+ * `--from` is not a test hook: when this reds at 03:49 you will want to
  * reproduce it against the file GitHub is showing you, and raw.githubusercontent
  * is blocked on plenty of corporate networks (this repository's own dev machine
  * included — `api.github.com` answers, `raw.` times out).
@@ -55,6 +55,7 @@
 import { readFileSync, existsSync, appendFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseEntry } from "./helpers/submission-entry.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const UPSTREAM_REPO = "awesome-dsh-plugin/awesome-dsh-plugin";
@@ -71,37 +72,12 @@ const DECLARABLE = new Set(["category", "description.en", "description.zh"]);
 
 // --- reading a submission file -------------------------------------------
 //
-// Scanned line by line rather than by regex, for the reason spelled out in the
-// offline gate: inside a template literal `\s` is silently eaten as an escape,
-// so the pattern that reaches the engine is `^url:s*(S+)s*$` — a matcher that
-// can only ever fail to match, wrapped in a check that can only ever pass. And
-// a single-quoted scalar escapes a quote by doubling it (`model''s` for
-// `model's`), so unescape before comparing or every apostrophe reads as drift.
-//
-// Keep this parser identical to the offline gate's. The two tiers read the same
-// bytes; if they read them differently they can contradict each other about one
-// file, and then neither is believable.
-
-function parseEntry(text) {
-  const lines = text.split("\n").map((line) => line.trim());
-  const scalar = (key) => {
-    const prefix = `${key}: '`;
-    const line = lines.find((c) => c.startsWith(prefix) && c.endsWith("'"));
-    return line === undefined ? undefined : line.slice(prefix.length, -1).replaceAll("''", "'");
-  };
-  const field = (key) => {
-    const prefix = `${key}: `;
-    const line = lines.find((c) => c.startsWith(prefix));
-    return line === undefined ? undefined : line.slice(prefix.length).trim();
-  };
-  return {
-    url: field("url"),
-    name: field("name"),
-    category: field("category"),
-    "description.en": scalar("en"),
-    "description.zh": scalar("zh"),
-  };
-}
+// 解析器住在 test/helpers/submission-entry.mjs，离线那一半（docs.test.mjs 的
+// 投稿副本块）import 的是同一个函数。两处各写一份、只靠一句注释要求「Keep
+// identical」治不住漂移——这正是 tools/dev/cross-repo-drift.mjs 头注治过的病
+// （同源副本铁器无门禁）。共用实现后，两个层级对同一份字节给出同一个读法，
+// 不可能互相矛盾。为什么逐行扫描、为什么要反转义、行尾注释怎么算，见那里的
+// 头注。
 
 // --- reporting ------------------------------------------------------------
 
@@ -188,11 +164,26 @@ function readLedger() {
 
 // --- the upstream side ----------------------------------------------------
 
+/** Malformed command line → exit 2, never exit 0. This used to `skip()` (exit 0
+ *  plus "Re-run once the network is back"), which read as an environment fact
+ *  and would have sent the reader re-running a command that cannot work. A
+ *  missing flag value is a typo on the command line; the repository's shape for
+ *  that is test/run-all.mjs's `die()`: message + usage + exit 2. */
+function usageError(message) {
+  console.error(`submission-drift: ${message}`);
+  console.error("用法：node test/submission-drift.mjs [--from <checkout>/data/plugins]");
+  process.exit(2);
+}
+
 function fetchTarget(file) {
   const fromIndex = process.argv.indexOf("--from");
   if (fromIndex !== -1) {
     const dir = process.argv[fromIndex + 1];
-    if (dir === undefined) skip("--from needs a directory", ["  node test/submission-drift.mjs --from <checkout>/data/plugins"]);
+    // A flag without its value is a typo, not an environment fact: exiting 0 with
+    // network advice would send the reader re-running a command that cannot work.
+    // This repository's convention is exit 2 for a malformed command line
+    // (test/run-all.mjs `die()`).
+    if (dir === undefined) usageError("--from needs a directory");
     return { kind: "file", path: join(resolve(dir), `${file}.yml`), label: join(resolve(dir), `${file}.yml`) };
   }
   return { kind: "http", url: `${RAW_BASE}/${file}.yml`, label: `${RAW_BASE}/${file}.yml` };

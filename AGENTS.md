@@ -32,7 +32,7 @@ npm run doctor                  # 只读盘点状态文件
 - **改了契约/接缝文件，跑全量**。`src/shared/*`、`client.js`、`lib/index.js` 以及被多个模块消费的文件，消费者不可枚举——按域裁剪会漏掉跨域契约。判断标准：这个文件的消费者我数得清吗？数不清就全量。
 - **全量现在是安全的**：跑完所有套件再汇总，失败项逐个点名。别因为怕卡机器而只跑自己那一个域。
 - **`--only` / `--skip` 给了值才算数**：从前 runner 只认 `--only <值>` 空格式，而本文件写的正是 `--only=<子串>` 等号式——等号式取不到值就**静默退化成全量**（你以为在裁剪，实际跑了 39 个套件），还因为 build-gate 当时挂在「未裁剪」分支里，连唯一的产物门禁一起跳过。现在两种写法都认，解析不出值或以 `--only-wire` 这种连字符形式出现就直接以退出码 2 报错；裁剪时 build-gate 照跑（「只跑一个域」恰恰是「改了 src 没重建」最容易蒙混的场景）。
-- **撞了封闭集合检查，别绕过，按它的修法补进去**。仓库的高 ROI 门禁都是闭合清单，每条都能在 `test/docs.test.mjs` 里点出行号：**§14（:691）**`src/` 四目录文件登记表（每个 `.ts` 都得在地图里，且不许写幽灵行）、**§14b（:720）**地图第三列的关键导出名必须真的导得出、**§15（:796）**口径表面集合 `SCOPE_FILES`（新增规范性表面必须补进这个数组）、**§17（:872）**状态 store 头注裁定集合、**§13（:615）**根目录手册禁令、**§6（:155）**套件数与 runner 契约。被它拦住 = 你动了未登记成员，正确动作是把新成员补进清单（连代码带测试），不是放宽或删掉这条检查。
+- **撞了封闭集合检查，别绕过，按它的修法补进去**。仓库的高 ROI 门禁都是闭合清单，每条都能在 `test/docs.test.mjs` 里点出行号：**§14（:692）**`src/` 四目录文件登记表（每个 `.ts` 都得在地图里，且不许写幽灵行）、**§14b（:721）**地图第三列的关键导出名必须真的导得出、**§15（:797）**口径表面集合 `SCOPE_FILES`（新增规范性表面必须补进这个数组）、**§17（:873）**状态 store 头注裁定集合、**§13（:616）**根目录手册禁令、**§6（:156）**套件数与 runner 契约。被它拦住 = 你动了未登记成员，正确动作是把新成员补进清单（连代码带测试），不是放宽或删掉这条检查。
   - 判断「这条检查到底在哪」时**先跑命令再写进文档**：本文件曾把三条门禁写成「panel 的 tt 白名单 / degrade marker grep / 聚合器纯度断言」，2026-10-18 清点发现前两条在代码里查无此物（`test/panel.test.mjs` 只有 zh/en 键集一致 + 值域断言，没有白名单；degrade 留痕只有 `test/draw-store.test.mjs:211` 一处 warn 日志断言），第三条同样不存在。指导文档点名门禁时必须带**文件:行**。
 - **测试期望要对齐实现语义**：改测试前先读被测模块的注释——很多「看起来怪」的行为（如 `valid: null` 不是 `false`）是刻意的语义区分。
 
@@ -97,7 +97,7 @@ npm run doctor                  # 只读盘点状态文件
 
 ## 进入代码库的读取顺序（AI 会话）
 
-约 59 个 src 文件（`.ts`）+ 39 个测试套件（`test/*.test.mjs`；连同 helpers 共 42 个 `.mjs`），乱序读会把时间花在「重新验证文档已写明的事实」上。
+约 59 个 src 文件（`.ts`）+ 40 个测试套件（`test/*.test.mjs`；连同脚本与 helpers 共 46 个 `.mjs`），乱序读会把时间花在「重新验证文档已写明的事实」上。
 
 1. **先文档，后代码**：本文件 → `README.md`（功能全貌 + 三条事实）→ `docs/PROVIDER-M4.md`（设计契约）。这些是判断「代码对不对」的坐标系。
 2. **git 先行**：`git log --oneline -15` + `git status --short`。并行会话常驻，优先读新鲜改动。
@@ -273,6 +273,7 @@ npm run doctor                  # 只读盘点状态文件
 | 改凭据存储 | `src/host/ms-auth.ts` |
 | 改模型能力判定 | `src/host/llm-models.ts` + `src/host/context-catalog.ts` |
 | 改出图逻辑 | `src/host/draw-runtime.ts` + `src/host/draw-register.ts` |
+| 改投稿副本 / 查市场收录漂移 | `awesome-dsh-plugin-submission/` + `test/submission-drift.mjs`（联网）+ `test/submission-drift.test.mjs`（离线夹具） |
 | 改测试 | `test/` 目录，每个模块有对应 `.test.mjs` |
 | 改契约类型 | `src/shared/wire.ts` |
 | 排查线上问题 | `npm run doctor` + `docs/IMPLEMENTATION.md` 踩坑档案 |
@@ -305,7 +306,8 @@ npm run doctor                  # 只读盘点状态文件
 test/
 ├── run-all.mjs              # 入口：跑全部测试
 ├── helpers/
-│   └── peer-stub-loader.mjs # Node module hooks 拦截 peer 入口
+│   ├── peer-stub-loader.mjs # Node module hooks 拦截 peer 入口
+│   └── submission-entry.mjs # 投稿 YAML 的共享解析器（离线与联网两个门禁共用一份）
 ├── deps-wiring.test.mjs     # 每个 deps 缝不传时落回 ctx，产品零漂移
 ├── dom-render.test.mjs      # 产物 + jsdom + mini 替身 React
 ├── dom-render-react.test.mjs # 真 React 18.3.1 + jsdom
@@ -319,6 +321,8 @@ test/
 ├── wire.test.mjs            # 契约类型一致性
 ├── docs.test.mjs            # 文档与代码一致性
 ├── build-gate.mjs           # 产物新鲜度
+├── submission-drift.mjs     # 投稿副本 vs 市场线上条目（联网那一半；离线夹具在 submission-drift.test.mjs）
+├── submission-drift.test.mjs # 投稿漂移门禁的离线夹具（把脚本复制进临时树跑，零网络）
 ├── release.test.mjs         # 发版门禁
 ├── doctor.test.mjs          # 盘点工具
 ├── credentials.test.mjs     # 凭据存储
