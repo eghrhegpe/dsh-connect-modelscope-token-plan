@@ -242,9 +242,10 @@ gh release create vX.Y.Z \
 
 规则只认上游原文，本仓副本在 `awesome-dsh-plugin-submission/contributing.md`——**别在本文件转述规则**（本节此前那张「硬门槛」表就是转述，已经漂移过）。
 
-本仓只有四件事实：
+本仓只有五件事实：
 
 - 条目文件 `awesome-dsh-plugin-submission/eghrhegpe__dsh-connect-modelscope-token-plan.yml`，提 PR 时原样复制到对方仓库的 `data/plugins/` 下。不要在这里再维护第二份 yaml。
+- 提交前那份条目要过本仓的合规门禁 `test/market-entry.test.mjs`：它用**市场自己的条目规则**（镜像在上游 `scripts/lib/entries.mjs`）校验我们这份稿子。**为什么要有这道门**：市场的形状检查是在**合入之后**才跑的——PR 闸只做 YAML 解析与仓库层面的检查，不看形状——于是一份形状不合规的稿子能过 PR 闸，然后在合入后打断他们的 README 生成；我们宁可自己这边先红。镜像的已知边界：规则是**手抄**的，上游改了不会自动跟着变（唯一能自动发现的一处是 `category` 取值，它与本仓的 `contributing.md` 副本交叉核对）；上游改了规则就抄一遍 `test/helpers/market-rules.mjs`。
 - 截图声明在仓库根 `screenshots.json`；清单与资产由 `test/release.test.mjs` 绑在一起（改名必须同步清单）。
 - 市场线上那条条目会随上游维护者的改动漂移，`test/submission-drift.mjs` 每天联网对账一次（定时档在 `.github/workflows/submission-drift.yml`）。**它红了是信息，不是回归**：要么把上游措辞并进草稿，要么重开 PR；别去回滚提交把它刷绿。对账用的是**市场同款的 YAML 解析器**（js-yaml，和上游 `scripts/lib/entries.mjs` 一个），比的是**值**不是写法：两边引号风格不同（单引号 / 无引号 plain scalar / 双引号）而说的是同一句话，算一致；并上游措辞时保持语义即可，不必照抄他们的引号风格。
 - 分歧台账在 `awesome-dsh-plugin-submission/pending-drift.json`：只有 `category` / `description.en` / `description.zh` 这三类**可声明分歧**能进台账，每条必须写清上游→草稿的确切取值，外加终结它的那条 PR 链接。台账**双向核对**——有分歧没声明判红，声明与现实不符（PR 已合、或上游挪了窝）同样判红；声明过期不清理，等于给分歧装了个静音键。`url` / `name` 是身份字段，永远不可声明，只能改草稿。**「上游根本没这个字段」写 `"upstream": null`**——那是唯一能表达「缺席」的形状；没有它，一次缺席就红得没有出口。

@@ -98,7 +98,7 @@ npm run doctor                  # 只读盘点状态文件
 
 ## 进入代码库的读取顺序（AI 会话）
 
-约 59 个 src 文件（`.ts`）+ 40 个测试套件（`test/*.test.mjs`；连同脚本与 helpers 共 46 个 `.mjs`），乱序读会把时间花在「重新验证文档已写明的事实」上。
+约 59 个 src 文件（`.ts`）+ 41 个测试套件（`test/*.test.mjs`；连同脚本与 helpers 共 48 个 `.mjs`），乱序读会把时间花在「重新验证文档已写明的事实」上。
 
 1. **先文档，后代码**：本文件 → `README.md`（功能全貌 + 三条事实）→ `docs/PROVIDER-M4.md`（设计契约）。这些是判断「代码对不对」的坐标系。
 2. **git 先行**：`git log --oneline -15` + `git status --short`。并行会话常驻，优先读新鲜改动。
@@ -274,7 +274,7 @@ npm run doctor                  # 只读盘点状态文件
 | 改凭据存储 | `src/host/ms-auth.ts` |
 | 改模型能力判定 | `src/host/llm-models.ts` + `src/host/context-catalog.ts` |
 | 改出图逻辑 | `src/host/draw-runtime.ts` + `src/host/draw-register.ts` |
-| 改投稿副本 / 查市场收录漂移 | `awesome-dsh-plugin-submission/` + `test/submission-drift.mjs`（联网）+ `test/submission-drift.test.mjs`（离线夹具） |
+| 改投稿副本 / 查市场收录漂移 | `awesome-dsh-plugin-submission/` + `test/submission-drift.mjs`（联网）+ `test/submission-drift.test.mjs`（离线夹具）+ `test/market-entry.test.mjs`（市场规则合规） |
 | 改测试 | `test/` 目录，每个模块有对应 `.test.mjs` |
 | 改契约类型 | `src/shared/wire.ts` |
 | 排查线上问题 | `npm run doctor` + `docs/IMPLEMENTATION.md` 踩坑档案 |
@@ -308,6 +308,7 @@ test/
 ├── run-all.mjs              # 入口：跑全部测试
 ├── helpers/
 │   ├── peer-stub-loader.mjs # Node module hooks 拦截 peer 入口
+│   ├── market-rules.mjs     # 市场的条目规则镜像（手抄上游 scripts/lib/entries.mjs）
 │   └── submission-entry.mjs # 投稿 YAML 的共享解析器（js-yaml，市场同款；离线与联网两个门禁共用一份）
 ├── deps-wiring.test.mjs     # 每个 deps 缝不传时落回 ctx，产品零漂移
 ├── dom-render.test.mjs      # 产物 + jsdom + mini 替身 React
@@ -324,6 +325,7 @@ test/
 ├── build-gate.mjs           # 产物新鲜度
 ├── submission-drift.mjs     # 投稿副本 vs 市场线上条目（联网那一半；离线夹具在 submission-drift.test.mjs）
 ├── submission-drift.test.mjs # 投稿漂移门禁的离线夹具（把脚本复制进临时树跑，零网络）
+├── market-entry.test.mjs   # 投稿副本按市场的条目规则校验（合规，不是同源）
 ├── release.test.mjs         # 发版门禁
 ├── doctor.test.mjs          # 盘点工具
 ├── credentials.test.mjs     # 凭据存储
