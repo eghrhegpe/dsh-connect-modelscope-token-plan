@@ -34,10 +34,10 @@
 // 生成物，别手改）。
 import { strict as assert } from "node:assert";
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { compareVersions, diffAgainstGolden, explain, hostPeers, partition } from "./host-range.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -203,6 +203,254 @@ function loadHostSemver() {
     assert.deepEqual(disagreements.slice(0, 10), [], disagreements.slice(0, 10).join("\n"));
     // 活性：没比到东西也算红——「一致」不能由零组输入凑出来。
     assert.ok(compared >= ranges.length * 10, `对拍没比到输入：compared=${compared}`);
+  }
+}
+
+// --- 8. 射程闭合：每条 peerDependency 都有账 -----------------------------
+//
+// 上面那个模型（golden.peers）只覆盖「宿主拿 DSH 运行时版本去判」的那类 peer。
+// 其余的（框架库、由宿主依赖树决定版本的）必须**显式**记进 golden.outOfScopePeers
+// 并写明原因——「多了一条 peer 依赖没人管」是沉默的缺口，而沉默的缺口会一直沉默。
+// 记下来的代价是：射程外的 peer 换一种契约来守（见 9、10 两节），不是从此没人管。
+{
+  const peerNames = Object.keys(manifest.peerDependencies ?? {});
+  const inScope = new Set(Object.keys(golden.peers ?? {}));
+  const outOfScope = new Map((golden.outOfScopePeers ?? []).map((entry) => [entry.name, entry]));
+
+  const unaccounted = peerNames.filter((name) => !inScope.has(name) && !outOfScope.has(name));
+  assert.deepEqual(
+    unaccounted,
+    [],
+    `这些 peerDependency 没有任何记录（既不在 golden.peers，也不在 golden.outOfScopePeers）：${unaccounted.join(", ")}`,
+  );
+
+  // 反向：账上有的必须是真声明——记一个 package.json 里没有的 peer 是幻觉。
+  const phantom = [...inScope, ...outOfScope.keys()].filter((name) => !peerNames.includes(name));
+  assert.deepEqual(phantom, [], `golden 记了 package.json 里没有的 peer：${phantom.join(", ")}`);
+
+  // 一条 peer 不许记两遍（两个账本两套说法 = 迟早自相矛盾）。
+  const doubleBooked = peerNames.filter((name) => inScope.has(name) && outOfScope.has(name));
+  assert.deepEqual(doubleBooked, [], `这些 peer 同时记在两个账本里：${doubleBooked.join(", ")}`);
+
+  for (const [name, entry] of outOfScope) {
+    assert.ok(
+      typeof entry.reason === "string" && entry.reason.trim().length > 10,
+      `${name} 的射程外记录没写「为什么不在射程里」`,
+    );
+    assert.equal(
+      entry.range,
+      manifest.peerDependencies?.[name] ?? null,
+      `${name} 的射程外记录里的 range 与 package.json 不一致（golden 是生成物，别手改）`,
+    );
+  }
+
+  // 我们真的从它 import 符号的那些射程外 peer，必须有「从哪个版本起符号就在」的证据——
+  // 否则那条下界是没有出处的。
+  for (const name of new Set(valueImports().map((entry) => entry.owner))) {
+    if (!outOfScope.has(name)) continue;
+    assert.ok(
+      typeof outOfScope.get(name).symbolsFrom === "string" && outOfScope.get(name).symbolsFrom.length > 0,
+      `${name} 是我们 import 符号的 peer，但它的射程外记录里没有 symbolsFrom——那个下界凭什么？`,
+    );
+  }
+}
+
+// --- 9. 已装版本的契约：宿主实际装的那份必须被我们声明的范围放行 ---------
+//
+// 射程外的 peer 不进「版本宇宙 × 范围」那个模型，但它们**确实**有个版本在宿主机器上
+// 装着。那份版本必须被我们声明的范围放行——否则宿主一升级，本插件就被自己的 peer 范围
+// 拒之门外，而这件事没有任何门禁会发现。
+{
+  const modulesDir = hostModulesDir();
+  const semver = loadHostSemver();
+  const skipped = [];
+  for (const entry of golden.outOfScopePeers ?? []) {
+    const version = modulesDir ? installedVersion(modulesDir, entry.name) : null;
+    if (!version) {
+      skipped.push(entry.name);
+      continue;
+    }
+    const admitted = rangeAdmits(version, entry.range, semver);
+    assert.notEqual(
+      admitted,
+      null,
+      `判断不了 ${entry.name}@${version} 是否被 "${entry.range}" 放行（既没有宿主那份 semver，本仓比较器也不认这个范围的写法）`,
+    );
+    assert.ok(
+      admitted,
+      `宿主装的是 ${entry.name}@${version}，但我们声明的范围 "${entry.range}" 不放行它——宿主升级后这个 peer 会直接拒绝本插件`,
+    );
+    // 两个都能算的时候必须一致：本仓比较器与宿主真正在用的 semver 说的是一件事。
+    let ours = null;
+    try {
+      ours = partition([version], entry.range).admitted.length === 1;
+    } catch {
+      ours = null; // 本仓比较器不认这种写法（^ ~ 等），不猜。
+    }
+    if (ours !== null && semver) {
+      assert.equal(
+        ours,
+        admitted,
+        `本仓比较器与宿主 semver 对 ${entry.name}@${version} × "${entry.range}" 的判断不一致`,
+      );
+    }
+  }
+  if (skipped.length > 0) {
+    console.log(`SKIP: 宿主这份没装 ${skipped.join(", ")}，已装版本契约未运行`);
+  }
+}
+
+// --- 10. 符号契约：我们 import 的符号必须在宿主装的那份里真的存在 ---------
+//
+// 9 节守的是「版本放不放行」，这一节守的是「放行了也用得上」：本插件从 pi-ai 拿
+// createProvider 与 openAICompletionsApi——如果宿主装的那份 pi-ai 改名或删了这两个
+// 导出，范围照样放行，插件照样装得上，然后在大庭广众之下炸在 import 上。
+{
+  const modulesDir = hostModulesDir();
+  const skipped = [];
+  let checked = 0;
+  for (const entry of valueImports()) {
+    if (!modulesDir) {
+      skipped.push(entry.spec);
+      continue;
+    }
+    const loaded = await loadHostModule(modulesDir, entry.spec);
+    if (!loaded) {
+      skipped.push(entry.spec);
+      continue;
+    }
+    for (const symbol of entry.symbols) {
+      assert.ok(
+        symbol in loaded.mod,
+        `宿主装的 ${entry.spec}@${loaded.version} 里没有导出 ${symbol}——我们在 ${entry.file} 从它 import 这个符号`,
+      );
+      checked++;
+    }
+  }
+  if (skipped.length > 0) {
+    console.log(`SKIP: 宿主这份里读不到 ${skipped.join(", ")}，符号契约未运行`);
+  }
+  // 活性：没查到一个符号，「全过」就是零组输入凑出来的。
+  assert.ok(checked > 0, "符号契约一个符号都没查到——扫描或解析坏了，不是「都对」");
+}
+
+// --- 共用工具 ---------------------------------------------------------------
+
+/** 宿主那份 node_modules 在哪（装 DSH 的那个目录）。找不到就返回 null。 */
+function hostModulesDir() {
+  try {
+    const globalRoot = execSync("npm root -g", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (!globalRoot) return null;
+    const dir = join(globalRoot, "@deepseek-ai", "dsh", "node_modules");
+    return existsSync(dir) ? dir : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 宿主那份里某个包装的是哪个版本。装不上就 null（不是 0，也不是报错）。 */
+function installedVersion(modulesDir, packageName) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(modulesDir, ...packageName.split("/"), "package.json"), "utf8"));
+    return typeof pkg.version === "string" ? pkg.version : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 「这个版本被这条范围放行吗」：有宿主 semver 就用它（它认 ^ ~ 等写法），
+ * 没有就用本仓比较器（只认 >=X.Y.Z / <X.Y.Z 的方言，别的直接放弃）。
+ * 判不了返回 null——**不猜**。
+ */
+function rangeAdmits(version, range, semver) {
+  if (semver) return semver.satisfies(version, range, { includePrerelease: true });
+  try {
+    return partition([version], range).admitted.length === 1;
+  } catch {
+    return null;
+  }
+}
+
+/** src/** 里从 peer 包 import 符号的地方（只收值导入；类型导入另行说明）。 */
+function valueImports() {
+  const peerNames = Object.keys(manifest.peerDependencies ?? {});
+  const files = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".ts")) files.push(full);
+    }
+  };
+  walk(join(root, "src"));
+  const found = [];
+  for (const file of files) {
+    const text = readFileSync(file, "utf8");
+    const re = /import\s+(type\s+)?\{([^}]*)\}\s+from\s+"([^"]+)"/g;
+    for (const match of text.matchAll(re)) {
+      if (match[1]) continue; // import type：类型面由 types/dsh-peer-modules.d.ts 的桩负责
+      const spec = match[3];
+      const owner = peerNames.find((name) => spec === name || spec.startsWith(`${name}/`));
+      if (!owner) continue;
+      const symbols = match[2]
+        .split(",")
+        .map((part) => part.trim().split(/\s+as\s+/)[0].trim())
+        .filter(Boolean);
+      found.push({ spec, owner, symbols, file: relative(root, file).replaceAll("\\", "/") });
+    }
+  }
+  return found;
+}
+
+/** exports 字段的值可能是字符串，也可能是条件对象（{import, node, default}）。 */
+function pickExportTarget(value) {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return null;
+  for (const condition of ["import", "node", "default"]) {
+    if (value[condition] === undefined) continue;
+    const target = pickExportTarget(value[condition]);
+    if (target) return target;
+  }
+  return null;
+}
+
+/** 解析 exports 里的某个子路径（含 "./api/*" 这种通配）。解析不出来就 null。 */
+function resolveSubpath(exportsMap, subpath) {
+  if (!exportsMap) return null;
+  if (exportsMap[subpath] !== undefined) return pickExportTarget(exportsMap[subpath]);
+  for (const key of Object.keys(exportsMap)) {
+    const star = key.indexOf("*");
+    if (star < 0) continue;
+    const prefix = key.slice(0, star);
+    const suffix = key.slice(star + 1);
+    if (!subpath.startsWith(prefix) || !subpath.endsWith(suffix)) continue;
+    if (subpath.length < prefix.length + suffix.length) continue;
+    const target = pickExportTarget(exportsMap[key]);
+    if (target) return target.replace("*", subpath.slice(prefix.length, subpath.length - suffix.length));
+  }
+  return null;
+}
+
+/** 宿主那份里的某个模块（按 exports 解析后 dynamic import）。读不到就 null。 */
+async function loadHostModule(modulesDir, spec) {
+  const parts = spec.split("/");
+  const packageName = spec.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+  const dir = join(modulesDir, ...packageName.split("/"));
+  let pkg;
+  try {
+    pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+  } catch {
+    return null;
+  }
+  const subpath = spec === packageName ? "." : `./${spec.slice(packageName.length + 1)}`;
+  const target = resolveSubpath(pkg.exports, subpath) ?? (subpath === "." ? pkg.main ?? "index.js" : null);
+  if (!target) return null;
+  try {
+    const mod = await import(pathToFileURL(join(dir, target)).href);
+    return { mod, version: pkg.version };
+  } catch {
+    return null;
   }
 }
 

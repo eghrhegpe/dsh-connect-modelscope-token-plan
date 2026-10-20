@@ -24,7 +24,8 @@
 //
 // `verdicts-moved` 表示上游发了一个运行时版本，它相对入库范围的归属与记录不同。
 // 这是**版本宇宙的事实**，不是「插件在它上面坏了」的证据：它说的是「范围与世界
-// 脱节了，来定夺」。真装真启是另一档（见 docs/TESTING.md），这个门禁不是安装测试。
+// 脱节了，来定夺」。真装真启是另一档（本仓库没有那道门禁——e2e 还在
+// `docs/ROADMAP.md` 的 backlog 里），这个门禁不是安装测试。
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -56,13 +57,47 @@ function fetchVersions(packageName) {
 // 刻意不读本机——那会让 golden 在开发机与 CI 上不同，而随机器变的黄金表没人能
 // review。在一个版本上验证过就加进来，并写清证据在哪。
 //
-//   0.2.1-rc.2  本机全局 `dsh` CLI 的版本，也是 CI 里
-//               `npm install -g @deepseek-ai/dsh` 装到的 dist-tag latest；
-//               离线套件、build-gate 与 e2e 都在它上面跑
+//   0.2.1-rc.2  本机全局 `dsh` CLI 的版本（2026-10-20 核对：`dsh --version`
+//               → 0.2.1-rc.2），本插件就装在这个宿主的插件目录里
+//               （`~/.dsh/plugins/dsh-connect-modelscope-token-plan/`），宿主启动
+//               时装配它；上游 dist-tag latest 同为 0.2.1-rc.2（同日核对）。
+//
+//               离线套件与 build-gate **不依赖**这个版本——它们在 Node 上跑本仓
+//               自己的代码（`gate.yml` 是 `npm install` 之后才 `npm test`）；CI 也
+//               **不装宿主**（`gate.yml` 全文没有 `npm install -g @deepseek-ai/dsh`），
+//               e2e 还没做——在 `docs/ROADMAP.md` 的 backlog 里。所以「CI 在这个
+//               版本上跑过」这句话曾经写在下面，是假的；现在也不打算再写。
 //
 // 加版本前先问：哪个 job / 哪次实测证明本插件在它上面跑起来了？没有证据就不加，
 // 这一行是账本，不是愿望清单。
 const VALIDATED_ON = ["0.2.1-rc.2"];
+
+// 射程之外的 peer：它们**不**进「版本宇宙 × 范围」这个模型（逐条写清原因），但必须
+// 显式列出来——「多了一条 peer 依赖没人管」是沉默的，而沉默的缺口会一直沉默。
+//
+// 记的是「模型不管它，那谁管」：契约落在 test/host-range.test.mjs 的两节里——
+// ① 已装版本的契约：宿主实际装的那份必须被我们声明的范围放行；② 符号契约：我们
+// 从 pi-ai import 的那几个符号，必须在宿主装的那份里真的存在。
+const OUT_OF_SCOPE_PEERS = [
+  {
+    name: "@deepseek-ai/cordis",
+    reason:
+      "宿主框架库：版本由宿主的依赖树决定（宿主 dsh-llm 一线用的是 @deepseek-ai/cordis 4.0.5），不是 DSH 运行时版本——`hostPeers()` 的模型是「拿 DSH 运行时版本去判 peer 范围」，cordis 没有这种版本号。",
+  },
+  {
+    name: "@deepseek-ai/schemastery",
+    reason:
+      "同上：宿主 dsh-llm / dsh-llm-pi-ai 依赖 @deepseek-ai/schemastery ~3.18.5，版本不由 DSH 运行时版本决定。",
+  },
+  {
+    name: "@earendil-works/pi-ai",
+    reason:
+      "版本由宿主的依赖树决定（宿主 dsh-llm-pi-ai@0.2.1-rc.2 依赖 @earendil-works/pi-ai ^1.1.0 → 实际装的是 1.3.0），不是 DSH 运行时版本。",
+    symbolsFrom: "0.85.0",
+    evidence:
+      "2026-10-20 实测 npm pack 0.85.0 / 0.85.1 / 1.0.0 / 1.1.0 / 1.2.0 / 1.3.0：createProvider 与 openAICompletionsApi 在每个版本里都存在（下界 0.85.0 因此有据）。",
+  },
+];
 
 const manifest = JSON.parse(readFileSync(`${REPO_ROOT}package.json`, "utf8"));
 const universe = fetchVersions(UNIVERSE_PACKAGE);
@@ -88,6 +123,8 @@ const golden = {
     "universe:    已发布的全部 @deepseek-ai/dsh 版本，按 semver 升序。",
     "validatedOn: 本插件真正跑过的运行时版本。",
     "peers:       来自 package.json 的每条 host peer 范围，以及宿主会接受的那个子集。",
+    "outOfScopePeers: 不进上面那个模型的 peer（逐条写明原因）——它们由宿主的依赖树",
+    "                决定版本，契约在 test/host-range.test.mjs 的已装版本/符号契约两节。",
     "",
     "test/host-range.test.mjs 红了表示版本宇宙或某条范围动了：重跑生成器并 review",
     "diff——一个版本离开 admitted，要么是范围该放宽，要么是这条宿主线本插件确实放弃。",
@@ -97,6 +134,10 @@ const golden = {
   universe,
   validatedOn: VALIDATED_ON,
   peers,
+  outOfScopePeers: OUT_OF_SCOPE_PEERS.map((entry) => ({
+    ...entry,
+    range: manifest.peerDependencies?.[entry.name] ?? null,
+  })),
 };
 
 const serialized = `${JSON.stringify(golden, null, 2)}\n`;

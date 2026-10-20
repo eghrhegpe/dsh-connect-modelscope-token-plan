@@ -3,12 +3,18 @@
  *
  * WHY THIS IS A SEPARATE MODULE FROM THE TEST
  *
- * `node --test test/*.test.js` must run on a bare checkout with nothing
- * installed (README promises it, CI relies on it before any `npm install`).
- * So the comparator lives here, exports plain functions, and both the gate
- * (`test/host-range.test.mjs`) and the generator (`scripts/update-host-range.mjs`)
- * import it. One implementation, so the thing that WRITES the golden file and
- * the thing that CHECKS it can never disagree.
+ * The comparator has no dependencies on purpose, and it lives here as plain
+ * exported functions so that both the gate (`test/host-range.test.mjs`) and the
+ * generator (`tools/update-host-range.mjs`) import it. One implementation, so
+ * the thing that WRITES the golden file and the thing that CHECKS it can never
+ * disagree.
+ *
+ * It used to claim the suites had to run "on a bare checkout with nothing
+ * installed", and that CI relied on that before any `npm install`. Both were
+ * wrong: `gate.yml` installs devDependencies before `npm test`, and the README
+ * never promised a bare checkout. The no-dependency property is still worth
+ * keeping — the generator needs nothing installed to run — but it is a
+ * property of THIS module, not of the whole suite.
  *
  * WHAT IT REFUSES TO DO
  *

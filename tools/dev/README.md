@@ -172,9 +172,15 @@ checkout 里没有这三个仓库，那不是错误。
 - `tools/doctor.mjs`：**随包发布的诊断工具**（`npm run doctor`），只读盘点各
   profile 的 `usage.json` 与 env 令牌在场性，绝不写盘、绝不打印令牌值。它属于
   `tools/` 根目录，不属于开发工具。
-- `tools/check-market-entry.mjs`：投稿市场的条目 YAML 静态校验
-  （`node tools/check-market-entry.mjs <含 yml 代码块的 md> [提供 yaml 模块的仓目录]`），
-  用真正的 YAML 解析器过一遍——市场 CI 就是这么查的。发版第 7 步用得上。
+- `tools/check-market-entry.mjs`：**已退役**（2026-10-20 删除）。它从发布说明里的
+  ` ```yaml ` 代码块抽出条目来校验，而投稿稿早已改成独立 yml 文件（见
+  `awesome-dsh-plugin-submission/`），抽取步骤在本仓永远找不到东西——实测退出码 1
+  「未找到 yaml 代码块」。它当年被明确留下（`docs/archive/2026-10-05-closeout.md`
+  记着「初判为 scratch 是错的」），那是在稿子还是代码块形态时对的判断；形态变了，
+  工具就死了。**投稿条目的校验搬到了 `test/market-entry.test.mjs`**：用的是市场
+  自己的规则（镜像在 `test/helpers/market-rules.mjs`）与市场同款 YAML 解析器
+  （js-yaml），跑在 `npm test` 里——比旧工具严，也进得了 CI。旧工具独有的两条
+  文案约定（en 以英文句号结尾、zh 以中文句号结尾）已并入新套件。
 
 ## 纪律
 

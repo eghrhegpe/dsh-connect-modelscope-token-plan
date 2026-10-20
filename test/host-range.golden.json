@@ -5,6 +5,8 @@
     "universe:    已发布的全部 @deepseek-ai/dsh 版本，按 semver 升序。",
     "validatedOn: 本插件真正跑过的运行时版本。",
     "peers:       来自 package.json 的每条 host peer 范围，以及宿主会接受的那个子集。",
+    "outOfScopePeers: 不进上面那个模型的 peer（逐条写明原因）——它们由宿主的依赖树",
+    "                决定版本，契约在 test/host-range.test.mjs 的已装版本/符号契约两节。",
     "",
     "test/host-range.test.mjs 红了表示版本宇宙或某条范围动了：重跑生成器并 review",
     "diff——一个版本离开 admitted，要么是范围该放宽，要么是这条宿主线本插件确实放弃。",
@@ -253,5 +255,24 @@
         "0.2.1-rc.2"
       ]
     }
-  }
+  },
+  "outOfScopePeers": [
+    {
+      "name": "@deepseek-ai/cordis",
+      "reason": "宿主框架库：版本由宿主的依赖树决定（宿主 dsh-llm 一线用的是 @deepseek-ai/cordis 4.0.5），不是 DSH 运行时版本——`hostPeers()` 的模型是「拿 DSH 运行时版本去判 peer 范围」，cordis 没有这种版本号。",
+      "range": ">=4.0.2 <5.0.0"
+    },
+    {
+      "name": "@deepseek-ai/schemastery",
+      "reason": "同上：宿主 dsh-llm / dsh-llm-pi-ai 依赖 @deepseek-ai/schemastery ~3.18.5，版本不由 DSH 运行时版本决定。",
+      "range": "^3.18.2"
+    },
+    {
+      "name": "@earendil-works/pi-ai",
+      "reason": "版本由宿主的依赖树决定（宿主 dsh-llm-pi-ai@0.2.1-rc.2 依赖 @earendil-works/pi-ai ^1.1.0 → 实际装的是 1.3.0），不是 DSH 运行时版本。",
+      "symbolsFrom": "0.85.0",
+      "evidence": "2026-10-20 实测 npm pack 0.85.0 / 0.85.1 / 1.0.0 / 1.1.0 / 1.2.0 / 1.3.0：createProvider 与 openAICompletionsApi 在每个版本里都存在（下界 0.85.0 因此有据）。",
+      "range": ">=0.85.0 <2.0.0"
+    }
+  ]
 }

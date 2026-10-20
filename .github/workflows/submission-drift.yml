@@ -34,7 +34,7 @@ name: Submission drift
 #
 # Dispatchable so a red can be re-run by hand after the draft is fixed.
 
-on:
+"on":
   schedule:
     # 03:49 UTC = 11:49 CST: after the upstream maintainers' day has produced
     # whatever edits it was going to, early enough for this one to be read.

@@ -27,6 +27,7 @@ node test/run-all.mjs --skip=<子串>   # 反向裁剪
 npm run typecheck               # tsc 类型检查
 npm run build                   # 改 src/ 后必跑：重建 lib/ 与根 client.js
 npm run doctor                  # 只读盘点状态文件
+npm run host-range:check        # peer 范围 × 已发布版本宇宙（联网；定时档每周一 04:17 UTC）
 ```
 
 - **改了契约/接缝文件，跑全量**。`src/shared/*`、`client.js`、`lib/index.js` 以及被多个模块消费的文件，消费者不可枚举——按域裁剪会漏掉跨域契约。判断标准：这个文件的消费者我数得清吗？数不清就全量。
@@ -36,6 +37,7 @@ npm run doctor                  # 只读盘点状态文件
   - 判断「这条检查到底在哪」时**先跑命令再写进文档**：本文件曾把三条门禁写成「panel 的 tt 白名单 / degrade marker grep / 聚合器纯度断言」，2026-10-18 清点发现前两条在代码里查无此物（`test/panel.test.mjs` 只有 zh/en 键集一致 + 值域断言，没有白名单；degrade 留痕只有 `test/draw-store.test.mjs:211` 一处 warn 日志断言），第三条同样不存在。指导文档点名门禁时必须带**文件:行**。
 - **测试期望要对齐实现语义**：改测试前先读被测模块的注释——很多「看起来怪」的行为（如 `valid: null` 不是 `false`）是刻意的语义区分。
 - **投稿门禁要装依赖**：投稿副本与市场条目这两个门禁共用 `test/helpers/submission-entry.mjs`，它用 **js-yaml**——市场的同款解析器（上游 `scripts/lib/entries.mjs` 就用它），所以我们读到的是市场看到的那份条目。js-yaml 是 `devDependencies`，裸 checkout 上跑这两个套件会抛「js-yaml is not installed」：先 `npm install`。
+- **peer 范围分两档，别把「不在射程」当成没人管**：`test/host-range.golden.json` 的 `peers` 是**射程内**（宿主拿 DSH 运行时版本去判的那 10 条 `@deepseek-ai/dsh-*`）；`outOfScopePeers` 是**射程外**（`@deepseek-ai/cordis`、`@deepseek-ai/schemastery`、`@earendil-works/pi-ai`——版本由宿主依赖树决定，不是 DSH 运行时版本）。射程外的换一种契约守：`test/host-range.test.mjs` 的 9 节（宿主装的那份必须被我们声明的范围放行）与 10 节（我们 import 的符号必须在宿主装的那份里真的存在）。新增 peer 依赖要落进其中一档，否则 §8 会判红。
 
 ---
 

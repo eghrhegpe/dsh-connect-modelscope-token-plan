@@ -49,6 +49,7 @@ import {
   tarballProblem,
   validateEntry,
 } from "./helpers/market-rules.mjs";
+import { parseEntry } from "./helpers/submission-entry.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..");
@@ -188,6 +189,28 @@ assert.ok(CAT_IDS.includes("usage"), "上游线上条目现在的 category 必�
   const broken = checkEntry("url: https://github.com/o/r\nname: o/r\ncategory: model\ndescription:\n  en: Vision toolkit: OCR, grounding and pixel diff.\n");
   assert.equal(broken.ok, false, "未加引号且含 ': ' 的描述不是合法 YAML");
   assert.ok(broken.error, "解析失败时必须带原因");
+}
+
+// ── 四、我们自己的文案约定（市场模板的措辞，上游的 validateEntries 不判）────
+//
+// 这两条检查以前只活在 `tools/check-market-entry.mjs` 里——那个工具 2026-10-20
+// 退役（草稿从 md 里的 yaml 代码块改成独立 yml 文件后，它的抽取步骤在本仓永远
+// 找不到东西），检查不能跟着一起消失。上游 `validateEntries` 不判句号，但市场模板
+// 就是这么写的（contributing.md:11-18「One-line description ending with a period.」
+// 与「一句话描述，以句号结尾。」），所以按模板对齐。
+{
+  const parsed = parseEntry(readFileSync(DRAFT_PATH, "utf8"));
+  assert.ok(parsed.ok, `投稿副本不是合法 YAML：${parsed.error}`);
+  const en = parsed.get("description.en");
+  const zh = parsed.get("description.zh");
+  assert.ok(
+    en.endsWith("."),
+    `投稿副本的 description.en 没有以英文句号结尾（市场模板要求一句话描述以句号结尾）：${en}`
+  );
+  assert.ok(
+    zh.endsWith("。"),
+    `投稿副本的 description.zh 没有以中文句号结尾（市场模板要求以句号结尾）：${zh}`
+  );
 }
 
 console.log("market-entry.test.mjs: all checks passed");
