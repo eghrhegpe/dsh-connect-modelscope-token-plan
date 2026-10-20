@@ -971,4 +971,59 @@ function readCodeMap() {
   }
 }
 
+// 投稿副本 — 市场介绍与卡片文案必须同源。
+//
+// 同一句话存四份：locale/en.json（宿主解析的锚点）、locale/zh.json、
+// package.json 的 description（英文回退面）、以及 awesome-dsh-plugin-submission/
+// 里那份投稿副本。此前没有任何东西比对过它们：姊妹仓里副本与线上条目对 category
+// 的分歧存在了一周没有一次红，而文案本身已分两次、从两个面各改过一遍。
+//
+// 这是**离线**那一半，每次 push 都跑。它看不到上游线上条目现在写的是什么——一份
+// 内部自洽但相对上游已过时的副本，在这里必然通过，这是设计：上游是别人的 main，
+// 它一动就让本仓判红，那种红最后没人读。上游那一半要联网，另开定时档。
+//
+// 刻意不断言 category：合法取值表在上游 contributing.md，会随分类体系拆分而变。
+{
+  const pkg = JSON.parse(read("package.json"));
+  const en = JSON.parse(read("locale/en.json")).meta.description;
+  const zh = JSON.parse(read("locale/zh.json")).meta.description;
+  assert.equal(
+    pkg.description,
+    en,
+    "package.json 的 description 与 locale/en.json 不是同一句——英文界面会读到另一份文案，且没有警告"
+  );
+
+  const repoUrl = String(pkg.repository?.url ?? "").replace(/^git\+/, "").replace(/\.git$/, "");
+  const slug = repoUrl.replace(/^https:\/\/github\.com\//, "");
+  const draftRel = `awesome-dsh-plugin-submission/${slug.replace("/", "__")}.yml`;
+
+  if (existsSync(join(root, draftRel))) {
+    const draft = read(draftRel);
+    // 逐行扫描，不用正则：模板字面量里的 `\s` 会被当成转义吃掉，写出来的正则
+    // 静默变成 `^url:s*(S+)s*$`，永远不匹配——一个只会通过的「门禁」。
+    // 单引号标量里引号靠重复转义（`model''s` 就是 `model's`），不反转义会把
+    // 每个撇号都读成漂移。
+    const lines = draft.split("\n").map((line) => line.trim());
+    const scalar = (key) => {
+      const prefix = `${key}: '`;
+      const line = lines.find((c) => c.startsWith(prefix) && c.endsWith("'"));
+      return line === undefined ? undefined : line.slice(prefix.length, -1).replaceAll("''", "'");
+    };
+    const field = (key) => {
+      const prefix = `${key}: `;
+      const line = lines.find((c) => c.startsWith(prefix));
+      return line === undefined ? undefined : line.slice(prefix.length).trim();
+    };
+
+    assert.ok(
+      scalar("en") !== undefined && scalar("zh") !== undefined,
+      "投稿副本缺 description.en / description.zh 之一，或不是上游解析器认的单引号标量"
+    );
+    assert.equal(field("url"), repoUrl, "投稿副本里的 url 指向别的仓库");
+    assert.equal(field("name"), slug, "投稿副本的 name 不是本仓的 owner/repo");
+    assert.equal(scalar("en"), en, "改一处就改两处——市场介绍与卡片是同一句话（英文）");
+    assert.equal(scalar("zh"), zh, "改一处就改两处——市场介绍与卡片是同一句话（中文）");
+  }
+}
+
 console.log("docs.test.mjs: all checks passed");
