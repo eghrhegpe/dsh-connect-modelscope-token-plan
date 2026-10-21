@@ -1,12 +1,4 @@
 {
   "$comment": "Divergences from the live marketplace entry that are EXPECTED and have a PR that ends them. Read by test/submission-drift.mjs. Every entry names the exact upstream→draft pair it excuses; the moment that pair stops being true the gate reds, because a declaration that outlives its reason is a mute button. Only category / description.en / description.zh may appear here — a wrong url or name is a bug, not an in-flight disagreement.",
-  "entries": [
-    {
-      "field": "category",
-      "upstream": "usage",
-      "draft": "model",
-      "pr": "https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8207",
-      "note": "Token-plan connect plugins are LLM access, not usage statistics. #8207 re-files this entry under `model`; upstream moves when a maintainer merges it."
-    }
-  ]
+  "entries": []
 }
