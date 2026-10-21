@@ -96,15 +96,9 @@ npm run doctor:json     # 机器读：JSON（可进你的巡检 / 工单脚本�
 
 ## 文档
 
-- [docs/SPIKE.md](docs/SPIKE.md) — 上游到底有没有额度信号（实测记录 + 结论）
-- [docs/SPIKE-image-gen.md](docs/SPIKE-image-gen.md) — 出图协议实测（2026-10-10；v0.2 起已实现）
-- [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md) — provider 接入实现契约（设计裁定都在这里）
-- [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) — 这版怎么做出来的、踩过什么坑
-- [docs/REFERENCES.md](docs/REFERENCES.md)、[docs/REFERENCE-modelsdev.md](docs/REFERENCE-modelsdev.md) — 上游端点全景 / 第三方方案对比
-- [docs/ROADMAP.md](docs/ROADMAP.md) — v1 要做什么、做到哪了
-- [docs/archive/](docs/archive/) — 已冻结的逐版修复档案
+**文档地图只有一份：[`AGENTS.md` §去哪查](AGENTS.md)**（每份文档一行「何时查」）。这里不再列第二遍——两处索引必然分叉，而分叉之后没人知道哪份是对的。
 
-AI 协作会话请先读 [AGENTS.md](AGENTS.md)（验证入口、红线与文档地图）；开发者校验工具（变异测试 / 覆盖率）见 [tools/dev/README.md](tools/dev/README.md)；发布流程见 [RELEASING.md](RELEASING.md)。
+开发者校验工具（变异测试 / 覆盖率）见 [`tools/dev/README.md`](tools/dev/README.md)，发布流程见 [`RELEASING.md`](RELEASING.md)。
 
 ## 许可证
 

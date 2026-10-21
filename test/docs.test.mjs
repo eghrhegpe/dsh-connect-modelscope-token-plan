@@ -58,17 +58,17 @@ const isVendoredSpec = (rel) => rel.startsWith("docs/modelscope.cn-openapi/");
   }
 }
 
-// ── §2 反向：每份文档都要在 README 文档地图里出现 ─────────────────────────
+// ── §2 反向：每份文档都要在文档地图里出现（地图只有一份：AGENTS.md §去哪查）──
 //
-// 防止「新增了文档但没人找得到」。归档豁免——它不入门，也不该要求登记。
+// 防止「新增了文档但没人找得到」。README 只留指针（双索引必然分叉），故两处合并查。归档豁免。
 {
-  const readme = read("README.md");
+  const index = [read("README.md"), read("AGENTS.md")].join("\n");
   const docs = docFiles().filter((f) => !inArchive(f));
   assert.ok(docs.length > 0, "docs/ 应当有文档");
   for (const doc of docs) {
     assert.ok(
-      readme.includes(doc),
-      `${doc} 不在 README 文档地图里——新增文档请登记，否则没人会读到它`
+      index.includes(doc),
+      `${doc} 不在文档地图里（README 指针或 AGENTS.md §去哪查）——新增文档请登记`
     );
   }
 }
