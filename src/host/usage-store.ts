@@ -175,6 +175,15 @@ export function createFileUsageStore({ name, profile = null, retentionDays = 90,
   const file = join(dir, "usage.json");
   /** 最近一次解析异常（损坏即忽略的痕迹），快照转 shapeWarnings。 */
   let anomaly: string | null = null;
+  /**
+   * 最近一次**写**失败的痕迹。
+   *
+   * 与 {@link anomaly} 分开记，因为两者的寿命不同：解析异常是**读**出来的，下一次
+   * 读就会覆盖它（读到好的就恢复）；写失败是**写**出来的，只有一次成功的写才能
+   * 抹掉它——读得动旧值不代表上一次写落了盘（读回来的永远是上一次**成功**写下去
+   * 的那一份）。
+   */
+  let writeAnomaly: string | null = null;
   /** 只读闸：磁盘版本比本构建新时置位——读照常、写拒绝，绝不 clobber。 */
   let readOnly = false;
 
@@ -246,10 +255,32 @@ export function createFileUsageStore({ name, profile = null, retentionDays = 90,
 
   const cache = createStateReadCache<UsagePayload>(readThrough, { now: () => Date.now() });
 
-  /** 把内存态写盘（原子），失败不抛——计数是尽力而为的观测，不是事务。 */
+  /**
+   * 把内存态写盘（原子），失败不抛——计数是尽力而为的观测，不是事务。
+   *
+   * 但「不抛」不等于「不说」。这一句注释原先与实现相反：writeStateFile 失败会**抛**
+   * （state-store.ts 的 writeStateFile 在 catch 里重抛），抛给谁？本仓的用法是
+   * index.ts 那句 `.catch(() => {})`（理由见那里：观测失败不是对话失败）——于是
+   * 一次写失败被彻底咽掉：面板继续显示上一次成功落盘的数字，计数看起来是活的，
+   * 其实早就冻住了，而**没有任何人知道**（没有日志，没有 shapeWarning）。
+   *
+   * 所以失败要留两处痕迹：日志（给操作者）与 {@link writeAnomaly}（进快照的
+   * shapeWarnings，给面板）。吞掉的是失败，不是失败的原因。
+   */
   const persist = async (payload: UsagePayload) => {
-    await ensureStateDir(dir);
-    await writeStateFile(file, JSON.stringify(payload), { temporary: temporaryOf(dir, "usage.json") });
+    try {
+      await ensureStateDir(dir);
+      await writeStateFile(file, JSON.stringify(payload), { temporary: temporaryOf(dir, "usage.json") });
+    } catch (error) {
+      const note = `usage-state: write failed (${redactSecrets(errMsg(error))})`;
+      writeAnomaly = note;
+      logger?.warn?.(
+        `${name}: ${note} — the local counters are not reaching disk; the panel still shows the last values that did`,
+      );
+      return;
+    }
+    // 只有一次**真的落盘**的写才算把上一次失败抹掉（读得动旧值不算，见 writeAnomaly）。
+    writeAnomaly = null;
     cache.remember(payload);
   };
 
@@ -478,9 +509,14 @@ export function createFileUsageStore({ name, profile = null, retentionDays = 90,
       return [...(payload.events ?? [])];
     },
 
-    /** 最近一次解析异常（无异常为 null）——快照转 shapeWarnings。 */
+    /**
+     * 最近一次异常（无异常为 null）——快照转 shapeWarnings。
+     *
+     * 写失败的痕迹优先于读侧的解析异常：它更近、也更严重（解析异常说「这份文件
+     * 读不懂」，写失败说「我们刚写的东西没落盘」）。
+     */
     anomaly() {
-      return anomaly;
+      return writeAnomaly ?? anomaly;
     },
 
   };

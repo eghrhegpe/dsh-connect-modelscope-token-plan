@@ -1,7 +1,7 @@
 // usage-store 行为测试：注入 DSH_HOME 到临时目录，隔离的 profile 段里跑。
 // 覆盖：天桶/单模型计数、跨日清零、事件有界、损坏即忽略、版本只读闸。
 import { strict as assert } from "node:assert";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFileUsageStore, localDateKey, exhaustedModelIds } from "../src/host/usage-store.ts";
@@ -341,6 +341,50 @@ assert.equal(localDateKey(new Date(2026, 9, 4)), "2026-10-04");
     exhaustedModelIds([ev("a/A", "quota", 0)], now, Number.NaN),
     [],
     "windowMinutes 非有限 = 空集（同上）"
+  );
+}
+
+// §11 写失败必须留信号：吞掉的是失败，不是失败的原因。
+//
+// 事故形状：一次写失败被 index.ts 的 `.catch(() => {})` 咽掉（理由是「观测失败
+// 不是对话失败」——那条裁定本身是对的），于是面板继续显示上一次**成功落盘**的
+// 数字，计数看起来是活的，其实早就冻住了，而没有日志、没有 shapeWarning，
+// 没有任何人知道。本节钉的是那两处痕迹。
+//
+// 注入点（真实的 fs 形状，不用桩）：状态目录是一个**悬空**的链接（Windows 用
+// junction，POSIX 用 symlink）指向一个还不存在的目标，于是
+//   - 版本守卫读 <dir>/usage.json → ENOENT（「那里没有东西要保护」）→ 放行；
+//   - ensureStateDir(<dir>) → mkdir 撞上悬空链接 → 失败；
+//   - 于是这次写真的落不下去。
+// 随后把目标目录**建出来**（悬空链接不删，只把它变成实的），下一次写就成功
+// 了——用来钉「只有一次真的落盘的写才抹掉写失败的痕迹」。
+{
+  const profile = "dangling-dir";
+  const target = join(home, "state", "dangling-target");
+  mkdirSync(join(home, "state", profile), { recursive: true });
+  symlinkSync(target, join(home, "state", profile, PLUGIN_ID), process.platform === "win32" ? "junction" : "dir");
+  warnings.length = 0;
+  const blocked = makeStore({ profile });
+  // 不许抛：观测失败不是对话失败（index.ts 的裁定）——但痕迹必须留下。
+  await blocked.recordCall({ modelId: "m/lost", tokens: 3, at: clock });
+  assert.match(
+    blocked.anomaly() ?? "",
+    /usage-state: write failed/,
+    "写失败必须在 anomaly 里说出原因（它会进快照的 shapeWarnings，给面板）",
+  );
+  assert.ok(
+    warnings.some((m) => /usage-state: write failed/.test(m)),
+    "写失败必须留一条日志（吞掉的是失败，不是失败的原因）",
+  );
+  assert.equal(existsSync(join(home, "state", profile, PLUGIN_ID, "usage.json")), false, "写确实没落盘");
+
+  // 目标目录建出来之后，同一个 store 的下一次写必须成功，并把上一次失败的痕迹抹掉。
+  mkdirSync(target, { recursive: true });
+  await blocked.recordCall({ modelId: "m/ok", tokens: 4, at: clock });
+  assert.equal(blocked.anomaly(), null, "一次成功的写抹掉写失败的痕迹（读得动旧值不算）");
+  assert.ok(
+    existsSync(join(home, "state", profile, PLUGIN_ID, "usage.json")),
+    "恢复后新计数真的落盘了",
   );
 }
 
