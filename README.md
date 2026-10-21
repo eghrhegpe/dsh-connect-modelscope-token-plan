@@ -60,7 +60,7 @@
 
 3. 打开 DSH 的 **Plugins 页**，找到本插件的插件卡（面板是页内联卡片，**不在侧边栏**）。
 
-> 装到 npm 的那一份**不含 `docs/`**（`package.json` 的 `files` 白名单只带 `lib/` / `client.js` / `assets/` / `README.md` / `CHANGELOG.md` / `LICENSE` 等），下文指向 `docs/*` 的链接在已安装副本上打不开，请到 GitHub 仓库看。
+> **分发面**：npm 包只含 `package.json#files` 那 11 项（`lib/`、`client.js`、`icon.svg`、`locale/`、`assets/`、`cordis.patch.yml`、`README.md`、`CHANGELOG.md`、`LICENSE`、`THIRD_PARTY_NOTICES.md`、`screenshots.json`）。`docs/`、`AGENTS.md`、`RELEASING.md`、`tools/`、`test/` **不在包里**——下文指向它们的链接（以及「文档」一节的两个开发者入口）在 registry 页面上会 404，请到 GitHub 仓库看；截图因 `assets/` 在包内，相对路径在两边都能显示。
 
 ## 免费额度怎么算（2026-10 快照，以官方为准）
 
@@ -96,10 +96,10 @@ npm run doctor:json     # 机器读：JSON（可进你的巡检 / 工单脚本�
 
 ## 文档
 
-**文档地图只有一份：[`AGENTS.md` §去哪查](AGENTS.md)**（每份文档一行「何时查」）。这里不再列第二遍——两处索引必然分叉，而分叉之后没人知道哪份是对的。
+**文档地图只有一份：[`AGENTS.md` §去哪查](https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan/blob/master/AGENTS.md)**（每份文档一行「何时查」）。这里不再列第二遍——两处索引必然分叉，而分叉之后没人知道哪份是对的。
 
-开发者校验工具（变异测试 / 覆盖率）见 [`tools/dev/README.md`](tools/dev/README.md)，发布流程见 [`RELEASING.md`](RELEASING.md)。
+开发者校验工具（变异测试 / 覆盖率）见 [`tools/dev/README.md`](https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan/blob/master/tools/dev/README.md)，发布流程见 [`RELEASING.md`](https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan/blob/master/RELEASING.md)。配置字段的人读清单见 [docs/CONFIG.md](docs/CONFIG.md)（`drawEnabled` 这类「只有 YAML 注释」的键都在那里）。
 
 ## 许可证
 
-MIT License，全文见 [LICENSE](LICENSE)。
+MIT License，全文见 [LICENSE](LICENSE)；第三方内容（`docs/modelscope.cn-openapi/` 的魔搭 OpenAPI 转储等）见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

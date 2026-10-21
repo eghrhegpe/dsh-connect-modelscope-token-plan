@@ -105,7 +105,8 @@ npm run market-rules:check      # 市场规则镜像 × 上游原文（联网；
 | provider 怎么接入（写代码前） | `docs/PROVIDER-M4.md`（实现契约） |
 | 这版是怎么做出来的、踩过什么坑 | `docs/IMPLEMENTATION.md`（0.1.0 / M4 实施过程档案） |
 | v0.2.0 的十二轮修复细节（已冻结） | `docs/archive/2026-10-05-closeout.md` |
-| 各版修复过程档案（0.3.0–0.6.1，按版本命名，已冻结） | `docs/archive/`（本轮 0.6.1：迁移窗口期状态可见性 + inheritFrom 死参数删除） |
+| 配置字段叫什么、默认多少、夹到哪、何时生效 | `docs/CONFIG.md`（人读清单；`drawEnabled` / `maxTokensOverrides` 都在这里） |
+| 各版修复过程档案（0.3.0–0.6.4，按版本命名，已冻结） | `docs/archive/README.md`（一行一个版本，按「什么时候值得翻」排） |
 | 上游端点全景 / 第三方方案对比 | `docs/REFERENCES.md`、`docs/REFERENCE-modelsdev.md` |
 | v1 要做什么、做到哪了 | `docs/ROADMAP.md` |
 | 魔搭 OpenAPI 契约全文 | `docs/modelscope.cn-openapi/modelscope.cn-openapi.md` |
