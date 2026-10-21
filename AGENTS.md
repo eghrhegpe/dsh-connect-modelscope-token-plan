@@ -18,6 +18,24 @@ Host（Node/cordis）走静态令牌（`ms-…`，无 OIDC / 无 refresh）；Cl
 
 ---
 
+## 探索顺序（按任务挑一条路，别从头读到尾）
+
+本文件是**纪律文件不是教程**：钉死红线、验证、导航，不教一步步做。按你当下的任务照下面一条路走最快；
+路走了一半、要定位某个具体文件或细节，再去翻「去哪查（docs/ 地图）」那张第二层字典。
+
+| 你的任务 | 第一站（先读） | 第二站（再读） | 动手前确认 |
+|---|---|---|---|
+| **它坏了 / 只有现象** | `npm run doctor`（只读盘点各 profile 状态） | `docs/IMPLEMENTATION.md`（踩坑档案）+ 红线 1–7（先认哪条事实被踩） | 观测失败≠对话失败（红线 4）；「读不到」画成 0 是欺骗（红线 3） |
+| 改面板 UI / 三 tab | `src/client/cards.ts` + `panel-page.ts` | `docs/IMPLEMENTATION.md`「面板收敛」 | 改 `src/` 必 `npm run build` 且 `lib/` 与源码同次提交（并行会话纪律） |
+| 改 Provider 注册 / 开关 | `src/host/provider-publish.ts` + `provider-reconcile.ts` | `docs/PROVIDER-M4.md`（实现契约） | 任意失败必须降级为「面板照常用、该模块缺席」（事实 2） |
+| 动凭据 / 令牌 | `src/host/ms-auth.ts`（红线 1/2 落点） | 红线 1、2 | 令牌永不入日志/插件目录；credentials kind 只 `grant`/`api-key` |
+| 改出图工具 | `src/host/draw*.ts` + `docs/SPIKE-image-gen.md` | `draw-register.ts` 头注（注册不可撤销） | 开关翻转下次 Host 启动才生效（事实 2） |
+| 改本地计数口径 | `src/host/usage-store.ts` + `usage-observer.ts` | `docs/IMPLEMENTATION.md` 用量相关 | 按 profile 分段、桌面/Web 互不可见（事实 1）——别当跨端总量 |
+| 加 / 改测试 | `test/` 对应 `.test.mjs`（`assert` 的 name 是契约） | `test/docs.test.mjs` §14 / §14b / §6③（登记表真源） | 新文件必须进本文件代码地图 / 测试树，否则门禁红 |
+| 查市场规则 / 投稿漂移 | `npm run market-rules:check`（联网） | `test/helpers/market-rules.mjs` | 取不到上游≠上游没变（会话工具踩坑末条） |
+
+---
+
 ## 验证（按域裁剪，禁止无脑全量）
 
 ```bash
@@ -102,7 +120,7 @@ npm run market-rules:check      # 市场规则镜像 × 上游原文（联网；
 
 ## 进入代码库的读取顺序（AI 会话）
 
-约 59 个 src 文件（`.ts`）+ 42 个测试套件（`test/*.test.mjs`；连同脚本与 helpers 共 50 个 `.mjs`），乱序读会把时间花在「重新验证文档已写明的事实」上。
+src 文件较多（全量见下方「代码地图」登记表，每个文件须在地图里登记——§14 门禁守着）；测试套件也较多（全量见下方「测试策略」树，每个套件须被点名——§6③ 门禁守着）。乱序通读会把时间花在「重新验证文档已写明的事实」上，按任务挑路（见上方「探索顺序」）才是正解。
 
 1. **先文档，后代码**：本文件 → `README.md`（功能全貌 + 三条事实）→ `docs/PROVIDER-M4.md`（设计契约）。这些是判断「代码对不对」的坐标系。
 2. **git 先行**：`git log --oneline -15` + `git status --short`。并行会话常驻，优先读新鲜改动。
