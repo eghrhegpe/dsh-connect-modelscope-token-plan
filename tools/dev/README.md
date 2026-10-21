@@ -181,6 +181,14 @@ checkout 里没有这三个仓库，那不是错误。
   自己的规则（镜像在 `test/helpers/market-rules.mjs`）与市场同款 YAML 解析器
   （js-yaml），跑在 `npm test` 里——比旧工具严，也进得了 CI。旧工具独有的两条
   文案约定（en 以英文句号结尾、zh 以中文句号结尾）已并入新套件。
+- `tools/check-market-rules.mjs`：**联网**（属 `tools/` 根目录，不属于开发工具）。
+  它取上游市场的 `scripts/lib/entries.mjs` 与 `contributing.md`，与本仓的规则镜像
+  和 `contributing.md` 副本逐项比对：上游的类别表/键白名单/tarball 主机有没有变、
+  上游自己两处说法是否一致、副本是不是逐字节等于上游原文。`--check` 只报告（退出 1
+  表示有差异），默认模式**只刷新副本**，不自动改镜像——抄判据是人的事。定时档在
+  `.github/workflows/market-rules-check.yml`（每周一 04:41 UTC）。它要 js-yaml
+  （镜像 import 共享解析器），裸 checkout 上先 `npm install`。**取不到上游时它退出 0
+  并明说「本轮没有比对任何东西」**——那不等于规则没变。
 
 ## 纪律
 

@@ -47,6 +47,8 @@
     "doctor:json": "node tools/doctor.mjs --json",
     "host-range:update": "node tools/update-host-range.mjs",
     "host-range:check": "node tools/update-host-range.mjs --check",
+    "market-rules:update": "node tools/check-market-rules.mjs",
+    "market-rules:check": "node tools/check-market-rules.mjs --check",
     "build": "tsdown -c tsdown.config.mjs",
     "prepack": "npm run build"
   },

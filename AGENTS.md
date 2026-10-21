@@ -28,6 +28,7 @@ npm run typecheck               # tsc 类型检查
 npm run build                   # 改 src/ 后必跑：重建 lib/ 与根 client.js
 npm run doctor                  # 只读盘点状态文件
 npm run host-range:check        # peer 范围 × 已发布版本宇宙（联网；定时档每周一 04:17 UTC）
+npm run market-rules:check      # 市场规则镜像 × 上游原文（联网；定时档每周一 04:41 UTC）
 ```
 
 - **改了契约/接缝文件，跑全量**。`src/shared/*`、`client.js`、`lib/index.js` 以及被多个模块消费的文件，消费者不可枚举——按域裁剪会漏掉跨域契约。判断标准：这个文件的消费者我数得清吗？数不清就全量。
@@ -37,6 +38,7 @@ npm run host-range:check        # peer 范围 × 已发布版本宇宙（联网�
   - 判断「这条检查到底在哪」时**先跑命令再写进文档**：本文件曾把三条门禁写成「panel 的 tt 白名单 / degrade marker grep / 聚合器纯度断言」，2026-10-18 清点发现前两条在代码里查无此物（`test/panel.test.mjs` 只有 zh/en 键集一致 + 值域断言，没有白名单；degrade 留痕只有 `test/draw-store.test.mjs:211` 一处 warn 日志断言），第三条同样不存在。指导文档点名门禁时必须带**文件:行**。
 - **测试期望要对齐实现语义**：改测试前先读被测模块的注释——很多「看起来怪」的行为（如 `valid: null` 不是 `false`）是刻意的语义区分。
 - **投稿门禁要装依赖**：投稿副本与市场条目这两个门禁共用 `test/helpers/submission-entry.mjs`，它用 **js-yaml**——市场的同款解析器（上游 `scripts/lib/entries.mjs` 就用它），所以我们读到的是市场看到的那份条目。js-yaml 是 `devDependencies`，裸 checkout 上跑这两个套件会抛「js-yaml is not installed」：先 `npm install`。
+- **peer 导入点的扫描线也要装依赖**：`test/host-range.test.mjs` 与 `test/peer-imports.test.mjs` 靠 `test/helpers/peer-imports.mjs` 扫 `src/**` 里的 peer 导入点，它用 **typescript**（`npm run typecheck` 那套解析器——门禁不该养第二套近似实现）。typescript 是 `devDependencies`，裸 checkout 上跑这两个套件会抛「Cannot find package 'typescript'」：先 `npm install`。**别用正则扫 import**：默认导入、命名空间导入、动态 `import("…")` 都是合法形态（本仓 `src/host/draw-register.ts` 就有一处动态导入），正则只认 `import { … } from "…"`，会静悄悄地漏掉它们。
 - **peer 范围分两档，别把「不在射程」当成没人管**：`test/host-range.golden.json` 的 `peers` 是**射程内**（宿主拿 DSH 运行时版本去判的那 10 条 `@deepseek-ai/dsh-*`）；`outOfScopePeers` 是**射程外**（`@deepseek-ai/cordis`、`@deepseek-ai/schemastery`、`@earendil-works/pi-ai`——版本由宿主依赖树决定，不是 DSH 运行时版本）。射程外的换一种契约守：`test/host-range.test.mjs` 的 9 节（宿主装的那份必须被我们声明的范围放行）与 10 节（我们 import 的符号必须在宿主装的那份里真的存在）。新增 peer 依赖要落进其中一档，否则 §8 会判红。
 
 ---
@@ -100,7 +102,7 @@ npm run host-range:check        # peer 范围 × 已发布版本宇宙（联网�
 
 ## 进入代码库的读取顺序（AI 会话）
 
-约 59 个 src 文件（`.ts`）+ 41 个测试套件（`test/*.test.mjs`；连同脚本与 helpers 共 48 个 `.mjs`），乱序读会把时间花在「重新验证文档已写明的事实」上。
+约 59 个 src 文件（`.ts`）+ 42 个测试套件（`test/*.test.mjs`；连同脚本与 helpers 共 50 个 `.mjs`），乱序读会把时间花在「重新验证文档已写明的事实」上。
 
 1. **先文档，后代码**：本文件 → `README.md`（功能全貌 + 三条事实）→ `docs/PROVIDER-M4.md`（设计契约）。这些是判断「代码对不对」的坐标系。
 2. **git 先行**：`git log --oneline -15` + `git status --short`。并行会话常驻，优先读新鲜改动。
@@ -277,6 +279,7 @@ npm run host-range:check        # peer 范围 × 已发布版本宇宙（联网�
 | 改模型能力判定 | `src/host/llm-models.ts` + `src/host/context-catalog.ts` |
 | 改出图逻辑 | `src/host/draw-runtime.ts` + `src/host/draw-register.ts` |
 | 改投稿副本 / 查市场收录漂移 | `awesome-dsh-plugin-submission/` + `test/submission-drift.mjs`（联网）+ `test/submission-drift.test.mjs`（离线夹具）+ `test/market-entry.test.mjs`（市场规则合规） |
+| 查市场规则漂移（上游改了类别表/键白名单） | `npm run market-rules:check`（联网，比对上游原文）+ `test/helpers/market-rules.mjs`（手抄镜像）+ `tools/check-market-rules.mjs` |
 | 改测试 | `test/` 目录，每个模块有对应 `.test.mjs` |
 | 改契约类型 | `src/shared/wire.ts` |
 | 排查线上问题 | `npm run doctor` + `docs/IMPLEMENTATION.md` 踩坑档案 |
@@ -300,6 +303,7 @@ npm run host-range:check        # peer 范围 × 已发布版本宇宙（联网�
 - **Git Bash 的 `/tmp` 与 Windows Python 不通用**：bash heredoc 写 `/tmp/x`，Windows 的 python 打开 `/tmp/x` 是 FileNotFoundError（两边看到的不是同一个目录）。跨 shell 传临时文件用品仓内相对路径（如 `.x.tmp`），用完即删、别提交。
 - **`npm run build` 必须排在跑全量门禁之前**：build-gate（`run-all.mjs` 末尾那道）按设计抓「改了 src 未重建」。把 build 串在 `node test/run-all.mjs` 后面，等于让门禁先红一次再绿——不是 flaky，是顺序错了。改 `src/` 后的正确顺序：build → 全量 → typecheck。
 - **别字节扫宿主 `app.asar`**：那是一个 121 MB 的单文件包，绝大部分是打包的第三方库；`readFileSync().toString("utf8")` 之后 `indexOf` 某个 UI 字面串，命中率≈噪声率（2026-10-18 找 GUI 底部「思考×N · 工具×N」那一行，跑了 9 个脚本、约 10 分钟、零有效命中，命中的全是 katex 的 `×` 实体表和轨迹表的关闭按钮）。要查宿主侧事实，**先解包再读具体条目**（`npx asar list <asar>` 找路径 → `npx asar extract-file` 取那一个文件），或直接读 `resources/app.asar.unpacked/dsh/` 子树；宿主 i18n 真值在 asar 内的 `column.*` / `message.turnProcess.*` 附近，不在渲染拼串里。
+- **本机联网要加 `--use-system-ca`**：这台开发机在 TLS 中间人后面，node 自带 CA 池不认那个证书，于是 `test/submission-drift.mjs` 与 `tools/check-market-rules.mjs` **两个端点都** `fetch failed`（不只 raw 那个）。加系统证书池就通：`node --use-system-ca test/submission-drift.mjs`。**「取不到上游」不等于「上游没变」**——两个脚本取不到时都退出 0 并明说本轮什么都没比对，别把那个 0 读成「一致」。
 
 ---
 
@@ -311,6 +315,7 @@ test/
 ├── helpers/
 │   ├── peer-stub-loader.mjs # Node module hooks 拦截 peer 入口
 │   ├── market-rules.mjs     # 市场的条目规则镜像（手抄上游 scripts/lib/entries.mjs）
+│   ├── peer-imports.mjs     # peer 导入点扫描器（typescript AST + token 双路互校）
 │   └── submission-entry.mjs # 投稿 YAML 的共享解析器（js-yaml，市场同款；离线与联网两个门禁共用一份）
 ├── deps-wiring.test.mjs     # 每个 deps 缝不传时落回 ctx，产品零漂移
 ├── dom-render.test.mjs      # 产物 + jsdom + mini 替身 React
@@ -347,7 +352,8 @@ test/
 ├── switch-precedence.test.mjs # 开关优先级：面板值 > patch 默认
 ├── family-kernel.test.mjs   # 同族同源**宣称**的核对（数值重叠只报告，不判红）
 ├── env-hermetic.test.mjs    # 环境隔离
-├── host-range.test.mjs      # peer 范围 × 已发布版本宇宙的对齐（golden 冻结，零网络）
+├── host-range.test.mjs      # peer 范围 × 已发布版本宇宙的对齐（golden 冻结，零网络；宿主那份在场时另核已装版本与符号契约）
+├── peer-imports.test.mjs   # peer 导入点扫描器自己的门禁（零网络、零宿主；src/** 的导入点是一张封闭清单）
 ├── inference-vision.test.mjs # 视觉判定
 └── draw*.test.mjs           # 出图工具全套（draw.test.mjs / -jobs / -register / -routes / -runtime / -store）
 ```

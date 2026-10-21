@@ -1,7 +1,11 @@
 # 离线门禁：类型检查 + 全部离线套件测试（`npm test`，含尾部的 build-gate）。
 #
-# 为什么这个 CI 只做这些：本仓库的测试全部是**离线**的（裸node + strip-types，
-# 不 import 运行时 peer），所以整套跑完在 CI 上只要几秒——没有理由不跑。
+# 为什么这个 CI 只做这些：本仓库的测试都是**零网络**的（裸node + strip-types），
+# 所以整套跑完在 CI 上只要几秒——没有理由不跑。
+# 一处要说清楚：`test/host-range.test.mjs` 的 9、10 节会去读**本机已装的那份宿主**
+# （`npm root -g` 下的 @deepseek-ai/dsh/node_modules），并从那份 peer 模块里核对
+# 导出符号。CI 上宿主不在场，那两节整体 SKIP（干净检出即此情形）——不联网，
+# 也不在这里装任何东西。
 # 真机 / e2e 冒烟（真 Host + 假魔搭平台）需要本地环境，不在这里，见
 # docs/ROADMAP.md 的 backlog。
 #

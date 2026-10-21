@@ -23,9 +23,12 @@
 //
 // ## 为什么是 .test.mjs
 //
-// test/run-all.mjs 按 glob 自动发现 test/*.test.mjs，所以落盘即参跑。本套件零网络、
-// 零安装，只读 package.json 与 golden 两个文件；刷新 golden 走
-// tools/update-host-range.mjs（唯一联网的地方）。
+// test/run-all.mjs 按 glob 自动发现 test/*.test.mjs，所以落盘即参跑。本套件零网络；
+// 它读 package.json、golden、src/** 与（宿主那份在场时）宿主 node_modules 里的
+// peer 模块。刷新 golden 走 tools/update-host-range.mjs（唯一联网的地方）。
+//
+// 它需要 devDependencies（typescript——扫描器用的就是 `npm run typecheck` 那套解析器）：
+// 裸 checkout 上先 `npm install`，否则报 "Cannot find package 'typescript'"。
 //
 // ## 红了怎么办
 //
@@ -34,10 +37,11 @@
 // 生成物，别手改）。
 import { strict as assert } from "node:assert";
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathResolves, readGroups, scanPeerImports } from "./helpers/peer-imports.mjs";
 import { compareVersions, diffAgainstGolden, explain, hostPeers, partition } from "./host-range.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -47,6 +51,13 @@ const golden = JSON.parse(readFileSync(join(here, "host-range.golden.json"), "ut
 
 /** 已发布的全部 @deepseek-ai/dsh 版本，按 semver 升序。 */
 const universe = golden.universe ?? [];
+
+/**
+ * src/** 里从 peer 取符号的地方。扫两遍：AST 路认形态（具名/默认/命名空间/动态/再导出），
+ * token 路只看词法。两套互不依赖的实现必须数出同一批——对不上就是扫描器坏了。
+ * 扫描器自己的门禁在 test/peer-imports.test.mjs（零宿主，CI 上也跑）。
+ */
+const peerScan = scanPeerImports({ root, peerNames: Object.keys(manifest.peerDependencies ?? {}) });
 
 // --- 1. golden 的宇宙 = 已发布的全部版本，不是抽样 -------------------------
 assert.ok(Array.isArray(universe) && universe.length > 0, "universe 为空");
@@ -246,7 +257,7 @@ function loadHostSemver() {
 
   // 我们真的从它 import 符号的那些射程外 peer，必须有「从哪个版本起符号就在」的证据——
   // 否则那条下界是没有出处的。
-  for (const name of new Set(valueImports().map((entry) => entry.owner))) {
+  for (const name of new Set(peerScan.ast.map((site) => site.owner))) {
     if (!outOfScope.has(name)) continue;
     assert.ok(
       typeof outOfScope.get(name).symbolsFrom === "string" && outOfScope.get(name).symbolsFrom.length > 0,
@@ -305,24 +316,54 @@ function loadHostSemver() {
 // 9 节守的是「版本放不放行」，这一节守的是「放行了也用得上」：本插件从 pi-ai 拿
 // createProvider 与 openAICompletionsApi——如果宿主装的那份 pi-ai 改名或删了这两个
 // 导出，范围照样放行，插件照样装得上，然后在大庭广众之下炸在 import 上。
+// 这一节分两段，两段的判据强度不同——混在一起写就会像现在这样：宿主不在场时，
+// 整节连同它的活性检查一起被跳过，于是「扫描器瞎了」这件事在 CI 上没人知道。
+//
+//   10a 扫描面（与宿主在不在场无关）：扫描器必须真的看见 src/** 里的 peer 导入点，
+//       而且 AST 路与 token 路两套互不依赖的实现必须数出同一批。宿主不在场时
+//       这一段照跑——它是「扫描器还活着」的唯一证据。
+//
+//   10b 契约面（宿主在场才跑）：逐个符号核对宿主装的那份。宿主不在场时按 9 节的
+//       同一语义 SKIP，不假装核对过。
 {
+  // --- 10a. 扫描面 ----------------------------------------------------------
+  const astSpecs = peerScan.ast.map((site) => `${site.file}|${site.spec}`).sort();
+  const tokenSpecs = peerScan.tokens.map((hit) => `${hit.file}|${hit.spec}`).sort();
+  assert.deepEqual(
+    tokenSpecs,
+    astSpecs,
+    "两套扫描路数出的 peer 导入点对不上——扫描器坏了，不是「都对」",
+  );
+  assert.ok(astSpecs.length > 0, "一个 peer 导入点都没扫到——扫描器坏了，不是「都对」");
+
+  // --- 10b. 契约面 ----------------------------------------------------------
   const modulesDir = hostModulesDir();
   const skipped = [];
   let checked = 0;
-  for (const entry of valueImports()) {
+  for (const site of peerScan.ast) {
     if (!modulesDir) {
-      skipped.push(entry.spec);
+      skipped.push(site.spec);
       continue;
     }
-    const loaded = await loadHostModule(modulesDir, entry.spec);
+    const loaded = await loadHostModule(modulesDir, site.spec);
     if (!loaded) {
-      skipped.push(entry.spec);
+      skipped.push(site.spec);
       continue;
     }
-    for (const symbol of entry.symbols) {
+    for (const symbol of site.symbols) {
       assert.ok(
         symbol in loaded.mod,
-        `宿主装的 ${entry.spec}@${loaded.version} 里没有导出 ${symbol}——我们在 ${entry.file} 从它 import 这个符号`,
+        `宿主装的 ${site.spec}@${loaded.version} 里没有导出 ${symbol}——我们在 ${site.file} 从它 import 这个符号`,
+      );
+      checked++;
+    }
+    // 命名空间导入与动态导入读的是**属性**（`mod?.defineTool ?? mod?.default?.defineTool`），
+    // 不是具名导出：契约是「这条 `??` 链上有一条走得通」，不是「每条都得通」。
+    for (const group of readGroups(site.reads)) {
+      const paths = group.paths.map((parts) => parts.join("."));
+      assert.ok(
+        group.paths.some((parts) => pathResolves(loaded.mod, parts)),
+        `宿主装的 ${site.spec}@${loaded.version} 上没有 ${paths.join(" 或 ")}——我们在 ${site.file} 读这个属性`,
       );
       checked++;
     }
@@ -330,8 +371,16 @@ function loadHostSemver() {
   if (skipped.length > 0) {
     console.log(`SKIP: 宿主这份里读不到 ${skipped.join(", ")}，符号契约未运行`);
   }
-  // 活性：没查到一个符号，「全过」就是零组输入凑出来的。
-  assert.ok(checked > 0, "符号契约一个符号都没查到——扫描或解析坏了，不是「都对」");
+  // 活性：宿主在场、却一个符号都没核到，说明我们以为能比的那份其实没读到（宿主那份
+  // 的布局与我们以为的不同，或解析器坏了）。这时候「全过」是零组输入凑出来的。
+  // 宿主不在场时这段不判红——那时 10a 已经兜住了「扫描器瞎了」，没有可比对象就是
+  // 没有可比对象，不假装有。
+  if (modulesDir) {
+    assert.ok(
+      checked > 0,
+      "宿主那份在，却一个符号都没核到——宿主那份的布局或解析器坏了，不是「都对」",
+    );
+  }
 }
 
 // --- 共用工具 ---------------------------------------------------------------
@@ -370,37 +419,6 @@ function rangeAdmits(version, range, semver) {
   } catch {
     return null;
   }
-}
-
-/** src/** 里从 peer 包 import 符号的地方（只收值导入；类型导入另行说明）。 */
-function valueImports() {
-  const peerNames = Object.keys(manifest.peerDependencies ?? {});
-  const files = [];
-  const walk = (dir) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (entry.name.endsWith(".ts")) files.push(full);
-    }
-  };
-  walk(join(root, "src"));
-  const found = [];
-  for (const file of files) {
-    const text = readFileSync(file, "utf8");
-    const re = /import\s+(type\s+)?\{([^}]*)\}\s+from\s+"([^"]+)"/g;
-    for (const match of text.matchAll(re)) {
-      if (match[1]) continue; // import type：类型面由 types/dsh-peer-modules.d.ts 的桩负责
-      const spec = match[3];
-      const owner = peerNames.find((name) => spec === name || spec.startsWith(`${name}/`));
-      if (!owner) continue;
-      const symbols = match[2]
-        .split(",")
-        .map((part) => part.trim().split(/\s+as\s+/)[0].trim())
-        .filter(Boolean);
-      found.push({ spec, owner, symbols, file: relative(root, file).replaceAll("\\", "/") });
-    }
-  }
-  return found;
 }
 
 /** exports 字段的值可能是字符串，也可能是条件对象（{import, node, default}）。 */

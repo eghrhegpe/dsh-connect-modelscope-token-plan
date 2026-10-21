@@ -4,11 +4,22 @@
 > / `dsh-connect-sensenova-token-plan`），本文件只写本仓**特有**的部分与共同纪律。
 >
 > **先讲清一个常见误解**：本仓库**没有发布自动化**——没有会自动打 tag / 发 npm / 建 Release 的
-> 工作流。但**有一条 CI 门禁**：`.github/workflows/gate.yml` 在 push 到 `main` 与所有 PR 上跑
-> `npm run typecheck` + `npm test`（全部离线套件，含尾部的 `build-gate`），几秒跑完。它是唯一能
-> 抓到「提交了忘 build」的地方——**发版前务必确认它绿**。GitHub Releases 页面上的发布说明仍是
-> **手动** `gh release create` 出来的：它对安装、测试、打 tag **都没有任何影响**，漏掉时只有
-> Release 页会缺一条，没有任何东西会报错。
+> 工作流。但有**四条工作流**，其中只有一条是硬门禁：
+>
+> - `.github/workflows/gate.yml`——**硬门禁**：在 push 到 `main` 与所有 PR 上跑 `npm run typecheck`
+>   + `npm test`（全部离线套件，含尾部的 `build-gate`），几秒跑完。它是唯一能抓到「提交了忘
+>   build」的地方——**发版前务必确认它绿**。
+> - `.github/workflows/host-range-check.yml`——**信息档**（每周一 04:17 UTC）：peer 范围 × 已发布
+>   版本宇宙的对账。红了是事实变了（宿主发新版了），不是代码坏了。
+> - `.github/workflows/submission-drift.yml`——**信息档**（每日 03:49 UTC）：投稿副本 × 市场线上
+>   条目的对账。红了是市场那边变了、或我们那份稿子过期了，不是代码坏了。
+> - `.github/workflows/market-rules-check.yml`——**信息档**（每周一 04:41 UTC）：市场的条目规则
+>   镜像 × 上游原文的对账。红了是上游改了规则，不是代码坏了。
+>
+> 三条信息档红了**不要**当成回归去回滚提交——它们是让人去更新 golden、去声明分歧、去抄新规则
+> 的信号。
+> GitHub Releases 页面上的发布说明仍是**手动** `gh release create` 出来的：它对安装、测试、打 tag
+> **都没有任何影响**，漏掉时只有 Release 页会缺一条，没有任何东西会报错。
 >
 > **本文件是唯一的发版知识源，不产生每版手册。** Release 正文写在**临时文件**里喂给
 > `gh release create --notes-file`（姊妹插件同款做法），草稿留在 `CHANGELOG.md` 该版节里。
@@ -242,10 +253,11 @@ gh release create vX.Y.Z \
 
 规则只认上游原文，本仓副本在 `awesome-dsh-plugin-submission/contributing.md`——**别在本文件转述规则**（本节此前那张「硬门槛」表就是转述，已经漂移过）。
 
-本仓只有五件事实：
+本仓只有六件事实：
 
 - 条目文件 `awesome-dsh-plugin-submission/eghrhegpe__dsh-connect-modelscope-token-plan.yml`，提 PR 时原样复制到对方仓库的 `data/plugins/` 下。不要在这里再维护第二份 yaml。
-- 提交前那份条目要过本仓的合规门禁 `test/market-entry.test.mjs`：它用**市场自己的条目规则**（镜像在上游 `scripts/lib/entries.mjs`）校验我们这份稿子。**为什么要有这道门**：市场的形状检查是在**合入之后**才跑的——PR 闸只做 YAML 解析与仓库层面的检查，不看形状——于是一份形状不合规的稿子能过 PR 闸，然后在合入后打断他们的 README 生成；我们宁可自己这边先红。镜像的已知边界：规则是**手抄**的，上游改了不会自动跟着变（唯一能自动发现的一处是 `category` 取值，它与本仓的 `contributing.md` 副本交叉核对）；上游改了规则就抄一遍 `test/helpers/market-rules.mjs`。
+- 提交前那份条目要过本仓的合规门禁 `test/market-entry.test.mjs`：它用**市场自己的条目规则**（镜像在上游 `scripts/lib/entries.mjs`）校验我们这份稿子。**为什么要有这道门**：市场的形状检查是在**合入之后**才跑的——PR 闸只做 YAML 解析与仓库层面的检查，不看形状——于是一份形状不合规的稿子能过 PR 闸，然后在合入后打断他们的 README 生成；我们宁可自己这边先红。镜像的已知边界：规则是**手抄**的，**镜像自己发现不了上游改了**——手抄的东西就是这样，它只知道自己被抄下来那天是什么样。零网络的发现点只有一处：离线门禁把镜像的 `category` 取值与本仓 `contributing.md` 副本交叉核对（副本也过期时，这处同样发现不了）。
+- **上游规则变了怎么知道**：`tools/check-market-rules.mjs` 联网取上游的 `scripts/lib/entries.mjs` 与 `contributing.md`，与本仓的镜像和副本逐项比对（定时档在 `.github/workflows/market-rules-check.yml`，每周一 04:41 UTC；`--check` 只报告，默认模式**只刷新副本**、不自动改镜像——抄判据是人的事）。**它红了是信息，不是回归**：要么把上游的值抄进 `test/helpers/market-rules.mjs`（本仓副本 `awesome-dsh-plugin-submission/contributing.md` 由脚本刷新），要么有意不改并在镜像的注释里写清为什么。这条之所以单列，是因为「镜像会静悄悄地过期」曾经是个**没有出口**的缺口：上游改了规则，本仓全绿，而市场的 README 生成会断。
 - 截图声明在仓库根 `screenshots.json`；清单与资产由 `test/release.test.mjs` 绑在一起（改名必须同步清单）。
 - 市场线上那条条目会随上游维护者的改动漂移，`test/submission-drift.mjs` 每天联网对账一次（定时档在 `.github/workflows/submission-drift.yml`）。**它红了是信息，不是回归**：要么把上游措辞并进草稿，要么重开 PR；别去回滚提交把它刷绿。对账用的是**市场同款的 YAML 解析器**（js-yaml，和上游 `scripts/lib/entries.mjs` 一个），比的是**值**不是写法：两边引号风格不同（单引号 / 无引号 plain scalar / 双引号）而说的是同一句话，算一致；并上游措辞时保持语义即可，不必照抄他们的引号风格。
 - 分歧台账在 `awesome-dsh-plugin-submission/pending-drift.json`：只有 `category` / `description.en` / `description.zh` 这三类**可声明分歧**能进台账，每条必须写清上游→草稿的确切取值，外加终结它的那条 PR 链接。台账**双向核对**——有分歧没声明判红，声明与现实不符（PR 已合、或上游挪了窝）同样判红；声明过期不清理，等于给分歧装了个静音键。`url` / `name` 是身份字段，永远不可声明，只能改草稿。**「上游根本没这个字段」写 `"upstream": null`**——那是唯一能表达「缺席」的形状；没有它，一次缺席就红得没有出口。

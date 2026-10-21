@@ -26,8 +26,13 @@
  *
  * - 规则是**手抄**的：上游改了类别表、键白名单或描述规则，这份镜像就会过期。
  *   过期了不会立刻出事——顶多是我们少查一条、多查一条——但它会**静悄悄地**过期。
- *   本仓目前没有任何机制发现它（上游的 `scripts/lib/entries.mjs` 只能联网取，
- *   而离线门禁是零网络的）。这是已知缺口，不假装没有。
+ *   **这份文件自己发现不了它**（离线门禁是零网络的，上游的 `scripts/lib/entries.mjs`
+ *   只能联网取）。发现它的机制在门外：`tools/check-market-rules.mjs` 联网取上游
+ *   原文，与本镜像和本仓的 `contributing.md` 副本逐项比对（定时档
+ *   `.github/workflows/market-rules-check.yml`，每周一 04:41 UTC）。**它红了是信息，
+ *   不是回归**：抄不抄是人的决定；脚本默认只刷新副本，不自动改这份镜像。
+ *   零网络的发现点仍然只有一处——离线门禁把镜像的 `category` 取值与副本交叉核对
+ *   （副本也过期时，那一处同样发现不了）。
  * - 抄的时候**尽量逐字**抄上游的判据与措辞：出问题时要能拿我们的输出和市场的
  *   输出对照，措辞对不上会让排查变难。
  * - 上游只抄了**单个条目**相关的规则：跨条目的重复 url 检查（`seen` 映射）在
@@ -75,7 +80,7 @@ export const CAT_IDS = [
 ];
 
 /** 上游第 113 行：tarball 只认 GitHub 自己的发布托管。 */
-const TARBALL_HOSTS = new Set(["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"]);
+export const TARBALL_HOSTS = new Set(["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"]);
 
 /**
  * 上游第 60–66 行：`https://github.com/o/r` → `o__r`；`.../tree/main/packages/x`

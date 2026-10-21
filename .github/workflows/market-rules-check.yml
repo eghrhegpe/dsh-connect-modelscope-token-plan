@@ -1,0 +1,79 @@
+name: Market rules check
+
+# Has the marketplace changed the rules our submission has to satisfy?
+#
+# `test/market-entry.test.mjs` is the offline half: it checks our draft entry
+# against `test/helpers/market-rules.mjs` — a HAND-COPIED mirror of upstream's
+# `scripts/lib/entries.mjs`. A hand-copied mirror cannot notice that upstream
+# changed; it only knows what was true when the copy was written. The copy
+# expires silently.
+#
+# This workflow is the other half: `tools/check-market-rules.mjs` fetches
+# upstream's `scripts/lib/entries.mjs` and `contributing.md` and prints the
+# difference between them and this repository's mirror and copy. Nothing here
+# decides anything — a human copies the new values over, because "upstream
+# changed the rules" is not the same claim as "our rules should change".
+#
+# Why a clock:
+#
+#   The rules move on the marketplace maintainers' schedule, not on ours. A
+#   per-push run measures our commit cadence, so a rule change that lands on a
+#   quiet week would stay unnoticed until the next unrelated commit. Alignment
+#   with the published rules is a time-dependent property.
+#
+# Why its own workflow rather than a job in gate.yml:
+#
+#   A red here is INFORMATION, not a regression. The fix is to copy the new
+#   values into `test/helpers/market-rules.mjs` and refresh
+#   `awesome-dsh-plugin-submission/contributing.md`. It must not sit on the same
+#   page as the offline hard gate, or the one signal that says BLOCK would blur
+#   into the one that says READ THIS.
+#
+# Why it installs one thing:
+#
+#   `tools/check-market-rules.mjs` imports the mirror, which imports the shared
+#   YAML parser, so it needs js-yaml — the marketplace's own parser, pinned to
+#   the range package.json declares. The upstream repository is public, so
+#   there is no secret here either.
+#
+# Dispatchable so a red can be re-run by hand after the mirror is updated.
+
+"on":
+  schedule:
+    # 04:41 UTC = 12:41 CST, Mondays. Deliberately not 04:17 (the host-range
+    # check) and not 03:49 (the submission-drift check): three mails arriving
+    # together get skimmed as one.
+    - cron: '41 4 * * 1'
+  workflow_dispatch:
+  # These are the files that decide what the mirror is compared against, so a
+  # change to any of them is worth one immediate run. Nothing else triggers it:
+  # this is not a gate on your work.
+  push:
+    paths:
+      - 'test/helpers/market-rules.mjs'
+      - 'test/helpers/submission-entry.mjs'
+      - 'awesome-dsh-plugin-submission/contributing.md'
+      - 'tools/check-market-rules.mjs'
+      - 'package.json'
+      - '.github/workflows/market-rules-check.yml'
+
+jobs:
+  market-rules:
+    name: Rule mirror vs upstream marketplace rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # The mirror imports the shared YAML parser, so it needs js-yaml — the
+      # marketplace's own parser. `--no-save` keeps package.json untouched;
+      # the range is the one package.json declares (^5.3.0), which is also the
+      # one upstream uses.
+      - name: Install the market's YAML parser
+        run: npm install --no-save --no-audit --no-fund --legacy-peer-deps js-yaml@^5.3.0
+      # Prints the diff and exits 1 when the mirror or the copy is stale. It
+      # does not write: copying upstream's rules over is a reviewed act, done
+      # on a machine, not by a bot.
+      - name: Compare the rule mirror with the upstream rules
+        run: node tools/check-market-rules.mjs --check

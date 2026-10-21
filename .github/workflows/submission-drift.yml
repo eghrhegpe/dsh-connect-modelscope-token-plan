@@ -69,9 +69,11 @@ jobs:
       # One dependency, and it is not ours: the marketplace parses entries with
       # js-yaml, and this script reads the entry with that same parser so that
       # what we compare is what the market sees. `--legacy-peer-deps` keeps npm
-      # from dragging in the fourteen peer packages it would otherwise resolve;
-      # `--no-save` keeps package.json untouched. The range is the one
-      # package.json declares (^5.3.0), which is also the one upstream uses.
+      # from resolving the thirteen peer packages this repository declares (all
+      # of them are marked optional, so npm would skip them anyway — the flag is
+      # belt and braces, not load-bearing); `--no-save` keeps package.json
+      # untouched. The range is the one package.json declares (^5.3.0), which is
+      # also the one upstream uses.
       #
       # No secret: the upstream repository is public and raw.githubusercontent.com
       # needs no auth. This is deliberately NOT a `*.test.mjs` line, so it stays
