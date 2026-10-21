@@ -50,7 +50,7 @@ import {
 import { isImageGenModel, imageGenModelIds, resolveDrawModelChoice, KNOWN_T2I_MODEL_ID } from "./llm-models.ts";
 import { createDrawJobs, type DrawJob, type DrawJobs } from "./draw-jobs.ts";
 import { DRAW_TIMEOUT_MAX_MS } from "./host-config.ts";
-import { str } from "./util.ts";
+import { redactSecrets, str } from "./util.ts";
 
 /** agent 工具名。带插件前缀，避免与 `dsh-draw-router` 的 `draw_image` 撞名。 */
 export const DRAW_TOOL_NAME = "modelscope_draw_image";
@@ -797,8 +797,13 @@ export function defineDrawTool({
       for (const raw of rawImages) {
         const normalized = normalizeImageUrlInput(raw);
         if (normalized === null) {
+          // 凭据永不入消息（docs/PROVIDER-M4.md 的红线）：被拒的 URL 可能带
+          // 签名查询串（`?token=…`）或别的键值对，原样回显就会把它带进日志与
+          // 面板。**先脱敏再截断**——先截断的话，凭据可以藏在尾巴里（与
+          // `draw.ts` 的 `describeDrawFailure` 同一纪律）。
+          const safe = redactSecrets(raw).slice(0, 80);
           throw new Error(
-            `imageUrl 不可用：${raw.slice(0, 80)} —— 只接受公网 http(s) 链接或 data:image/...;base64 内联数据（本地文件上游取不到，请先上传）`
+            `imageUrl 不可用：${safe} —— 只接受公网 http(s) 链接或 data:image/...;base64 内联数据（本地文件上游取不到，请先上传）`
           );
         }
         images.push(normalized);

@@ -229,6 +229,24 @@ section("请求体发 image_url 数组（多图编辑）", async () => {
   assert.deepEqual(sent.image_url, ["https://a/1.png", "https://a/2.png"]);
 });
 
+section("被拒的 imageUrl 回显必须先脱敏（凭据永不入消息）", async () => {
+  // 被拒的 URL 仍可能带签名查询串（`?token=…`）或别的键值对。原样回显就会把它
+  // 带进日志与面板——红线 1（凭据永不入日志）要防的正是这一条，而这一处曾是没
+  // 过脱敏闸的唯一一个错误面（docs/PROVIDER-M4.md 的红线「redactSecrets 过所有
+  // 日志/错误/响应体」）。
+  const { def, calls } = makeTool({ steps: [res(200, { task_id: "t1" })] });
+  await assert.rejects(
+    () => def.execute({ prompt: "a cat", imageUrl: "ftp://files.example/pic.png?token=sk-abcdef1234567890" }),
+    (error) => {
+      assert.doesNotMatch(error.message, /abcdef1234567890/, "凭据不许出现在错误消息里");
+      assert.match(error.message, /\[REDACTED\]/, "脱敏后的样子要留在消息里，诊断才有料");
+      return true;
+    },
+    "被拒的 URL 必须先过脱敏闸再回显"
+  );
+  assert.equal(calls.length, 0, "输入图不合格就不该提交");
+});
+
 section("成功结果保持上游返回的全部图片", async () => {
   const { fetchImpl } = scriptedFetch([
     res(200, { task_id: "t1" }),
