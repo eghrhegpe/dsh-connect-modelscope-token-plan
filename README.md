@@ -1,4 +1,22 @@
-# dsh-connect-modelscope-token-plan
+<h1 align="center">dsh-connect-modelscope-token-plan</h1>
+
+<p align="center"><b>把魔搭社区（ModelScope）API-Inference 免费额度的面板接进 DSH，并可选把魔搭模型注册成 LLM provider。</b></p>
+
+<p align="center">
+  <a href="#安装">安装</a> ·
+  <a href="#面板长什么样">工作原理</a> ·
+  <a href="CHANGELOG.md">更新日志</a> ·
+  <a href="https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan/issues">问题反馈</a>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/dsh-connect-modelscope-token-plan"><img src="https://img.shields.io/npm/v/dsh-connect-modelscope-token-plan?style=flat-square&label=npm&color=cb3837" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/dsh-connect-modelscope-token-plan"><img src="https://img.shields.io/npm/d18m/dsh-connect-modelscope-token-plan?style=flat-square&label=downloads&color=cb3837" alt="npm downloads"></a>
+  <a href="https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/eghrhegpe/dsh-connect-modelscope-token-plan/ci.yml?branch=main&style=flat-square&label=tests" alt="test status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/eghrhegpe/dsh-connect-modelscope-token-plan?style=flat-square" alt="MIT license"></a>
+  <a href="https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan/stargazers"><img src="https://img.shields.io/github/stars/eghrhegpe/dsh-connect-modelscope-token-plan?style=flat-square" alt="GitHub stars"></a>
+  <a href="https://dshfind.com/plugins/eghrhegpe/dsh-connect-modelscope-token-plan"><img src="https://dshfind.com/api/badge/eghrhegpe/dsh-connect-modelscope-token-plan" alt="dshfind plugin"></a>
+</p>
 
 把魔搭社区（modelscope.cn）**API-Inference 免费额度**的面板接进 DeepSeek Harness 的 **Plugins 页**（插件卡内联，三个 tab：额度 / 模型 / 接入），并可选把魔搭模型注册成 **DSH 的 LLM provider**（id `modelscope-token-plan`，OpenAI 兼容）——注册后魔搭模型进 DSH 模型选择器，可直接对话调用；还能开**出图工具**做文生图 / 图生图。
 
