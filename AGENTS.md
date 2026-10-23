@@ -270,7 +270,7 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 | 为什么出图开关要下次启动才生效？ | `src/host/draw-register.ts` 文件头注释 |
 | 为什么重分类层在观察层之内？ | `src/host/llm-adapter.ts` 注释 |
 | 为什么 commitPublish 不是 async？ | `src/host/provider-publish.ts` |
-| 为什么策展表只收 19 个模型？ | `src/host/context-catalog.ts` |
+| 为什么策展表只收 21 个模型？ | `src/host/context-catalog.ts` |
 | 为什么 DSH 有自己的账本还要本地计数？ | `src/host/usage-observer.ts` 文件头 |
 | 为什么环境变量压过面板保存的值？ | `src/host/ms-auth.ts` 注释 |
 | 为什么目录取数不阻塞在余额取数之后？ | `src/host/snapshot-aggregate.ts` 注释 |

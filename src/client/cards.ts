@@ -564,7 +564,7 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
   // 源标注：面板保存的值 / patch 的默认。
   const sourceKey = status.source === "panel" ? "provider.source.panel" : "provider.source.config";
 
-  // 全局上下文窗口**覆盖**。放在卡片最底：插件自带策展表（19 个模型的交叉真值，
+  // 全局上下文窗口**覆盖**。放在卡片最底：插件自带策展表（21 个模型的交叉真值，
   // 只收这几个的理由见 context-catalog.ts 头注），
   // 这个值只在目录未声明窗口时套用，却会盖过策展表——它是「覆盖」而不是「跟随」，
   // 所以不该出现在开关旁边冒充主流程。

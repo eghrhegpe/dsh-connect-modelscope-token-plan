@@ -157,3 +157,23 @@ id/object/owned_by/created + Tasks 标签），未声明条目原本一路落到
 - 魔搭 provider 数据：`providers/modelscope/`（provider.toml + models/{Qwen,ZhipuAI}/*.toml）
 - 视觉编码样例：`models/alibaba/qwen-vl-max.toml`（`[modalities] input = ["text","image"]`）
 - Mastra 文档声明：「capabilities ... sourced from models.dev」— https://mastra.ai/models/providers/modelscope
+
+## 8. 2026-10-23 复查：两条新上架 id 补入策展表
+
+用户实测：`deepseek-ai/DeepSeek-V4.1-Flash-1017`（视觉）在面板上显示 128K——它
+是 10-16 之后上架的 dated 变体，不在当时的策展表里，落 128k 兜底。本轮同时拉
+live `api.json` 与 live `/v1/models`（37 条）复核，结论已回填
+`src/host/context-catalog.ts`（19 → 21 条）：
+
+- **补入** `deepseek-ai/DeepSeek-V4.1-Flash-1017` → 1048576（canon
+  `deepseek/deepseek-v4.1-flash-1017`，35 host 众数，modalities text|image）；
+- **补入** `stepfun-ai/Step-5-Preview` → 1000000（canon `stepfun/step-5-preview`，
+  19 host 众数，多模态对话模型）——同为 10-16 后新上架、曾落兜底的条目；
+- 19 条旧条目中 16 条与 live 众数一致；3 条失配**全是同一量级的十进制/二进制
+  拼写差**（V4-Pro 1048576 vs live 1000000；Step-3.5/3.7-Flash 262144 vs live
+  256000，后者含 stepfun 官方 host），展示层同为 1M/256K，维持原值并在表内注明；
+- 覆盖面对齐：live 算法（canon 匹配 + 跨 host 众数）对当前目录 37 条命中 21 条，
+  与补入后的策展表完全一致；剩余 16 条（ERNIE-4.5 全系、Intern-S1 系、
+  InternVL3_5、XiYanSQL、CompassJudger 等）在任何数据源都没有窗口真值；
+- 传输体积（运行时直取的成本依据）：api.json 解压后 **5.6 MiB**，230 providers /
+  8850 models（全部带 `limit.context`），本机拉全量约 1.6s。

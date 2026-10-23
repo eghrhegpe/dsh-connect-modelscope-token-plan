@@ -455,8 +455,8 @@ const FACTS = [
     pointer: "PROVIDER-M4.md"
   },
   {
-    id: "上下文窗口策展表只收 19 个模型（models.dev 交叉真值）",
-    needles: [/19 个/],
+    id: "上下文窗口策展表只收 21 个模型（models.dev 交叉真值）",
+    needles: [/21 个/],
     canonical: "src/host/context-catalog.ts",
     pointer: "context-catalog.ts"
   },

@@ -17,6 +17,8 @@ for (const [id, window] of Object.entries(CURATED_CONTEXT_WINDOWS)) {
   assert.equal(curatedWindowOf(id), window, `表内 id 必须自洽命中：${id}`);
 }
 assert.equal(curatedWindowOf("deepseek-ai/DeepSeek-V4.1-Flash"), 1048576);
+assert.equal(curatedWindowOf("deepseek-ai/DeepSeek-V4.1-Flash-1017"), 1048576, "dated 变体同族 1M（2026-10-23 补入：曾落 128k 兜底）");
+assert.equal(curatedWindowOf("stepfun-ai/Step-5-Preview"), 1000000, "Step-5-Preview 1M（2026-10-23 补入：10-16 后新上架）");
 assert.equal(curatedWindowOf("Qwen/Qwen-Image-Edit"), null, "生图模型不进表");
 assert.equal(curatedWindowOf("no/such-model"), null, "未收录 → null（兜底留给调用方）");
 assert.equal(curatedWindowOf(""), null, "空 id → null");
@@ -28,6 +30,8 @@ const CATALOG = {
   data: [
     // 策展命中：目录不声明 → 策展表 1048576
     { id: "deepseek-ai/DeepSeek-V4.1-Flash", object: "", owned_by: "system", created: 1 },
+    // 回归（2026-10-23）：10-16 之后上架的 dated 变体，旧表没有它 → 曾落 128k
+    { id: "deepseek-ai/DeepSeek-V4.1-Flash-1017", object: "", owned_by: "system", created: 1 },
     // 不在表（生图）→ 兜底 128000
     { id: "Qwen/Qwen-Image-Edit", object: "", owned_by: "system", created: 1 },
     // 策展命中：GLM-5.2 → 1000000
@@ -39,6 +43,7 @@ const CATALOG = {
 
 function detailTasks(id) {
   if (id === "deepseek-ai/DeepSeek-V4.1-Flash") return [{ Name: "image-text-to-text", ChineseName: "视觉多模态理解" }];
+  if (id === "deepseek-ai/DeepSeek-V4.1-Flash-1017") return [{ Name: "image-text-to-text", ChineseName: "视觉多模态理解" }];
   if (id === "Qwen/Qwen-Image-Edit") return [{ Name: "image-to-image", ChineseName: "图片生成图片" }];
   return [{ Name: "text-generation", ChineseName: "文本生成" }];
 }
@@ -68,6 +73,10 @@ const { entries } = await client.fetchModels();
 const ds = entries.find((e) => e.id === "deepseek-ai/DeepSeek-V4.1-Flash");
 assert.equal(ds?.contextWindow, 1048576, "策展表命中 → 1048576（不是 128000 兜底）");
 assert.equal(contextWindowSourceOf(ds), "curated", "策展命中标记 curated");
+const ds1017 = entries.find((e) => e.id === "deepseek-ai/DeepSeek-V4.1-Flash-1017");
+assert.equal(ds1017?.contextWindow, 1048576, "V4.1-Flash-1017 策展命中 → 1048576（回归：曾落 128k 兜底）");
+assert.equal(contextWindowSourceOf(ds1017), "curated", "1017 策展命中标记 curated");
+assert.equal(ds1017?.vision, true, "1017 是视觉模型（详情端点 Tasks 判定，与上游 modalities text|image 一致）");
 const glm = entries.find((e) => e.id === "ZhipuAI/GLM-5.2");
 assert.equal(glm?.contextWindow, 1000000, "GLM-5.2 策展 1000000");
 assert.equal(contextWindowSourceOf(glm), "curated");
