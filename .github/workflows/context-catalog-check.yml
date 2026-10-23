@@ -1,0 +1,75 @@
+name: Context catalog check
+
+# Has the curated context-window table gone stale against upstream?
+#
+# `src/host/context-catalog.ts` is static knowledge: models.dev's api.json and
+# the ModelScope catalogue both move, and the table cannot notice. The 2026-10-23
+# incident was exactly this — `deepseek-ai/DeepSeek-V4.1-Flash-1017` shipped a
+# week before the table had it, so the panel showed the 128k fallback while 35
+# hosts agreed on 1M. A human found it by diffing upstream by hand; this
+# workflow automates that diff.
+#
+# `test/context-catalog-drift.test.mjs` is the offline half: it pins the
+# checker's classification semantics and exit codes against fixtures, zero
+# network. This workflow is the other half — the live fetch that the offline
+# suites structurally cannot do.
+#
+# Why a clock:
+#
+#   New models arrive on ModelScope's schedule, not ours. A per-push run
+#   measures our commit cadence, so a model that lands on a quiet week stays
+#   unnoticed until the next unrelated commit. Staleness is a time-dependent
+#   property.
+#
+# Why its own workflow rather than a job in gate.yml:
+#
+#   A red here is INFORMATION, not a regression. The fix is to edit
+#   `src/host/context-catalog.ts` (add / remove / re-check entries, bump
+#   CURATED_AS_OF) and rebuild — a reviewed act. It must not sit on the same
+#   page as the offline hard gate, or the one signal that says BLOCK would blur
+#   into the one that says READ THIS.
+#
+# Why it installs nothing:
+#
+#   `tools/check-context-catalog.mjs` imports only node builtins, the pure
+#   checker (`tools/lib/curated-drift.mjs`), and the table itself
+#   (`src/host/context-catalog.ts`, stripped by node >= 22.19 — see package.json
+#   engines). No devDependencies, so no install step.
+#
+# Exit codes: 0 = nothing actionable (including SKIP when upstream is
+# unreachable — "could not ask" is not "nothing changed"), 1 = actionable drift
+# or unusable input, 2 = usage error. Dispatchable so a red can be re-run by
+# hand after the table is updated.
+
+"on":
+  schedule:
+    # 05:05 UTC = 13:05 CST, Mondays. Deliberately not 03:49 (submission-drift),
+    # 04:17 (host-range) or 04:41 (market-rules): four mails arriving together
+    # get skimmed as one.
+    - cron: '05 5 * * 1'
+  workflow_dispatch:
+  # These are the files that decide what the table is compared against, so a
+  # change to any of them is worth one immediate run. Nothing else triggers it:
+  # this is not a gate on your work.
+  push:
+    paths:
+      - 'src/host/context-catalog.ts'
+      - 'tools/check-context-catalog.mjs'
+      - 'tools/lib/curated-drift.mjs'
+      - 'test/context-catalog-drift.test.mjs'
+      - '.github/workflows/context-catalog-check.yml'
+
+jobs:
+  context-catalog:
+    name: Curated context windows vs models.dev
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # Prints the diff and exits 1 when the table needs a human (missing /
+      # drifted / delisted entries). It does not write: deciding which values
+      # to copy over is a reviewed act, done on a machine, not by a bot.
+      - name: Diff the curated table against upstream
+        run: node tools/check-context-catalog.mjs

@@ -49,6 +49,7 @@ npm run build                   # 改 src/ 后必跑：重建 lib/ 与根 client
 npm run doctor                  # 只读盘点状态文件
 npm run host-range:check        # peer 范围 × 已发布版本宇宙（联网；定时档每周一 04:17 UTC）
 npm run market-rules:check      # 市场规则镜像 × 上游原文（联网；定时档每周一 04:41 UTC）
+npm run context-catalog:check   # 内置策展表 × models.dev 上游 + live 目录（联网；漂移退出码 1；定时档每周一 05:05 UTC）
 ```
 
 - **改了契约/接缝文件，跑全量**。`src/shared/*`、`client.js`、`lib/index.js` 以及被多个模块消费的文件，消费者不可枚举——按域裁剪会漏掉跨域契约。判断标准：这个文件的消费者我数得清吗？数不清就全量。
@@ -293,6 +294,7 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 | 加新路由 | `src/host/routes/` 对应文件 + `src/host/routes/paths.ts` + `src/client/const.ts` |
 | 改凭据存储 | `src/host/ms-auth.ts` |
 | 改模型能力判定 | `src/host/llm-models.ts` + `src/host/context-catalog.ts` |
+| 查策展表是否落后于上游 | `npm run context-catalog:check`（联网 diff，红了改 `src/host/context-catalog.ts`） |
 | 改出图逻辑 | `src/host/draw-runtime.ts` + `src/host/draw-register.ts` |
 | 改投稿副本 / 查市场收录漂移 | `awesome-dsh-plugin-submission/` + `test/submission-drift.mjs`（联网）+ `test/submission-drift.test.mjs`（离线夹具）+ `test/market-entry.test.mjs`（市场规则合规） |
 | 查市场规则漂移（上游改了类别表/键白名单） | `npm run market-rules:check`（联网，比对上游原文）+ `test/helpers/market-rules.mjs`（手抄镜像）+ `tools/check-market-rules.mjs` |
@@ -319,7 +321,7 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 - **Git Bash 的 `/tmp` 与 Windows Python 不通用**：bash heredoc 写 `/tmp/x`，Windows 的 python 打开 `/tmp/x` 是 FileNotFoundError（两边看到的不是同一个目录）。跨 shell 传临时文件用品仓内相对路径（如 `.x.tmp`），用完即删、别提交。
 - **`npm run build` 必须排在跑全量门禁之前**：build-gate（`run-all.mjs` 末尾那道）按设计抓「改了 src 未重建」。把 build 串在 `node test/run-all.mjs` 后面，等于让门禁先红一次再绿——不是 flaky，是顺序错了。改 `src/` 后的正确顺序：build → 全量 → typecheck。
 - **别字节扫宿主 `app.asar`**：那是一个 121 MB 的单文件包，绝大部分是打包的第三方库；`readFileSync().toString("utf8")` 之后 `indexOf` 某个 UI 字面串，命中率≈噪声率（2026-10-18 找 GUI 底部「思考×N · 工具×N」那一行，跑了 9 个脚本、约 10 分钟、零有效命中，命中的全是 katex 的 `×` 实体表和轨迹表的关闭按钮）。要查宿主侧事实，**先解包再读具体条目**（`npx asar list <asar>` 找路径 → `npx asar extract-file` 取那一个文件），或直接读 `resources/app.asar.unpacked/dsh/` 子树；宿主 i18n 真值在 asar 内的 `column.*` / `message.turnProcess.*` 附近，不在渲染拼串里。
-- **本机联网要加 `--use-system-ca`**：这台开发机在 TLS 中间人后面，node 自带 CA 池不认那个证书，于是 `test/submission-drift.mjs` 与 `tools/check-market-rules.mjs` **两个端点都** `fetch failed`（不只 raw 那个）。加系统证书池就通：`node --use-system-ca test/submission-drift.mjs`。**「取不到上游」不等于「上游没变」**——两个脚本取不到时都退出 0 并明说本轮什么都没比对，别把那个 0 读成「一致」。
+- **本机联网要加 `--use-system-ca`**：这台开发机在 TLS 中间人后面，node 自带 CA 池不认那个证书，于是 `test/submission-drift.mjs`、`tools/check-market-rules.mjs` 与 `tools/check-context-catalog.mjs` **三个端点都** `fetch failed`（不只 raw 那个）。加系统证书池就通：`node --use-system-ca test/submission-drift.mjs`。**「取不到上游」不等于「上游没变」**——两个脚本取不到时都退出 0 并明说本轮什么都没比对，别把那个 0 读成「一致」。
 
 ---
 
@@ -353,6 +355,7 @@ test/
 ├── doctor.test.mjs          # 盘点工具
 ├── credentials.test.mjs     # 凭据存储
 ├── context-catalog.test.mjs # 策展表
+├── context-catalog-drift.test.mjs # 策展表漂移检查器（纯逻辑判定 + CLI 退出码，零网络）
 ├── codes.test.mjs           # 错误分类
 ├── config.test.mjs          # 配置解析
 ├── catalog.test.mjs         # 模型目录
