@@ -32,12 +32,24 @@
  * 数据复用面板的同一个轮询内核（`useSnapshotPolling`），不新开接口、不新列路由：
  * 胶囊与面板读同一份快照，失败降级也一致（保留上次数值并标「上次数据」）。
  *
+ * **可展开**（0.6.6）：胶囊本体是一个 `<button aria-haspopup="dialog">`，点开
+ * 在同层弹出一个 `role="dialog"` 面板，把正文那两段摊成两行、补上口径注脚与
+ * 读取时间，并列出「本机首次见到的模型」。面板向上弹（`bottom: 100%`）——
+ * 胶囊在输入框工具栏，向下会盖住正在打的草稿。点外面或 Escape 关（见
+ * {@link useDismissOn}），没有 portal：宿主那层行容器不设 overflow，绝对定位
+ * 能自然溢出。
+ *
+ * **第三段「· N 新模型」**：只在有时才画。口径是「本机首次见到」而不是
+ * 「网关新增」——官方模型列表没有 `listedSince`，本插件唯一能证明的是自己的
+ * 状态文件里第一次记到它是什么时候。这条纪律与 sensenova 的同一处标记一致
+ * （两仓同一套 ADR 口径），文案里也明说了（`composer.newModelsNote`）。
+ *
  * 样式：本组件不注入样式表，全部外观是 inline style，取自 `styles.ts` 的
  * `S.pill*` 一族——那一族按**宿主工具栏**的尺度定（28px 高 / 12px 字 / 无框 /
  * 透明底），不按本插件卡片自己的 13px 框按钮尺度。`className` 只作测试选择器。
  * @module dsh-connect-modelscope-token-plan/client/composer-usage-pill
  */
-import { h } from "./runtime.ts";
+import { h, useState, useEffect, useCallback, useRef } from "./runtime.ts";
 import { S } from "./styles.ts";
 import { count, format, isoTime, statedCadenceMs } from "./format.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
@@ -210,16 +222,183 @@ function titleOf(props: {
 }
 
 /**
+ * 面板的 DOM id。`aria-controls` 只在面板真挂上时指过来——指向一个不存在的
+ * 节点是坏引用，所以那个属性是条件渲染的（同 sensenova 的裁定）。
+ */
+const POPOVER_ID = "dsh-modelscope-composer-pill-popover";
+
+/**
+ * 「本机首次见到的模型」清单：`snapshot.provider.newModelIds` 的净味版。
+ *
+ * 三道过滤都是承重的：
+ *   - 非数组（老 Host / 降级快照）→ 空清单，不抛；
+ *   - 非字符串 / 空串 → 丢掉，否则面板会画出一个空名字的「新模型」；
+ *   - 去重 → Host 侧已经去过重，但客户端不能依赖对端，重复项会让「3 个新模型」
+ *     变成 4 行同名。
+ */
+export function newModelsOf(snapshot: Snapshot | null | undefined): string[] {
+  const raw = snapshot?.provider?.newModelIds;
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const value of raw) {
+    if (typeof value !== "string") continue;
+    const id = value.trim();
+    if (id === "" || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+/**
+ * 点面板外面或按 Escape 关面板。
+ *
+ * 三处细节各有理由：
+ *   - `pointerdown` 而不是 `click`：`click` 触发时按钮自己的 onClick 已经跑过，
+ *     一个把触发器算作「里面」的 click 监听会先关再被 toggle 打开，面板永远关不掉；
+ *   - 包含判定读**锚节点**而不是面板：点触发器本身是一次 toggle，把它算作「里面」
+ *     才不会和 toggle 抢；
+ *   - 鸭子类型判 `nodeType` 而不是 `instanceof Node`：本模块在 jsdom 里也跑，
+ *     而 jsdom 只把 `document` 镜像进 Node realm，`Node` 构造函数在那儿不存在。
+ *
+ * `open === false` 时不挂监听（没有面板要关，挂上就是白跑）。
+ */
+function useDismissOn(open: boolean, close: () => void, anchorRef: { current: unknown }) {
+  useEffect(() => {
+    if (!open) return;
+    // 没有 document 的宿主（裸 Node 挂载）只有触发器自身的 toggle 这一条关闭路径，
+    // 这里绝不能抛。
+    if (typeof document === "undefined" || !("addEventListener" in document)) return;
+    const nodeLike = (value: unknown): value is { nodeType: number } =>
+      typeof value === "object" && value !== null && typeof (value as { nodeType?: unknown }).nodeType === "number";
+    const anchorLike = anchorRef.current as { contains?: (node: unknown) => boolean } | null;
+    const insideAnchor = (target: unknown) =>
+      nodeLike(target) && typeof anchorLike?.contains === "function" && anchorLike.contains(target);
+    const onPointerDown = (event: Event) => {
+      if (insideAnchor((event.target as EventTarget | null))) return;
+      close();
+    };
+    const onKeyDown = (event: Event) => {
+      if ((event as KeyboardEvent).key !== "Escape") return;
+      close();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, close, anchorRef]);
+}
+
+/**
+ * 展开面板：把胶囊正文那两段摊成两行，再补胶囊装不下的东西（口径注脚、
+ * 读取时间、新模型清单）。
+ *
+ * 面板是触发器的**兄弟**而不是子节点：`<button>` 里塞 `<div role="dialog">`
+ * 是非法嵌套（按钮的内容模型是 phrasing content，交互内容更糟）。锚壳用
+ * `<span>` 同理。
+ */
+function QuotaPopover(props: {
+  tt: Tt;
+  title: string;
+  stale: boolean;
+  available: number | null;
+  usedToday: number | null;
+  balance: BalanceData | null;
+  newModels: string[];
+}): unknown {
+  const { tt, title, stale, available, usedToday, balance, newModels } = props;
+  const fetchedAt = balance?.fetchedAt;
+  const failure = balance?.error;
+  return h(
+    "div",
+    {
+      className: "dsh-modelscope-composer-pill-popover",
+      id: POPOVER_ID,
+      role: "dialog",
+      "aria-label": title,
+      style: S.pillPopover
+    },
+    h(
+      "div",
+      { style: S.pillPopoverHead },
+      h("span", { style: S.pillPopoverTitle }, tt("composer.panelTitle")),
+      stale ? h("span", { style: S.pillPopoverStale }, tt("composer.stale")) : null
+    ),
+    // 两行读数各自带标签，而不是复用胶囊正文的「143 魔粒 · 今日本地 7 次」：
+    // 面板有空间，把口径写在每一行的标签里比让读者回忆正文的排布更省事。
+    h(
+      "div",
+      { style: S.pillPopoverRow },
+      h(
+        "div",
+        { style: S.pillPopoverRowLine },
+        h("span", { style: S.pillPopoverLabel }, tt("composer.panelBalance")),
+        h("span", { style: S.pillPopoverFigure }, balanceText(available, tt))
+      )
+    ),
+    h(
+      "div",
+      { style: S.pillPopoverRow },
+      h(
+        "div",
+        { style: S.pillPopoverRowLine },
+        h("span", { style: S.pillPopoverLabel }, tt("composer.panelCalls")),
+        h("span", { style: S.pillPopoverFigure }, usedToday === null ? "—" : format(tt("composer.localCalls"), { calls: count(usedToday) }))
+      )
+    ),
+    // 新模型行只在真的有时才出现：一个恒亮的「0 新模型」会变成背景噪声，
+    // 而它的价值全在「有」的那几轮。
+    newModels.length === 0
+      ? null
+      : h(
+          "div",
+          { style: S.pillPopoverRow },
+          h(
+            "div",
+            { style: S.pillPopoverRowLine },
+            h("span", { style: S.pillPopoverLabel }, tt("composer.newModelsRow")),
+            h("span", { style: S.pillPopoverFigure }, newModels.join(tt("composer.newModelsSep")))
+          )
+        ),
+    // 失败原文与读取时间都放底注：面板的第一屏是读数，不是诊断。
+    failure !== undefined && typeof failure === "string" && failure !== ""
+      ? h("div", { style: S.pillPopoverNote }, format(tt("balance.unavailable"), { error: failure }))
+      : null,
+    fetchedAt !== undefined && typeof fetchedAt === "string" && fetchedAt !== ""
+      ? h("div", { style: S.pillPopoverNote }, format(tt("balance.fetched"), { time: isoTime(fetchedAt) }))
+      : null,
+    h("div", { style: S.pillPopoverNote }, tt("composer.panelNote")),
+    // 第二行底注只说「新」的口径。与上面那条分开：panelNote 说读数来源，
+    // 这条说一个词的定义，揉成一段会让「新模型」读起来像告警。
+    newModels.length === 0 ? null : h("div", { style: S.pillPopoverNote }, tt("composer.newModelsNote"))
+  );
+}
+
+/**
  * 内层：只在会话选中本插件的模型时挂载。轮询 hook 在这里，被挂/摘即起停——
  * 非归属 provider 的会话不发任何请求。
+ *
+ * 展开状态也住在这里（而不是外层门控）：外层每帧都要调 `useProjection` 才能
+ * 决定挂谁，把 `useState` 加到外层会让「非归属 → 归属」这个切换改变 hook 顺序
+ * （外层先 return null 再挂内层，Rules of Hooks 会炸）。内层被挂/摘时它自己的
+ * hook 序是完整的，所以 open 放这里安全。
  */
 export function ModelscopePill(props: { tt: Tt }): unknown {
   const { tt } = props;
   const { data, error, loadedOnce, updatedAt } = useSnapshotPolling();
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<unknown>(null);
+  const close = useCallback(() => setOpen(false), []);
+  const toggle = useCallback(() => setOpen((current) => !current), []);
+  useDismissOn(open, close, anchorRef);
 
   const balance = data?.balance ?? null;
   const available = availableOf(balance);
   const usedToday = usedTodayOf(data);
+  const newModels = newModelsOf(data);
 
   // cadence 跟 Host 声明走（`pollSeconds`），不跟常量走：Host 改声明周期，
   // 「多久算陈旧」必须跟着改，否则退避期里每一帧都误报陈旧。
@@ -230,7 +409,7 @@ export function ModelscopePill(props: { tt: Tt }): unknown {
 
   const title = titleOf({ tt, balance, usedToday, stale });
 
-  return h(
+  const trigger = h(
     "button",
     {
       type: "button",
@@ -238,6 +417,12 @@ export function ModelscopePill(props: { tt: Tt }): unknown {
       className: "dsh-modelscope-composer-pill",
       title,
       "aria-label": title,
+      // 触发器**拥有**一个面板（不是菜单，所以不承诺方向键导航）；
+      // aria-controls 只在面板真挂上时才指过去。
+      "aria-expanded": open,
+      "aria-haspopup": "dialog",
+      "aria-controls": open ? POPOVER_ID : undefined,
+      onClick: toggle,
       style: S.pillTrigger
     },
     h("span", {
@@ -260,6 +445,39 @@ export function ModelscopePill(props: { tt: Tt }): unknown {
     ),
     stale
       ? h("span", { className: "dsh-modelscope-composer-pill-stale", style: S.pillStale }, ` · ${tt("composer.stale")}`)
+      : null,
+    // 第三段「· N 新模型」。**只在有时才画**：一个恒亮的「0 新模型」是噪声，
+    // 而这一段的全部价值就是「有新的」那几轮。
+    //
+    // 措辞是「新模型」而不是「新增模型」：本机能证明的只有「本机第一次记到它」，
+    // 官方模型列表没有 `listedSince`，把本机观察说成上游事实就是造假。
+    newModels.length === 0
+      ? null
+      : h(
+          "span",
+          {
+            className: "dsh-modelscope-composer-pill-new",
+            style: S.pillNewTag,
+            // 胶囊正文只有 N，名字在 tooltip 里给前三个：宽度预算不允许铺开
+            // 一整个清单，而「有 3 个」这个事实本身已经够触发一次点击。
+            title: `${tt("composer.newModelsTitle")}${newModels.slice(0, 3).join(tt("composer.newModelsSep"))}${
+              newModels.length > 3 ? "…" : ""
+            }`
+          },
+          ` · ${newModels.length} ${tt("composer.newModels")}`
+        )
+  );
+
+  return h(
+    "span",
+    {
+      className: "dsh-modelscope-composer-pill-anchor",
+      style: S.pillPopoverAnchor,
+      ref: anchorRef
+    },
+    trigger,
+    open
+      ? h(QuotaPopover, { tt, title, stale, available, usedToday, balance, newModels })
       : null
   );
 }

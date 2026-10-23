@@ -208,10 +208,10 @@ export const S = {
     fontSize: 12,
     fontWeight: 600,
     lineHeight: "18px",
-    // 胶囊本身没有点击行为（tooltip 才是它的内容），所以不给手型光标，
-    // 也不给它按钮的按下反馈——但保留可聚焦：键盘用户聚焦后能读到
-    // aria-label 里的来源与口径说明。
-    cursor: "default",
+    // 胶囊现在**可点**（点开是详情面板，见 composer-usage-pill.ts），所以给手型
+    // 光标——一个能点的东西不给手型，用户根本不会去点它。键盘用户聚焦后既能
+    // 读到 aria-label 里的口径说明，也能用 Enter/空格展开面板。
+    cursor: "pointer",
     flexShrink: 0,
     whiteSpace: "nowrap"
   },
@@ -227,5 +227,44 @@ export const S = {
   pillTierExhausted: "#ef4444",
   pillTierUnknown: "#9ca3af",
   // 只有余额读数确实为 0 时才把正文染成告警色——健康读数保持 inherit。
-  pillTierExhaustedText: { color: "var(--dsw-alias-state-error-primary)" }
+  pillTierExhaustedText: { color: "var(--dsw-alias-state-error-primary)" },
+  // 「· N 新模型」这一段的墨色：它是一条**旁注**，不是读数，所以压到 secondary
+  // 一档——不能让「2 新模型」比 143 魔粒更抢眼。
+  pillNewTag: { color: "var(--dsw-alias-label-secondary)", flexShrink: 0 },
+  // 展开面板的定位锚。`position: relative` 是面板 `bottom: 100%` 的参照系；
+  // `inline-flex` 让锚与按钮同宽，面板的 `right: 0` 才对齐到胶囊右缘。
+  pillPopoverAnchor: { position: "relative", display: "inline-flex" },
+  // 面板本体。**向上弹**（`bottom: "100%"`）而不是向下：胶囊在输入框工具栏，
+  // 向下会盖住正在打的草稿。宿主那层行容器不设 `overflow`，所以绝对定位能溢出，
+  // 不需要 portal，也不需要跟宿主抢 z-index——100 只是压过同层的兄弟胶囊。
+  pillPopover: {
+    position: "absolute",
+    bottom: "100%",
+    right: 0,
+    zIndex: 100,
+    border: "1px solid var(--dsw-alias-border-l1)",
+    borderRadius: 10,
+    background: "var(--dsw-alias-bg-layer-1)",
+    boxShadow: "0 6px 24px rgba(0, 0, 0, 0.18)",
+    width: "min(320px, calc(100vw - 32px))",
+    padding: "10px 12px",
+    marginBottom: 8,
+    textAlign: "left",
+    color: "var(--dsw-alias-label-primary)",
+    fontSize: 12,
+    lineHeight: "18px",
+    fontFamily: "inherit",
+    boxSizing: "border-box"
+  },
+  pillPopoverHead: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 8 },
+  pillPopoverTitle: { fontSize: 12, fontWeight: 600, color: "var(--dsw-alias-label-primary)" },
+  // 面板里的「上次数据」比胶囊正文里的更淡：面板已经把读数摊开了，
+  // 这一行只是提醒「摊开的这些是旧的」，不需要再强调一次。
+  pillPopoverStale: { color: "var(--dsw-alias-label-tertiary)", fontStyle: "italic" },
+  pillPopoverRow: { padding: "6px 0" },
+  pillPopoverRowLine: { display: "flex", alignItems: "baseline", gap: 8 },
+  pillPopoverLabel: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" },
+  pillPopoverFigure: { marginLeft: "auto", fontVariantNumeric: "tabular-nums", color: "var(--dsw-alias-label-primary)" },
+  // 面板底注：来源、口径、失败原文都放这里，用最淡的一档。
+  pillPopoverNote: { marginTop: 8, color: "var(--dsw-alias-label-tertiary)" }
 };

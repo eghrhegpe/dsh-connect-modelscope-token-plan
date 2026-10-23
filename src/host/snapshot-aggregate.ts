@@ -50,8 +50,8 @@ async function soft<T>(promise: Promise<T>): Promise<{ ok: true; value: T } | { 
 }
 
 /** 聚合快照 body。wiring 子集见 routes/snapshot.ts 的 Pick。 */
-export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "tokenStore" | "usageStore" | "inference" | "providerStore" | "drawStore" | "usagePrefsStore" | "publisher" | "logger">): Promise<Snapshot> {
-  const { settings, tokenStore, usageStore, inference, providerStore, drawStore, usagePrefsStore, publisher } = wiring;
+export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "tokenStore" | "usageStore" | "inference" | "providerStore" | "drawStore" | "usagePrefsStore" | "rosterSeenStore" | "publisher" | "logger">): Promise<Snapshot> {
+  const { settings, tokenStore, usageStore, inference, providerStore, drawStore, usagePrefsStore, rosterSeenStore, publisher } = wiring;
 
   // 趋势的显示窗口**先**裁决出来：面板覆盖 > 配置默认，再夹进保留窗口
   // （resolveWindowDays 一处算完）。这一步必须排在拉 `trend` 之前——它是 trend()
@@ -133,6 +133,11 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
   // 配置默认——不说出口，「保存的显示窗口被忽略」就是「从未保存过」。
   const windowNote = await soft((async () => usagePrefsStore.versionNote())());
   if (windowNote.ok && windowNote.value !== null) shapeWarnings.push(windowNote.value);
+  // roster-seen.json 同一条纪律，但后果比上面三份更直接：读侧宽容成空表，
+  // 「首见表被忽略」在面板上呈现成「没有新模型」——一个看起来完全正常的答案。
+  // 不说出口，用户永远不会知道标记为什么消失了。
+  const rosterNote = await soft((async () => rosterSeenStore.versionNote())());
+  if (rosterNote.ok && rosterNote.value !== null) shapeWarnings.push(rosterNote.value);
 
   // 策展上下文窗口表是静态知识（context-catalog.ts），目录会上下架而表不会自己
   // 更新。过期不是错误——表里的值往往仍然正确——但「不再有核对背书」这件事该
@@ -146,8 +151,7 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     );
   }
 
-  // ── provider 块（M4 §11）──
-  // 开关（面板值优先，patch 默认兜底）+ 注册状态 + 目录 roster，整块软失败：
+  // ── provider 块（M4 §11）──  // 开关（面板值优先，patch 默认兜底）+ 注册状态 + 目录 roster，整块软失败：
   // 任何一路读不到都走降级形状，绝不 ok:false。roster 用 llm-models 的
   // rosterWithAvailability——面板保留额度耗尽的模型（灰显），picker 才丢弃它们，
   // 两处口径不同是故意的。**耗尽集合的唯一生产者是 provider-reconciler**
@@ -187,6 +191,13 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     // 没有再退回目录原因。**不复用 models 的 shapeWarnings 抑制规则**：那条抑制是
     // 为了不往形状漂移横幅里塞网络抖动，而这里正是用户在看的那个块。
     const catalogNote = models.ok ? null : `模型目录读不到：${models.error}`;
+    // 「本机第一次见到」还算新的模型。**只读**：写发生在收敛器（provider-reconcile）
+    // 拿到目录那一刻——这条读路径每个面板轮询都会跑，顺手写会把「谁是新模型」
+    // 变成「谁最近一次被轮询到」。
+    //
+    // 读失败降级为空数组：胶囊少画一段，比整块 provider 状态消失轻得多；原因
+    // 已由上面的 rosterNote 与收敛器的 warn 各自记档。
+    const newModelIds = await rosterSeenStore.fresh().catch(() => [] as string[]);
     return {
       enabled,
       source,
@@ -198,6 +209,7 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
       allowed: allowedList.mode,
       enabledIds,
       contextWindow,
+      newModelIds,
       roster
     } satisfies Snapshot["provider"];
   })());

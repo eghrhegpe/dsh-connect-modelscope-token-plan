@@ -16,10 +16,11 @@ import type { Wiring } from "../types.ts";
 
 /**
  * 注册快照路由。wiring 子集：settings / configError / tokenStore /
- * usageStore / inference / providerStore / publisher / logger。
+ * usageStore / inference / providerStore / drawStore / usagePrefsStore /
+ * rosterSeenStore / publisher / logger。
  * @returns {Function} off() 注销回调。
  */
-export function registerSnapshotRoute(ctx: any, wiring: Pick<Wiring, "settings" | "configError" | "tokenStore" | "usageStore" | "inference" | "providerStore" | "drawStore" | "usagePrefsStore" | "publisher" | "logger">) {
+export function registerSnapshotRoute(ctx: any, wiring: Pick<Wiring, "settings" | "configError" | "tokenStore" | "usageStore" | "inference" | "providerStore" | "drawStore" | "usagePrefsStore" | "rosterSeenStore" | "publisher" | "logger">) {
   const { settings, configError } = wiring;
 
   return ctx.webServer.register({

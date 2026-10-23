@@ -76,6 +76,7 @@ import { createFileProviderStore } from "./provider-store.ts";
 import { createFileDrawStore } from "./draw-store.ts";
 import { createDrawJobs } from "./draw-jobs.ts";
 import { createFileUsagePrefsStore } from "./usage-prefs-store.ts";
+import { createFileRosterSeenStore } from "./roster-seen-store.ts";
 import { registerDrawTool } from "./draw-register.ts";
 import { resetDrawToolNote } from "./draw-tool-state.ts";
 import { createProviderPublisher } from "./provider-publish.ts";
@@ -151,6 +152,11 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   const drawJobs = createDrawJobs({ resumeWindowMs: settings.drawTimeoutMs });
   // 用量面板的显示偏好（趋势图画多少天）。与 usageStore 分开：那是数据，这是偏好。
   const usagePrefsStore = createFileUsagePrefsStore({ profile, logger: ctx.logger });
+  // 「本机第一次见到这些模型是什么时候」的首见表（胶囊那句「· N 新模型」的
+  // 事实源）。**写只在收敛器里**（下面 createProviderReconciler 的
+  // rosterSeenStore 缝），快照与 provider 路由只读——理由见 roster-seen-store.ts
+  // 与 types.ts 的 Wiring 注释。
+  const rosterSeenStore = createFileRosterSeenStore({ profile, logger: ctx.logger });
   const publisher = createProviderPublisher({
     settings,
     panelSwitch: () => providerStore.enabled(),
@@ -192,6 +198,10 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     // 与两个面板 roster 消费的都是它。推断规则是纯函数 exhaustedModelIds
     // （usage-store.ts），窗口在 settings.exhaustionWindowMinutes。
     usageEvents: () => usageStore.events(),
+    // 首见时间的**唯一写入口**：收敛器拿到完整目录那一刻记一笔（见
+    // provider-reconcile.ts 的 runOnce）。读路径（快照聚合 / provider 路由）
+    // 只 fresh()，绝不在这里顺手写——那会把「谁是新模型」变成「谁最近被读到」。
+    rosterSeenStore,
     logger: ctx.logger
   });
 
@@ -205,6 +215,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     drawStore,
     drawJobs,
     usagePrefsStore,
+    rosterSeenStore,
     publisher,
     reconcile,
     logger: ctx.logger

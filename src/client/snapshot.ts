@@ -174,6 +174,10 @@ export const DEGRADED_PROVIDER: ProviderStatus = Object.freeze({
   allowed: "all",
   enabledIds: [],
   contextWindow: null,
+  // 降级块没有首见表可说：空数组 = 「没有新的」，与 Host 侧「窗口内没有」同形。
+  // 不用 null——`newModelIds` 的语义里没有「不知道」这一档，而「不知道」在这里
+  // 由整块缺席表达（`providerOf(undefined)` 才走到本对象）。
+  newModelIds: [],
   roster: []
 });
 
@@ -235,6 +239,11 @@ export function providerOf(raw: unknown): ProviderStatus {
     contextWindow: typeof p.contextWindow === "number" && Number.isFinite(p.contextWindow) && p.contextWindow > 0
       ? p.contextWindow
       : null,
+    // 旧 Host 不带这个字段 → 空数组（胶囊不画第三段）。不从这里推「谁可能是新的」：
+    // 首见时间是历史，Client 手上没有任何东西能重建它。
+    newModelIds: Array.isArray(p.newModelIds)
+      ? (p.newModelIds as unknown[]).map((id) => String(id ?? "")).filter((id) => id !== "")
+      : [],
     roster
   };
 }

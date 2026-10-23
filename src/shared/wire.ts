@@ -116,6 +116,16 @@ export interface ProviderStatus {
    * 未声明窗口的模型；descriptor / roster / 签名都在打标后派生。
    */
   contextWindow: number | null;
+  /**
+   * 「本机第一次见到」还算新的模型 id（首见戳在 7 天窗口内，按首见时间升序）。
+   *
+   * 口径是**本机首次见到**，不是「网关新增」：上游 `/v1/models` 不提供上架时间，
+   * 本插件没有任何字段能证实某个模型是这周才上的。空数组 = 没有新的（或首见表
+   * 被读作空——那种情况由 `shapeWarnings` 里的 roster-seen 说明说出口）。
+   *
+   * 只读：写发生在收敛器拿到目录那一刻，快照与 provider 路由从不写它。
+   */
+  newModelIds: string[];
   /** 面板清单：每行带可用性与额度耗尽标记。 */
   roster: {
     id: string;

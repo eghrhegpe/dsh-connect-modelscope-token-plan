@@ -48,7 +48,8 @@ if (SRC_MODE) {
       balanceText: pill.balanceText,
       callsText: pill.callsText,
       readingText: pill.readingText,
-      staleOf: pill.staleOf
+      staleOf: pill.staleOf,
+      newModelsOf: pill.newModelsOf
     },
     components: { ComposerUsagePill: pill.ComposerUsagePill, ModelscopePill: pill.ModelscopePill }
   };
@@ -122,12 +123,29 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
   assert.ok(tree, "归属会话必须挂内层胶囊");
   assert.equal(typeof tree.type, "function", "外层返回的是内层组件（hook 都在内层，切模型不踩 hook 顺序）");
   const inner = tree.type({ tt: ttZh });
-  assert.equal(inner.type, "button", "内层渲染一个 button");
-  assert.equal(inner.props.className, "dsh-modelscope-composer-pill", "className 是测试选择器，别改名");
-  const flat = JSON.stringify(inner);
+  // 内层现在返回**锚壳**（`<span>`），触发器是它唯一的子节点：面板要跟触发器
+  // 做兄弟（`<button>` 里塞 `role="dialog"` 是非法嵌套），所以外面多一层锚。
+  // 注意替身 createElement 把 children 放在 `.children` 上（真 React 放
+  // `props.children`），所以这里读 `.children`。
+  assert.equal(inner.type, "span", "内层渲染一个锚壳（面板必须是触发器的兄弟）");
+  assert.equal(inner.props.className, "dsh-modelscope-composer-pill-anchor", "锚壳 className 是测试选择器，别改名");
+  const trigger = inner.children[0];
+  assert.equal(trigger.type, "button", "锚壳里第一个子节点是触发器 button");
+  assert.equal(trigger.props.className, "dsh-modelscope-composer-pill", "className 是测试选择器，别改名");
+  assert.equal(trigger.props["aria-haspopup"], "dialog", "触发器声明它拥有一个面板");
+  assert.equal(trigger.props["aria-expanded"], false, "默认收起");
+  assert.equal(trigger.props["aria-controls"], undefined, "收起时不指 aria-controls（指向不存在的节点是坏引用）");
+  assert.equal(typeof trigger.props.onClick, "function", "点触发器必须能展开");
+  const flat = JSON.stringify(trigger);
   assert.ok(flat.includes("…"), "首帧还没读到数据时正文是「读取中」，不是 0");
   assert.ok(!flat.includes("0 魔粒"), "首帧绝不能把「还没读到」画成 0 魔粒");
-  assert.ok(inner.props.title.includes(zh["composer.pillTitle"]), "tooltip 必须带标题那句");
+  assert.ok(trigger.props.title.includes(zh["composer.pillTitle"]), "tooltip 必须带标题那句");
+  // 默认收起：面板不挂（锚壳的第二个 child 是 null——替身 createElement 不
+  // 过滤 null 子节点，真 React 会把它略过）。
+  assert.equal(inner.children.length, 2, "锚壳恰好两个子节点位：触发器 + 面板位");
+  assert.equal(inner.children[1], null, "收起时面板位是 null");
+  // 替身 React 下数据恒为 null → newModelIds 为空 → 第三段不画。
+  assert.ok(!flat.includes(zh["composer.newModels"]), "没有新模型时不画第三段（0 新模型是噪声）");
 }
 
 // ── §3 口径：null ≠ 0、定档、文案、陈旧 ─────────────────────────────────────
@@ -197,12 +215,47 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
   assert.ok(!zh["composer.balanceUnit"].includes("本地"), "余额段不标本地：它是官方数据");
 
   const S = panel.styles;
-  for (const name of ["pillTrigger", "pillDot", "pillPlan", "pillStale", "pillTierOk", "pillTierExhausted", "pillTierUnknown", "pillTierExhaustedText"]) {
+  for (const name of [
+    "pillTrigger",
+    "pillDot",
+    "pillPlan",
+    "pillStale",
+    "pillTierOk",
+    "pillTierExhausted",
+    "pillTierUnknown",
+    "pillTierExhaustedText",
+    // 0.6.6 展开面板族 + 第三段。
+    "pillNewTag",
+    "pillPopoverAnchor",
+    "pillPopover",
+    "pillPopoverHead",
+    "pillPopoverTitle",
+    "pillPopoverStale",
+    "pillPopoverRow",
+    "pillPopoverRowLine",
+    "pillPopoverLabel",
+    "pillPopoverFigure",
+    "pillPopoverNote"
+  ]) {
     assert.ok(S[name] !== undefined, `styles.ts 必须有 ${name}（胶囊外观全在这一族里）`);
   }
   // 宿主工具栏尺度。
   assert.equal(S.pillTrigger.height, 28, "胶囊按宿主工具栏的 28px 定尺度");
   assert.equal(S.pillTrigger.display, "inline-flex");
+  // 胶囊现在可点（点开详情面板），所以光标必须是手型——一个能点的东西不给
+  // 手型，用户根本不会去点它。
+  assert.equal(S.pillTrigger.cursor, "pointer", "可点就必须给手型光标");
+  // 面板向上弹：胶囊在输入框工具栏，向下会盖住正在打的草稿。
+  assert.equal(S.pillPopover.bottom, "100%", "面板必须向上弹，不许盖住草稿");
+  assert.equal(S.pillPopover.position, "absolute");
+  assert.equal(S.pillPopover.right, 0, "面板右缘对齐胶囊右缘");
+  assert.equal(S.pillPopoverAnchor.position, "relative", "锚必须是面板绝对定位的参照系");
+  assert.equal(S.pillPopoverAnchor.display, "inline-flex");
+  // 面板不写死主题色（同胶囊正文的纪律）：底色与字色都取宿主 token。
+  assert.ok(String(S.pillPopover.background).includes("--dsw-alias-"), "面板底色取宿主 token，不写死");
+  assert.ok(String(S.pillPopover.color).includes("--dsw-alias-"), "面板字色取宿主 token，不写死");
+  // 第三段是旁注，不能比读数更抢眼：secondary 一档，且不许是正文字色。
+  assert.ok(String(S.pillNewTag.color).includes("--dsw-alias-label-secondary"), "「N 新模型」压暗到 secondary");
   // 这条是渲染坑的防线：写成 border:"none" 时 UA 的 border-image 仍会画出框；
   // borderStyle:"none" + borderWidth:0 分开写才是真的无框。
   assert.equal(S.pillTrigger.borderStyle, "none", "无框必须走 borderStyle（不是 border 简写）");
@@ -210,6 +263,59 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
   assert.equal(S.pillTrigger.border, undefined, "不要用 border 简写——UA border-image 会画出一个框");
   assert.equal(S.pillTierExhaustedText.color, "var(--dsw-alias-state-error-primary)", "耗尽档正文取宿主告警 token，不写死 hex");
   assert.equal(new Set([S.pillTierOk, S.pillTierExhausted, S.pillTierUnknown]).size, 3, "三档墨色必须互不相同");
+}
+
+// ── §5 「· N 新模型」：清单净味与口径 ───────────────────────────────────────
+{
+  const { newModelsOf } = helpers;
+
+  // 老 Host / 降级快照：没有这个字段时是空清单，不是抛。
+  assert.deepEqual(newModelsOf(null), []);
+  assert.deepEqual(newModelsOf(undefined), []);
+  assert.deepEqual(newModelsOf({}), []);
+  assert.deepEqual(newModelsOf({ provider: {} }), []);
+  assert.deepEqual(newModelsOf({ provider: { newModelIds: null } }), []);
+  assert.deepEqual(newModelsOf({ provider: { newModelIds: "Qwen/Qwen3-8B" } }), [], "字符串不是清单");
+  assert.deepEqual(newModelsOf({ provider: { newModelIds: { a: 1 } } }), [], "对象不是清单");
+
+  // 正常清单原样保留（含顺序——Host 侧按首见时间升序给）。
+  assert.deepEqual(newModelsOf({ provider: { newModelIds: ["b", "a"] } }), ["b", "a"]);
+
+  // 三道净味：非字符串、空串/纯空白、重复。任何一条漏掉都会让面板画出一个
+  // 空名字的行，或者把「3 个新模型」写成 4 行同名。
+  assert.deepEqual(newModelsOf({ provider: { newModelIds: ["a", null, "b"] } }), ["a", "b"], "非字符串丢掉");
+  assert.deepEqual(newModelsOf({ provider: { newModelIds: ["a", "", "   ", "b"] } }), ["a", "b"], "空串与纯空白丢掉");
+  assert.deepEqual(newModelsOf({ provider: { newModelIds: [" a ", "a", "b"] } }), ["a", "b"], "去重前先 trim");
+  assert.deepEqual(newModelsOf({ provider: { newModelIds: ["a", 1, "a"] } }), ["a"], "非字符串不参与去重判定");
+
+  // 口径文案：**不许**出现「新增 / new in gateway」这类把本机观察说成上游事实的措辞。
+  assert.equal(zh["composer.newModels"], "新模型");
+  assert.ok(zh["composer.newModelsNote"].includes("本机"), "中文注脚必须说清是「本机」首见");
+  assert.ok(!zh["composer.newModelsNote"].includes("网关新增"), "注脚不许写成「网关新增」");
+  assert.ok(zh["composer.newModelsNote"].includes("7"), "注脚必须写明窗口是 7 天");
+  assert.ok(en["composer.newModelsNote"].includes("this device"), "英文注脚同样要说 this device");
+  assert.ok(!en["composer.newModelsNote"].includes("newly added by"), "英文注脚不许写成上游新增");
+  assert.ok(zh["composer.newModelsTitle"].endsWith("："), "tooltip 前缀以全角冒号收尾（后面直接接名字）");
+  assert.ok(en["composer.newModelsTitle"].endsWith(": "), "英文 tooltip 前缀以「: 」收尾");
+
+  // 面板文案键：键集必须 zh/en 同时在场（en 是 typeof zh，缺键即编译错；这条是
+  // 运行期再兜一次，防止有人把 en 的值写成 undefined）。
+  for (const key of [
+    "composer.panelTitle",
+    "composer.panelBalance",
+    "composer.panelCalls",
+    "composer.panelNote",
+    "composer.newModels",
+    "composer.newModelsRow",
+    "composer.newModelsTitle",
+    "composer.newModelsSep",
+    "composer.newModelsNote"
+  ]) {
+    assert.equal(typeof zh[key], "string", `${key} 必须在 zh 里`);
+    assert.equal(typeof en[key], "string", `${key} 必须在 en 里`);
+    assert.ok(zh[key] !== "", `${key} 的 zh 不许是空串`);
+    assert.ok(en[key] !== "", `${key} 的 en 不许是空串`);
+  }
 }
 
 console.log("composer-pill.test.mjs: all checks passed");

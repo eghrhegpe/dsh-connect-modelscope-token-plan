@@ -108,6 +108,16 @@ export interface Wiring {
    * 旧构建重写会静默丢掉这个键。详见 usage-prefs-store.ts 头注。
    */
   usagePrefsStore: ReturnType<typeof import("./usage-prefs-store.ts").createFileUsagePrefsStore>;
+  /**
+   * 「本机第一次见到这个模型是什么时候」的首见表（`roster-seen.json`）。
+   *
+   * **写只发生在一处**：收敛器拿到目录那一刻调 `note()`。快照聚合与 provider
+   * 路由都只 `fresh()` 读——读路径若顺手补戳，一次面板轮询就能把「谁是新模型」
+   * 改写掉。这个不对称是有意的，别在路由里「顺手也记一下」。
+   *
+   * 口径是**本机首次见到**，不是网关新增（见 roster-seen-store.ts 头注）。
+   */
+  rosterSeenStore: ReturnType<typeof import("./roster-seen-store.ts").createFileRosterSeenStore>;
   /** provider 注册状态机（M4 §7）：publish/dispose/release 与 state。 */
   publisher: ReturnType<typeof import("./provider-publish.ts").createProviderPublisher>;
   /**

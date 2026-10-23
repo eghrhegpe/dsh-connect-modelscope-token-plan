@@ -558,6 +558,12 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
       windowDays: async () => null,
       versionNote: async () => "usage-prefs-state: usage-prefs.json holds version 99, which this build cannot read"
     },
+    // roster-seen.json 的 versionNote 是第四个消费者：标记被忽略时不说出口，面板
+    // 就会呈现成「没有新模型」——一个看起来完全正常的答案。
+    rosterSeenStore: {
+      fresh: async () => [],
+      versionNote: async () => "roster-seen-state: roster-seen.json holds version 99, which this build cannot read"
+    },
     publisher: { state: { enabledIds: [], llmAvailable: false, registered: false, error: null } },
     logger: { warn: () => {} }
   });
@@ -575,6 +581,10 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   assert.ok(
     body.shapeWarnings.some((w) => w.startsWith("usage-prefs-state:")),
     "usage-prefs.json 的版本说明必须进 shapeWarnings（与 provider / draw 同一条纪律）"
+  );
+  assert.ok(
+    body.shapeWarnings.some((w) => w.startsWith("roster-seen-state:")),
+    "roster-seen.json 的版本说明必须进 shapeWarnings——否则「标记被忽略」会呈现成「没有新模型」"
   );
 }
 
@@ -596,6 +606,8 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
     providerStore: { enabled: async () => null, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
     drawStore: { enabled: async () => null, modelId: async () => null, versionNote: async () => null },
     usagePrefsStore: { windowDays: async () => null, versionNote: async () => null },
+    // roster-seen.json 的两路（首见清单 / 版本说明）都是只读：空清单 = 没有新模型。
+    rosterSeenStore: { fresh: async () => [], versionNote: async () => null },
     publisher: { state: { enabledIds: [], llmAvailable: false, registered: false, error: null } },
     logger: { warn: () => {} }
   };
@@ -637,6 +649,8 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
     providerStore: { enabled: async () => null, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
     drawStore: { enabled: async () => null, modelId: async () => null, versionNote: async () => null },
     usagePrefsStore: { windowDays: async () => null, versionNote: async () => null },
+    // roster-seen.json 的两路（首见清单 / 版本说明）都是只读：空清单 = 没有新模型。
+    rosterSeenStore: { fresh: async () => [], versionNote: async () => null },
     publisher: { state: { enabledIds: [], llmAvailable: false, registered: false, error: null } },
     logger: { warn: () => {} }
   };
@@ -692,6 +706,8 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
     providerStore: { enabled: async () => null, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
     drawStore: { enabled: async () => null, modelId: async () => null, versionNote: async () => null },
     usagePrefsStore: { windowDays: async () => null, versionNote: async () => null },
+    // roster-seen.json 的两路（首见清单 / 版本说明）都是只读：空清单 = 没有新模型。
+    rosterSeenStore: { fresh: async () => [], versionNote: async () => null },
     // provider 块里唯一会真抛的一路：publisher 状态读不到。
     publisher: { get state() { throw new Error("publisher state unavailable"); } },
     logger: { warn: () => {} }
@@ -727,6 +743,8 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
     providerStore: { enabled: async () => true, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
     drawStore: { enabled: async () => null, modelId: async () => null, versionNote: async () => null },
     usagePrefsStore: { windowDays: async () => null, versionNote: async () => null },
+    // roster-seen.json 的两路（首见清单 / 版本说明）都是只读：空清单 = 没有新模型。
+    rosterSeenStore: { fresh: async () => [], versionNote: async () => null },
     // 本轮的「事实」：b/B 在推断窗口内出现过 quota 事件。
     publisher: { state: { enabledIds: [], llmAvailable: true, registered: true, error: null, unavailableIds: ["b/B"] } },
     logger: { warn: () => {} }
@@ -754,6 +772,8 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
     },
     providerStore: { enabled: async () => null, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
     usagePrefsStore: { windowDays: async () => null, versionNote: async () => null },
+    // roster-seen.json 的两路（首见清单 / 版本说明）都是只读：空清单 = 没有新模型。
+    rosterSeenStore: { fresh: async () => [], versionNote: async () => null },
     publisher: { state: { enabledIds: [], llmAvailable: false, registered: false, error: null } },
     logger: { warn: () => {} }
   };

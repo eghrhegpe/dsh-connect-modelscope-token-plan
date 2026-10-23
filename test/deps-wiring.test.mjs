@@ -136,8 +136,14 @@ function allSources() {
     }
   );
 
-  // 给挂载轮询（拉目录 → publish）几拍时间跑完它的 await 链。
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  // 给挂载轮询（拉目录 → 记首见 → publish）跑完它的 await 链。用**等到条件成立**
+  // 而不是固定睡 50ms：这条链上多了一次状态文件落盘（roster-seen.json，冷启动
+  // 要播种整个目录），固定窗口在满负载并行跑套件时会被挤爆成假红。等的是同一件
+  // 事（`asked > 0`），所以放宽的是等待时长，不是断言。
+  const deadline = Date.now() + 5000;
+  while (asked === 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
   for (const off of cleanups.splice(0)) off();
 
   assert.ok(asked > 0, "注入的 getLlm 必须真的被 publisher 调用（修复前它走 ctx.get，asked 恒为 0）");

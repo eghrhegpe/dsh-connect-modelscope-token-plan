@@ -120,13 +120,18 @@ let rosterOrder = [
 ];
 /** 余额是**可替换**的：胶囊那节要在同一棵树里切「为正 / 为 0 / 读不到」三种读数。 */
 let balanceFixture = { available: 143, total: 143, frozen: 0, fetchedAt: null, error: null };
+/**
+ * `provider.newModelIds` 是**可替换**的：胶囊那节要切「没有新的 / 有 2 个」两种态。
+ * 默认空——升级后头几轮就是这个状态（首轮收敛只播种，不宣布）。
+ */
+let newModelsFixture = [];
 const snapshotBody = () => ({
   ok: true, name: SLUG, version: "0.2.0", now: "2026-10-15T00:00:00Z", pollSeconds: 30, cacheSeconds: 60,
   token: { present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false, readError: null },
   balance: balanceFixture,
   quota: { daily: { usedLocal: 7 }, perModel: [], countingNote: "local-counting" },
   events: [], trend: { days: 14, buckets: [] }, models: { available: true, count: 5, sample: [A], error: null },
-  provider: { enabled: false, source: "config", llmAvailable: true, registered: false, error: null, modelCount: 5, enabledCount: 0, allowed: "all", enabledIds: [], roster: rosterOrder },
+  provider: { enabled: false, source: "config", llmAvailable: true, registered: false, error: null, modelCount: 5, enabledCount: 0, allowed: "all", enabledIds: [], contextWindow: null, newModelIds: newModelsFixture, roster: rosterOrder },
   draw: { enabled: false, source: "config", candidateIds: [], candidateCount: 0, preferredModel: null, preferredSource: "config", absentReason: null, mountPending: false, toolName: "modelscope_draw_image" },
   shapeWarnings: [], quotaError: null
 });
@@ -286,6 +291,83 @@ assert.ok((pill.getAttribute("title") ?? "").includes(zh["composer.pillTitle"]),
 const greenInk = dotInk();
 assert.ok(greenInk !== null && greenInk !== "", "绿点墨色真的进了 CSSOM");
 const pillTick = specFns[specFns.length - 1]; // 胶囊自己的那一拍（面板的那一拍更早）
+
+// (c2) 可展开：点触发器弹面板（`role="dialog"`），点外面 / Escape 收起。
+// 这三条只有真 reconciler 能钉——替身 React 的 useState 不落状态，面板永远不挂。
+const pillPopover = () => pillHost.querySelector('[role="dialog"]');
+const pillAnchor = () => pillHost.querySelector(".dsh-modelscope-composer-pill-anchor");
+
+assert.ok(pillAnchor(), "锚壳在（面板的定位参照系）");
+assert.equal(pillPopover(), null, "默认收起：没有面板");
+assert.equal(pill.getAttribute("aria-expanded"), "false", "收起时 aria-expanded=false");
+assert.equal(pill.getAttribute("aria-controls"), null, "收起时不指 aria-controls（指向不存在的节点是坏引用）");
+assert.equal(pill.getAttribute("aria-haspopup"), "dialog", "触发器声明它拥有一个面板");
+
+await act(async () => { pill.click(); });
+const opened = pillPopover();
+assert.ok(opened, "点触发器必须弹面板");
+assert.equal(opened.id, "dsh-modelscope-composer-pill-popover", "面板 id 与 aria-controls 必须对得上");
+assert.equal(pill.getAttribute("aria-expanded"), "true", "展开时 aria-expanded=true");
+assert.equal(pill.getAttribute("aria-controls"), "dsh-modelscope-composer-pill-popover", "展开时 aria-controls 指向面板");
+// 面板把两个读数摊成两行，标签来自字典（不是写死的中文）。
+const popoverText = opened.textContent;
+assert.ok(popoverText.includes(zh["composer.panelTitle"]), "面板标题来自字典");
+assert.ok(popoverText.includes(zh["composer.panelBalance"]), "余额行有标签");
+assert.ok(popoverText.includes(zh["composer.panelCalls"]), "本地次数行有标签");
+assert.ok(popoverText.includes("143 魔粒"), "面板里的余额读数与胶囊同源");
+assert.ok(popoverText.includes(zh["composer.panelNote"]), "面板带口径注脚（两个数字来源不同）");
+// 没有新模型时：面板里不出现「本机首次见到的模型」行，胶囊也不出现第三段。
+assert.equal(pillHost.querySelector(".dsh-modelscope-composer-pill-new"), null, "没有新模型时胶囊不画第三段");
+assert.ok(!popoverText.includes(zh["composer.newModelsRow"]), "没有新模型时面板不画那一行");
+
+// 再点一次收起（toggle，不是只开不关）。
+await act(async () => { pill.click(); });
+assert.equal(pillPopover(), null, "再点触发器收起");
+assert.equal(pill.getAttribute("aria-expanded"), "false");
+
+// Escape 收起。
+await act(async () => { pill.click(); });
+assert.ok(pillPopover(), "重新展开");
+await act(async () => {
+  document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+});
+assert.equal(pillPopover(), null, "Escape 必须收起面板");
+
+// 点面板外面收起；点面板里面**不**收起（否则读不完就被关掉）。
+await act(async () => { pill.click(); });
+assert.ok(pillPopover(), "重新展开");
+await act(async () => {
+  pillPopover().dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
+});
+assert.ok(pillPopover(), "点面板里面不许关（否则读不完就被关掉）");
+await act(async () => {
+  document.body.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
+});
+assert.equal(pillPopover(), null, "点面板外面必须收起");
+
+// (c3) 「· N 新模型」第三段：只在有时画，点开面板列出名字。
+newModelsFixture = ["Qwen/Qwen3.8-Flash", "MiniMax/M3"];
+await act(async () => { await pillTick(); });
+const newTag = pillHost.querySelector(".dsh-modelscope-composer-pill-new");
+assert.ok(newTag, "有新模型时胶囊挂第三段");
+assert.ok(newTag.textContent.includes("2"), `第三段带数量：${newTag.textContent}`);
+assert.ok(newTag.textContent.includes(zh["composer.newModels"]), "第三段文案来自字典");
+assert.ok((newTag.getAttribute("title") ?? "").includes(zh["composer.newModelsTitle"]), "第三段的 tooltip 说明口径");
+assert.ok((newTag.getAttribute("title") ?? "").includes("Qwen/Qwen3.8-Flash"), "tooltip 列出名字（前三个）");
+await act(async () => { pill.click(); });
+const withNews = pillPopover();
+assert.ok(withNews, "展开面板");
+assert.ok(withNews.textContent.includes(zh["composer.newModelsRow"]), "面板列出「本机首次见到的模型」行");
+assert.ok(withNews.textContent.includes("Qwen/Qwen3.8-Flash"), "面板列出具体模型名");
+assert.ok(withNews.textContent.includes("MiniMax/M3"), "面板列出全部名字（不截断到 3 个）");
+assert.ok(withNews.textContent.includes(zh["composer.newModelsNote"]), "面板带「新」的口径注脚");
+await act(async () => {
+  document.body.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
+});
+assert.equal(pillPopover(), null, "收起面板，后面的读数断言不受影响");
+newModelsFixture = [];
+await act(async () => { await pillTick(); });
+assert.equal(pillHost.querySelector(".dsh-modelscope-composer-pill-new"), null, "新模型清空后第三段消失（不是留在屏幕上）");
 
 // (d) 官方读数确实是 0 → 红点（0 是读数，不是「读不到」）。
 balanceFixture = { available: 0, total: 143, frozen: 0, fetchedAt: null, error: null };

@@ -216,7 +216,23 @@ export const zh = {
   "composer.pillTitle": "魔搭额度：官方魔粒余额 + 今日本地调用次数",
   "composer.balanceUnit": "魔粒",
   "composer.localCalls": "今日本地 {calls} 次",
-  "composer.stale": "上次数据"
+  "composer.stale": "上次数据",
+
+  // 胶囊展开面板（点胶囊弹出）。面板把胶囊正文那两段摊开成两行，并补上胶囊
+  // 装不下的东西：口径注脚、读取时间、以及「本机首次见到的模型」清单。
+  //
+  // 「本机首次见到」这个口径**不许**改写成「网关新增」：官方模型列表没有
+  // `listedSince` 之类的字段，本插件唯一能证明的是「这台机器的这份状态文件
+  // 里，第一次记到它是什么时候」。写成「新增」就是把一个本机观察说成上游事实。
+  "composer.panelTitle": "魔搭额度详情",
+  "composer.panelBalance": "官方魔粒余额",
+  "composer.panelCalls": "今日本地调用",
+  "composer.panelNote": "余额来自官方接口，调用次数由本机按本地日统计——两者口径不同，不互相换算。",
+  "composer.newModels": "新模型",
+  "composer.newModelsRow": "本机首次见到的模型",
+  "composer.newModelsTitle": "本机首次见到的模型：",
+  "composer.newModelsSep": "、",
+  "composer.newModelsNote": "「新」指本机首次记到它，与上游何时上架无关。只列最近 7 天内首见的。",
 };
 
 /** English dictionary, key-parity pinned by the type. */
@@ -401,7 +417,17 @@ export const en: typeof zh = {
   "composer.pillTitle": "ModelScope quota: official Magicube balance + today's local call count",
   "composer.balanceUnit": "Magicubes",
   "composer.localCalls": "local today {calls}",
-  "composer.stale": "stale data"
+  "composer.stale": "stale data",
+
+  "composer.panelTitle": "ModelScope quota details",
+  "composer.panelBalance": "Official Magicube balance",
+  "composer.panelCalls": "Calls today (local)",
+  "composer.panelNote": "The balance comes from the official endpoint; the call count is tallied on this device by local day — different sources, so they are not converted into each other.",
+  "composer.newModels": "new",
+  "composer.newModelsRow": "First seen on this device",
+  "composer.newModelsTitle": "First seen on this device: ",
+  "composer.newModelsSep": ", ",
+  "composer.newModelsNote": "\"New\" means first recorded on this device, not newly listed by the gateway. Only models first seen within the last 7 days are listed.",
 };
 
 export type DictionaryKey = keyof typeof zh;

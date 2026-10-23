@@ -146,6 +146,7 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 | `provider-store.ts` | 开关 + 允许清单 + 窗口覆盖的持久化 | `createFileProviderStore()` |
 | `state-store.ts` | 文件状态原语（原子写/版本守卫/读缓存/写队列） | 被上面四个 store 共用 |
 | `usage-prefs-store.ts` | 用量面板显示偏好（趋势显示窗口）的持久化 | `createFileUsagePrefsStore()`, `resolveWindowDays()` |
+| `roster-seen-store.ts` | 模型「本机首次见到」时间戳的持久化（胶囊「· N 新模型」的唯一写入口，写在收敛器里） | `createFileRosterSeenStore()`, `freshIdsOf()` |
 | `context-catalog.ts` | 内置上下文窗口策展表（models.dev 交叉真值） | `curatedWindowOf()` |
 | **── Provider 注册 ──** | | |
 | `llm-models.ts` | 目录→descriptor 映射（peer-free） | `buildDescriptors()`, `rosterWithAvailability()` |
@@ -360,6 +361,7 @@ test/
 ├── retry.test.mjs           # 重试策略
 ├── usage-store.test.mjs     # 本地计数持久化
 ├── usage-prefs-store.test.mjs # 趋势显示窗口偏好持久化
+├── roster-seen-store.test.mjs # 模型「本机首次见到」时间戳持久化（胶囊「· N 新模型」的唯一写入口）
 ├── state-store.test.mjs     # 文件状态原语
 ├── panel.test.mjs           # 面板路由契约
 ├── routes.test.mjs          # 路由族

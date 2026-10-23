@@ -2,7 +2,7 @@
   "name": "dsh-connect-modelscope-token-plan",
   "displayName": "DSH Connect ModelScope Token Plan",
   "icon": "./icon.svg",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "homepage": "https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan",
   "bugs": {
     "url": "https://github.com/eghrhegpe/dsh-connect-modelscope-token-plan/issues"

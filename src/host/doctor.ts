@@ -38,6 +38,7 @@ import { describeProviderPayload } from "./provider-store.ts";
 import { describeUsagePayload } from "./usage-store.ts";
 import { describeDrawPayload } from "./draw-store.ts";
 import { describeUsagePrefsPayload } from "./usage-prefs-store.ts";
+import { describeRosterSeenPayload } from "./roster-seen-store.ts";
 
 /** 症状 id 的单一声明（renderReport 与 --json 都从这里取值）。 */
 export const SYMPTOM = Object.freeze({
@@ -49,10 +50,11 @@ export type SymptomValue = (typeof SYMPTOM)[keyof typeof SYMPTOM];
 /** 每个症状的第一步动作。总函数：缺一条 hint 就过不了编译（见 deriveSymptoms）。 */
 const SYMPTOM_HINT: Record<SymptomValue, string> = {
   [SYMPTOM.STATE_UNREADABLE]:
-    "state/ 下有一个文件（usage.json / provider.json / draw.json / usage-prefs.json）无法按本构建认识的形状解析：要么损坏，" +
+    "state/ 下有一个文件（usage.json / provider.json / draw.json / usage-prefs.json / roster-seen.json）无法按本构建认识的形状解析：要么损坏，" +
     "要么由更新的构建写入（本构建的写入已被版本只读闸挡住）。面板会显示 shapeWarnings；" +
     "升级插件后再看，或删除该文件重置——usage.json 丢了历史计数，provider.json 丢了面板保存的" +
-    "开关与允许清单，draw.json 丢了面板保存的出图开关与模型偏好，usage-prefs.json 丢了趋势图的显示窗口。"
+    "开关与允许清单，draw.json 丢了面板保存的出图开关与模型偏好，usage-prefs.json 丢了趋势图的显示窗口，" +
+    "roster-seen.json 丢了每个模型「本机第一次见到」的时间（胶囊的「· N 新模型」标记会消失，直到它们重新被首见）。"
 };
 
 /** 缺一条 hint 就在编译期报错——新症状 id 必须先补 hint。 */
@@ -72,6 +74,13 @@ export interface DoctorScope {
   draw: { versionKnown: boolean; enabled: boolean | null; modelId: string | null } | null;
   /** usage-prefs.json 的速览；`null` = 文件不在场（还没改过趋势显示窗口，不是故障）。 */
   usagePrefs: { versionKnown: boolean; windowDays: number | null } | null;
+  /**
+   * roster-seen.json 的速览；`null` = 文件不在场（还没记过首见时间，不是故障）。
+   *
+   * 这份与上面四份的区别：它的内容**不是用户设置**，而是自动积累的历史。所以
+   * 「不在场」在升级后的头几轮里是正常态（首轮收敛才播种），doctor 不该报它。
+   */
+  rosterSeen: { versionKnown: boolean; ids: number; fresh: number } | null;
   /** 在场但解析不了的文件名清单（含未知版本）。 */
   unreadable: string[];
 }
@@ -143,7 +152,7 @@ async function inspectStateFile<T extends { versionKnown: boolean }>(
 
 /** 读一个作用域目录。调用方保证目录在场（profile 目录来自 readdir；共享布局先过 exists()）。 */
 async function readScope(dir: string, profile: string | null): Promise<DoctorScope> {
-  const scope: DoctorScope = { profile, stateDir: dir, usage: null, provider: null, draw: null, usagePrefs: null, unreadable: [] };
+  const scope: DoctorScope = { profile, stateDir: dir, usage: null, provider: null, draw: null, usagePrefs: null, rosterSeen: null, unreadable: [] };
   await inspectStateFile(dir, "usage.json", scope, describeUsagePayload, (summary) => {
     scope.usage = summary;
   });
@@ -155,6 +164,9 @@ async function readScope(dir: string, profile: string | null): Promise<DoctorSco
   });
   await inspectStateFile(dir, "usage-prefs.json", scope, describeUsagePrefsPayload, (summary) => {
     scope.usagePrefs = summary;
+  });
+  await inspectStateFile(dir, "roster-seen.json", scope, describeRosterSeenPayload, (summary) => {
+    scope.rosterSeen = summary;
   });
   return scope;
 }
@@ -242,13 +254,13 @@ export function deriveSymptoms(scopes: DoctorScope[]): { id: SymptomValue; hint:
 export function renderReport(report: DoctorReport): string {
   const lines = [`dshHome: ${report.dshHome}`];
   const scopes = report.shared !== null ? [report.shared, ...report.scopes] : report.scopes;
-  if (scopes.every((scope) => scope.usage === null && scope.provider === null && scope.draw === null && scope.usagePrefs === null && scope.unreadable.length === 0)) {
+  if (scopes.every((scope) => scope.usage === null && scope.provider === null && scope.draw === null && scope.usagePrefs === null && scope.rosterSeen === null && scope.unreadable.length === 0)) {
     lines.push(`no state under ${join(report.dshHome, "state")} (a clean machine, or the panel has not saved anything yet)`);
   }
   for (const scope of scopes) {
     const label = scope.profile === null ? "shared (legacy)" : scope.profile;
-    if (scope.usage === null && scope.provider === null && scope.draw === null && scope.usagePrefs === null && scope.unreadable.length === 0) {
-      lines.push(`${label}: no usage.json, no provider.json, no draw.json, no usage-prefs.json (not recorded yet)`);
+    if (scope.usage === null && scope.provider === null && scope.draw === null && scope.usagePrefs === null && scope.rosterSeen === null && scope.unreadable.length === 0) {
+      lines.push(`${label}: no usage.json, no provider.json, no draw.json, no usage-prefs.json, no roster-seen.json (not recorded yet)`);
       continue;
     }
     if (scope.usage !== null) {
@@ -283,6 +295,15 @@ export function renderReport(report: DoctorReport): string {
       lines.push(
         `${label}: usage-prefs.json — trend window ${prefs.windowDays === null ? "not set (follows config)" : `${prefs.windowDays} day(s)`}` +
         (prefs.versionKnown ? "" : " [UNKNOWN VERSION]")
+      );
+    }
+    if (scope.rosterSeen !== null) {
+      const seen = scope.rosterSeen;
+      // 「首见历史」不是用户设置，所以措辞与上面四份不同：它答的是「这个标记
+      // 有没有历史可用」，而不是「我保存的值是什么」。
+      lines.push(
+        `${label}: roster-seen.json — ${seen.ids} model(s) on record, ${seen.fresh} first seen within the last 7 day(s)` +
+        (seen.versionKnown ? "" : " [UNKNOWN VERSION]")
       );
     }
     for (const item of scope.unreadable) lines.push(`${label}: UNREADABLE: ${item}`);

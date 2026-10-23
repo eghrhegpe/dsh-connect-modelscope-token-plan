@@ -65,6 +65,14 @@ interface ProviderRouteWiring {
     // 跟随目录）。readEntries 每次重注册都把 store 里的覆盖传下去。
     fetchModels: (contextWindow?: number | null) => Promise<{ entries?: unknown[]; [k: string]: unknown }>;
   };
+  /**
+   * 首见表：**本路由只读**（`fresh()`）。
+   *
+   * 与 `Wiring.rosterSeenStore` 的写侧注释成对：写只发生在收敛器。这条路由是
+   * 面板 `GET /provider` 的兜底读路径，一次刷新就会跑；在这里「顺手记一下」
+   * 等于把「谁是新模型」变成「谁最近一次被面板读到」。
+   */
+  rosterSeenStore?: { fresh: (nowMs?: number) => Promise<string[]> };
   logger?: { warn?: (message: string) => void };
 }
 
@@ -114,7 +122,7 @@ async function readEnabledIds(store: ProviderRouteWiring["providerStore"], publi
  * @returns {Function} 依次调用三个 `off()` 的注销回调。
  */
 export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
-  const { settings, providerStore, publisher, reconcile, inference, logger } = wiring;
+  const { settings, providerStore, publisher, reconcile, inference, rosterSeenStore, logger } = wiring;
 
   /**
    * 组装一份 §9 响应形状。GET 与成功后的 POST 共用，所以两个方向不可能对「当前
@@ -155,6 +163,15 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
     // 不虚增，与 snapshot-aggregate 同一份 enabledCountOf）。
     const allowedList = parseAllowedList(enabledIds);
     const modelCount = roster.length;
+    // 「本机第一次见到」还算新的模型：**只读**，且读失败降级为空数组。
+    //
+    // 为什么容忍失败而不是让整条 GET 报错：这条字段只决定胶囊多画不画一段，
+    // 而本路由是面板 provider 块的权威读路径——为一个装饰性的字段把整块状态
+    // 打成 ok:false，是拿用户的「模型清单能不能看」去换「标记准不准」。
+    // 真正需要说出口的是**版本漂移**（读作空表），那条在快照的 shapeWarnings 里。
+    const newModelIds = rosterSeenStore === undefined
+      ? []
+      : await optional(rosterSeenStore.fresh(), [] as string[]);
     return {
       ok: true,
       enabled: resolveSwitchEnabled(panelSwitch, settings.registerProvider),
@@ -167,6 +184,7 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
       allowed: allowedList.mode,
       enabledIds,
       contextWindow,
+      newModelIds,
       roster,
       ...(catalogError !== null ? { catalogError } : {}),
       ...extra

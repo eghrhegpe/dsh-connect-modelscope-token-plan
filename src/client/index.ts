@@ -37,7 +37,8 @@ import {
   balanceText,
   callsText,
   readingText,
-  staleOf
+  staleOf,
+  newModelsOf
 } from "./composer-usage-pill.ts";
 import { usePollingInterval } from "./use-polling-interval.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
@@ -83,6 +84,9 @@ function clientFactory(loaderRequire: (specifier: string) => unknown): {
       callsText,
       readingText,
       staleOf,
+      // 「本机首次见到的模型」清单的净味版：三道过滤（非数组 / 非字符串 / 重复）
+      // 是纯规则，同上面几条一样放 helpers。
+      newModelsOf,
     }),
     components: Object.freeze({
       BalanceCard,

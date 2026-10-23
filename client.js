@@ -286,7 +286,16 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"composer.pillTitle": "魔搭额度：官方魔粒余额 + 今日本地调用次数",
 			"composer.balanceUnit": "魔粒",
 			"composer.localCalls": "今日本地 {calls} 次",
-			"composer.stale": "上次数据"
+			"composer.stale": "上次数据",
+			"composer.panelTitle": "魔搭额度详情",
+			"composer.panelBalance": "官方魔粒余额",
+			"composer.panelCalls": "今日本地调用",
+			"composer.panelNote": "余额来自官方接口，调用次数由本机按本地日统计——两者口径不同，不互相换算。",
+			"composer.newModels": "新模型",
+			"composer.newModelsRow": "本机首次见到的模型",
+			"composer.newModelsTitle": "本机首次见到的模型：",
+			"composer.newModelsSep": "、",
+			"composer.newModelsNote": "「新」指本机首次记到它，与上游何时上架无关。只列最近 7 天内首见的。"
 		};
 		en = {
 			"panel.refresh": "Refresh",
@@ -440,7 +449,16 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"composer.pillTitle": "ModelScope quota: official Magicube balance + today's local call count",
 			"composer.balanceUnit": "Magicubes",
 			"composer.localCalls": "local today {calls}",
-			"composer.stale": "stale data"
+			"composer.stale": "stale data",
+			"composer.panelTitle": "ModelScope quota details",
+			"composer.panelBalance": "Official Magicube balance",
+			"composer.panelCalls": "Calls today (local)",
+			"composer.panelNote": "The balance comes from the official endpoint; the call count is tallied on this device by local day — different sources, so they are not converted into each other.",
+			"composer.newModels": "new",
+			"composer.newModelsRow": "First seen on this device",
+			"composer.newModelsTitle": "First seen on this device: ",
+			"composer.newModelsSep": ", ",
+			"composer.newModelsNote": "\"New\" means first recorded on this device, not newly listed by the gateway. Only models first seen within the last 7 days are listed."
 		};
 	}));
 
@@ -998,7 +1016,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				fontSize: 12,
 				fontWeight: 600,
 				lineHeight: "18px",
-				cursor: "default",
+				cursor: "pointer",
 				flexShrink: 0,
 				whiteSpace: "nowrap"
 			},
@@ -1017,7 +1035,69 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			pillTierOk: "#22c55e",
 			pillTierExhausted: "#ef4444",
 			pillTierUnknown: "#9ca3af",
-			pillTierExhaustedText: { color: "var(--dsw-alias-state-error-primary)" }
+			pillTierExhaustedText: { color: "var(--dsw-alias-state-error-primary)" },
+			pillNewTag: {
+				color: "var(--dsw-alias-label-secondary)",
+				flexShrink: 0
+			},
+			pillPopoverAnchor: {
+				position: "relative",
+				display: "inline-flex"
+			},
+			pillPopover: {
+				position: "absolute",
+				bottom: "100%",
+				right: 0,
+				zIndex: 100,
+				border: "1px solid var(--dsw-alias-border-l1)",
+				borderRadius: 10,
+				background: "var(--dsw-alias-bg-layer-1)",
+				boxShadow: "0 6px 24px rgba(0, 0, 0, 0.18)",
+				width: "min(320px, calc(100vw - 32px))",
+				padding: "10px 12px",
+				marginBottom: 8,
+				textAlign: "left",
+				color: "var(--dsw-alias-label-primary)",
+				fontSize: 12,
+				lineHeight: "18px",
+				fontFamily: "inherit",
+				boxSizing: "border-box"
+			},
+			pillPopoverHead: {
+				display: "flex",
+				alignItems: "center",
+				gap: 6,
+				flexWrap: "wrap",
+				marginBottom: 8
+			},
+			pillPopoverTitle: {
+				fontSize: 12,
+				fontWeight: 600,
+				color: "var(--dsw-alias-label-primary)"
+			},
+			pillPopoverStale: {
+				color: "var(--dsw-alias-label-tertiary)",
+				fontStyle: "italic"
+			},
+			pillPopoverRow: { padding: "6px 0" },
+			pillPopoverRowLine: {
+				display: "flex",
+				alignItems: "baseline",
+				gap: 8
+			},
+			pillPopoverLabel: {
+				fontSize: 12,
+				color: "var(--dsw-alias-label-secondary)"
+			},
+			pillPopoverFigure: {
+				marginLeft: "auto",
+				fontVariantNumeric: "tabular-nums",
+				color: "var(--dsw-alias-label-primary)"
+			},
+			pillPopoverNote: {
+				marginTop: 8,
+				color: "var(--dsw-alias-label-tertiary)"
+			}
 		};
 	}));
 
@@ -1193,6 +1273,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			allowed: p.allowed === "none" ? "none" : p.allowed === "list" ? "list" : "all",
 			enabledIds: ids,
 			contextWindow: typeof p.contextWindow === "number" && Number.isFinite(p.contextWindow) && p.contextWindow > 0 ? p.contextWindow : null,
+			newModelIds: Array.isArray(p.newModelIds) ? p.newModelIds.map((id) => String(id ?? "")).filter((id) => id !== "") : [],
 			roster
 		};
 	}
@@ -1286,6 +1367,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			allowed: "all",
 			enabledIds: [],
 			contextWindow: null,
+			newModelIds: [],
 			roster: []
 		});
 		DEGRADED_DRAW = Object.freeze({
@@ -3013,15 +3095,109 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		return parts.filter((part) => part !== null).join(" · ");
 	}
 	/**
+	* 「本机首次见到的模型」清单：`snapshot.provider.newModelIds` 的净味版。
+	*
+	* 三道过滤都是承重的：
+	*   - 非数组（老 Host / 降级快照）→ 空清单，不抛；
+	*   - 非字符串 / 空串 → 丢掉，否则面板会画出一个空名字的「新模型」；
+	*   - 去重 → Host 侧已经去过重，但客户端不能依赖对端，重复项会让「3 个新模型」
+	*     变成 4 行同名。
+	*/
+	function newModelsOf(snapshot) {
+		const raw = snapshot?.provider?.newModelIds;
+		if (!Array.isArray(raw)) return [];
+		const seen = /* @__PURE__ */ new Set();
+		const ids = [];
+		for (const value of raw) {
+			if (typeof value !== "string") continue;
+			const id = value.trim();
+			if (id === "" || seen.has(id)) continue;
+			seen.add(id);
+			ids.push(id);
+		}
+		return ids;
+	}
+	/**
+	* 点面板外面或按 Escape 关面板。
+	*
+	* 三处细节各有理由：
+	*   - `pointerdown` 而不是 `click`：`click` 触发时按钮自己的 onClick 已经跑过，
+	*     一个把触发器算作「里面」的 click 监听会先关再被 toggle 打开，面板永远关不掉；
+	*   - 包含判定读**锚节点**而不是面板：点触发器本身是一次 toggle，把它算作「里面」
+	*     才不会和 toggle 抢；
+	*   - 鸭子类型判 `nodeType` 而不是 `instanceof Node`：本模块在 jsdom 里也跑，
+	*     而 jsdom 只把 `document` 镜像进 Node realm，`Node` 构造函数在那儿不存在。
+	*
+	* `open === false` 时不挂监听（没有面板要关，挂上就是白跑）。
+	*/
+	function useDismissOn(open, close, anchorRef) {
+		useEffect(() => {
+			if (!open) return;
+			if (typeof document === "undefined" || !("addEventListener" in document)) return;
+			const nodeLike = (value) => typeof value === "object" && value !== null && typeof value.nodeType === "number";
+			const anchorLike = anchorRef.current;
+			const insideAnchor = (target) => nodeLike(target) && typeof anchorLike?.contains === "function" && anchorLike.contains(target);
+			const onPointerDown = (event) => {
+				if (insideAnchor(event.target)) return;
+				close();
+			};
+			const onKeyDown = (event) => {
+				if (event.key !== "Escape") return;
+				close();
+			};
+			document.addEventListener("pointerdown", onPointerDown, true);
+			document.addEventListener("keydown", onKeyDown);
+			return () => {
+				document.removeEventListener("pointerdown", onPointerDown, true);
+				document.removeEventListener("keydown", onKeyDown);
+			};
+		}, [
+			open,
+			close,
+			anchorRef
+		]);
+	}
+	/**
+	* 展开面板：把胶囊正文那两段摊成两行，再补胶囊装不下的东西（口径注脚、
+	* 读取时间、新模型清单）。
+	*
+	* 面板是触发器的**兄弟**而不是子节点：`<button>` 里塞 `<div role="dialog">`
+	* 是非法嵌套（按钮的内容模型是 phrasing content，交互内容更糟）。锚壳用
+	* `<span>` 同理。
+	*/
+	function QuotaPopover(props) {
+		const { tt, title, stale, available, usedToday, balance, newModels } = props;
+		const fetchedAt = balance?.fetchedAt;
+		const failure = balance?.error;
+		return h("div", {
+			className: "dsh-modelscope-composer-pill-popover",
+			id: POPOVER_ID,
+			role: "dialog",
+			"aria-label": title,
+			style: S.pillPopover
+		}, h("div", { style: S.pillPopoverHead }, h("span", { style: S.pillPopoverTitle }, tt("composer.panelTitle")), stale ? h("span", { style: S.pillPopoverStale }, tt("composer.stale")) : null), h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.panelBalance")), h("span", { style: S.pillPopoverFigure }, balanceText(available, tt)))), h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.panelCalls")), h("span", { style: S.pillPopoverFigure }, usedToday === null ? "—" : format(tt("composer.localCalls"), { calls: count(usedToday) })))), newModels.length === 0 ? null : h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.newModelsRow")), h("span", { style: S.pillPopoverFigure }, newModels.join(tt("composer.newModelsSep"))))), failure !== void 0 && typeof failure === "string" && failure !== "" ? h("div", { style: S.pillPopoverNote }, format(tt("balance.unavailable"), { error: failure })) : null, fetchedAt !== void 0 && typeof fetchedAt === "string" && fetchedAt !== "" ? h("div", { style: S.pillPopoverNote }, format(tt("balance.fetched"), { time: isoTime(fetchedAt) })) : null, h("div", { style: S.pillPopoverNote }, tt("composer.panelNote")), newModels.length === 0 ? null : h("div", { style: S.pillPopoverNote }, tt("composer.newModelsNote")));
+	}
+	/**
 	* 内层：只在会话选中本插件的模型时挂载。轮询 hook 在这里，被挂/摘即起停——
 	* 非归属 provider 的会话不发任何请求。
+	*
+	* 展开状态也住在这里（而不是外层门控）：外层每帧都要调 `useProjection` 才能
+	* 决定挂谁，把 `useState` 加到外层会让「非归属 → 归属」这个切换改变 hook 顺序
+	* （外层先 return null 再挂内层，Rules of Hooks 会炸）。内层被挂/摘时它自己的
+	* hook 序是完整的，所以 open 放这里安全。
 	*/
 	function ModelscopePill(props) {
 		const { tt } = props;
 		const { data, error, loadedOnce, updatedAt } = useSnapshotPolling();
+		const [open, setOpen] = useState(false);
+		const anchorRef = useRef(null);
+		const close = useCallback(() => setOpen(false), []);
+		const toggle = useCallback(() => setOpen((current) => !current), []);
+		useDismissOn(open, close, anchorRef);
 		const balance = data?.balance ?? null;
 		const available = availableOf(balance);
 		const usedToday = usedTodayOf(data);
+		const newModels = newModelsOf(data);
 		const cadenceMs = statedCadenceMs(data?.pollSeconds, DEFAULT_CADENCE_MS);
 		const stale = staleOf({
 			error,
@@ -3038,11 +3214,15 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			usedToday,
 			stale
 		});
-		return h("button", {
+		const trigger = h("button", {
 			type: "button",
 			className: "dsh-modelscope-composer-pill",
 			title,
 			"aria-label": title,
+			"aria-expanded": open,
+			"aria-haspopup": "dialog",
+			"aria-controls": open ? POPOVER_ID : void 0,
+			onClick: toggle,
 			style: S.pillTrigger
 		}, h("span", {
 			className: "dsh-modelscope-composer-pill-dot",
@@ -3060,7 +3240,24 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, pending ? "…" : readingText(available, usedToday, tt)), stale ? h("span", {
 			className: "dsh-modelscope-composer-pill-stale",
 			style: S.pillStale
-		}, ` · ${tt("composer.stale")}`) : null);
+		}, ` · ${tt("composer.stale")}`) : null, newModels.length === 0 ? null : h("span", {
+			className: "dsh-modelscope-composer-pill-new",
+			style: S.pillNewTag,
+			title: `${tt("composer.newModelsTitle")}${newModels.slice(0, 3).join(tt("composer.newModelsSep"))}${newModels.length > 3 ? "…" : ""}`
+		}, ` · ${newModels.length} ${tt("composer.newModels")}`));
+		return h("span", {
+			className: "dsh-modelscope-composer-pill-anchor",
+			style: S.pillPopoverAnchor,
+			ref: anchorRef
+		}, trigger, open ? h(QuotaPopover, {
+			tt,
+			title,
+			stale,
+			available,
+			usedToday,
+			balance,
+			newModels
+		}) : null);
 	}
 	/**
 	* 外层门控：固定一处调 `useProjection`，再决定内层挂谁。非归属 provider 返回
@@ -3071,7 +3268,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		if (selectedProviderOf(selection) !== "modelscope-token-plan") return null;
 		return h(ModelscopePill, { tt: props.tt });
 	}
-	var MODELSCOPE_PROVIDER, DEFAULT_CADENCE_MS, STALE_CADENCES, TIER_INK;
+	var MODELSCOPE_PROVIDER, DEFAULT_CADENCE_MS, STALE_CADENCES, TIER_INK, POPOVER_ID;
 	var init_composer_usage_pill = __esmMin((() => {
 		init_runtime();
 		init_styles();
@@ -3085,6 +3282,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			exhausted: S.pillTierExhausted,
 			unknown: S.pillTierUnknown
 		};
+		POPOVER_ID = "dsh-modelscope-composer-pill-popover";
 	}));
 
 //#endregion
@@ -3208,7 +3406,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 					balanceText,
 					callsText,
 					readingText,
-					staleOf
+					staleOf,
+					newModelsOf
 				}),
 				components: Object.freeze({
 					BalanceCard,

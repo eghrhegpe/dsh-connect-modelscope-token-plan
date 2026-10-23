@@ -315,8 +315,14 @@ export function summarizeCatalog(entries: unknown): { modelCount: number; vision
   { ok: true, enabled: boolean, source: "panel"|"config",
     llmAvailable: boolean, registered: boolean, error: string|null,
     modelCount: number, enabledCount: number, allowed: "all"|"none"|"list",
-    enabledIds: string[], roster: {id,name,vision,available,quotaExhausted}[] }
+    enabledIds: string[], contextWindow: number|null,
+    newModelIds: string[],
+    roster: {id,name,vision,available,quotaExhausted}[] }
   ```
+  `newModelIds` 是「本机第一次见到的模型」（7 天窗口内，口径与写入口见
+  `src/host/roster-seen-store.ts` 头注）。**这条路由只读它**：首见时间戳的唯一写入口
+  在 `provider-reconcile.ts` 的收敛链里——读路径顺手写盘会把「谁是新模型」变成
+  「谁最近被读到」。
   写开关/清单失败**必须传播**（返回 `ok:false, error`），不静默吞：这是用户的
   显式操作，面板必须看到它没生效。
 

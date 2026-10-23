@@ -74,6 +74,18 @@ export interface ProviderReconcilerDeps {
    * `exhaustedModelIds`（usage-store.ts），窗口来自 `settings`。
    */
   usageEvents?: () => Promise<readonly QuotaEvent[] | null>;
+  /**
+   * 首见表：**这是它唯一的写入口**（胶囊那句「· N 新模型」的事实源）。
+   *
+   * 为什么写在这里而不是路由/快照里：写需要「这一轮完整目录」这个前提，而完整
+   * 目录只有收敛器拿得到（`fetchModels` 的成功点）。放在读路径上写，一次面板
+   * 轮询就能把「谁是新模型」改写掉，而读路径本该是只读的。
+   *
+   * 缺省 = 不记首见（胶囊永远不画第三段）。测试可省；装配时必须给。
+   */
+  rosterSeenStore?: {
+    note: (ids: readonly string[], nowMs?: number) => Promise<{ newIds: string[] }>;
+  };
   logger?: { warn?: (message: string) => void };
 }
 
@@ -95,7 +107,7 @@ interface Desired {
  * @returns {{reconcile: () => Promise<void>; health: () => {{ lastError: unknown }} }}
  */
 export function createProviderReconciler(deps: ProviderReconcilerDeps) {
-  const { settings, providerStore, inference, publisher, usageEvents, logger } = deps;
+  const { settings, providerStore, inference, publisher, usageEvents, logger, rosterSeenStore } = deps;
 
   /**
    * 把一次 store 读取收成「值或 null」——**同步抛与异步拒收都降级**。
@@ -188,6 +200,24 @@ export function createProviderReconciler(deps: ProviderReconcilerDeps) {
       return;
     }
     const entries = Array.isArray(catalog?.entries) ? catalog.entries : [];
+    // 记「本机第一次见到这些模型是什么时候」——胶囊那句「· N 新模型」的唯一
+    // 写入口（读路径只 fresh()，理由见 rosterSeenStore 的类型注释）。
+    //
+    // 放在 publish **之前**：这句话说的是「目录里有什么」，与注册成不成功无关；
+    // 挂在 publish 成功之后会让「注册失败的那几轮」的首见时间凭空推迟。
+    //
+    // 失败只 warn，不打断收敛：一个记不住历史的磁盘（只读 Home、权限、写守卫
+    // 拒绝）不该连带把 provider 注册打掉。但原因不吞——「这一轮没记下首见」与
+    // 「这一轮没有新模型」是两条不同的事实，前者在日志里、后者在面板上。
+    if (rosterSeenStore !== undefined) {
+      try {
+        await rosterSeenStore.note(entries.map((entry) => String((entry as { id?: unknown })?.id ?? "")));
+      } catch (error) {
+        logger?.warn?.(
+          `${name}: roster first-sighting write failed (${redactSecrets(errMsg(error))}) — the new-model marker may miss this pass`
+        );
+      }
+    }
     // 清单口径与快照/路由**共用** resolveEnabledIds：可读的落盘清单（含空清单
     // = 不过滤）优先，只有读抛错才回退内存里最近一次 publish 的那份。
     const enabledIds = resolveEnabledIds(after.enabledIds, publisher.state.enabledIds);
