@@ -102,10 +102,9 @@
         #   · 出图**不扣**魔粒（chat 才扣，1 次 = 1 魔粒），所以面板刻意**不显示**
         #     出图计数——那会变成拿 chat 的口径给生图记账。
         #
-        # 生效时机：开关值立即保存，但**工具的挂载发生在下次 Host 启动**——
-        # peer 的 tools registry 没有 unregister，工具一旦注册就摘不下来（机制与
-        # 后果的完整论述见 src/host/draw-register.ts 文件头注）。
-        # 面板会就这一点给出提示（draw.restartHint）。
+        # 生效时机：开关值保存后**当场**挂/卸工具——peer 的 tools.register 返回 disposer
+        # （注销句柄），关掉就把工具摘掉，不用重启（机制与后果的完整论述见
+        # src/host/draw-register.ts 文件头注）。旧 Host 不返回句柄时才降级为 not-removable。
         drawEnabled: false
         # 出图默认模型（空 = 自动取目录里第一个出图模型）。
         # 注意只有目录内**平台声明**出图能力的模型才进候选：实测目录 35 条里

@@ -10,12 +10,11 @@
  * 「给 agent 一个出图工具」。两者的开关、状态文件、候选集合都不同，合并会让
  * 「关掉出图」波及 provider 的注册时序（详见 draw-store.ts 的头注）。
  *
- * 一处**与 provider 路由不同**的地方必须说清：provider 开关翻转会**立即**重注册
- * （publish 是活的重建），而出图工具的开关翻转**要等下次 Host 启动**——peer 的
- * tools registry 没有 unregister，工具一旦注册就摘不下来（完整论述见
- * draw-register.ts 文件头注）。所以本路由保存成功后
- * 不改挂载状态，只在响应里给出 `mountPending`，让面板能说清这件事，而不是让用户
- * 以为开关坏了。
+ * 开关翻转**当场生效**：保存成功后本路由 await 挂载控制器的 `syncDraw()`（注册
+ * 或注销），再把**收敛之后**的真实状态写进响应。所以面板拿到的不是「已保存、等
+ * 重启」，而是「已挂上」或「挂载失败的原因」。`syncDraw` 由装配层注入（`index.ts`
+ * 把同一个控制器交给路由与挂载），本路由不自己建——否则「注册」与「注销」会各持
+ * 一份状态。
  *
  * peer-free：不 import 任何 Host peer。
  * @module dsh-connect-modelscope-token-plan/routes/draw
@@ -44,6 +43,14 @@ interface DrawRouteWiring {
   inference: {
     fetchModels: () => Promise<{ entries?: unknown[]; [k: string]: unknown }>;
   };
+  /**
+   * 让出图工具按**刚保存的**开关值收敛一次（挂/卸）。
+   *
+   * 可选：缺省时路由只保存、不改挂载状态（老装配/单测）。真装配里 `index.ts`
+   * 注入同一个控制器的 `sync()`，并等它跑完再回快照——面板才不会先看到「开关已开、
+   * 工具未挂」再被下一次轮询纠正。
+   */
+  syncDraw?: () => Promise<void>;
   logger?: { warn?: (message: string) => void };
 }
 
@@ -80,7 +87,7 @@ async function readEntries(
  * @returns {Function} 注销回调。
  */
 export function registerDrawRoute(ctx: any, wiring: DrawRouteWiring) {
-  const { settings, drawStore, inference, logger } = wiring;
+  const { settings, drawStore, inference, syncDraw, logger } = wiring;
 
   /**
    * 组装响应。GET 与写成功后的响应共用，两个方向不可能对「当前状态」说两套话。
@@ -113,15 +120,15 @@ export function registerDrawRoute(ctx: any, wiring: DrawRouteWiring) {
       // （措辞在客户端 i18n 里，与 sensenova 的 DRAW_ABSENT_KEY 同一套分工）。
       absentReason: drawToolNote(),
       /**
-       * 开关的保存**不会**改变本次挂载的工具。
+       * 开关为开、但工具此刻还没挂上（正在收敛，或收敛失败）。
        *
-       * 工具无法注销（peer 的 tools registry 没有 unregister），所以开关翻转只在
-       * 下次 Host 启动时生效。面板据此显示一句说明——否则用户会以为开关坏了。
-       * 判据：开关为开且**本次挂载没注册上**。
+       * 现在开关翻转是**当场**收敛的（见上面的 `syncDraw`），所以正常保存后这一位
+       * 就是 false。它仍然有用：GET 与进程刚启动、还没跑到第一次 sync 时仍可能为
+       * true，面板靠它区分「暂时没挂」与「挂上了」。
        *
-       * 注意判据不是「有缺席原因」：缺席原因非 null 表示注册尝试过且失败，而挂载
-       * 那一刻开关是关的（用户之后才翻开）时 absentReason 为 null、却同样没注册
-       * 上——后者才是最需要这句提示的场景。见 `draw-tool-state.ts` 文件头。
+       * 注意判据不是「有缺席原因」：缺席原因非 null 表示收敛已尝试且失败（面板会
+       * 优先显示那个原因），而「还没跑完」时 absentReason 为 null。见
+       * `draw-tool-state.ts` 文件头。
        */
       mountPending: resolveSwitchEnabled(panelSwitch, settings.drawEnabled) === true && drawToolMounted() !== true,
       // 首选模型还在不在目录里。false = 目录读到了、它不在（下架/改名，但按「用户
@@ -176,6 +183,10 @@ export function registerDrawRoute(ctx: any, wiring: DrawRouteWiring) {
       try {
         if (hasEnabled) await drawStore.saveEnabled(body.enabled as boolean);
         if (body.modelId !== undefined) await drawStore.saveModelId(body.modelId as string | null);
+        // 开关翻转当场收敛：开→注册、关→注销。必须 **await**——它在响应快照之前
+        // 跑完，面板读到的 absentReason / mountPending 才是收敛后的真实状态。
+        // 只保存模型偏好时不动挂载（模型在工具**调用时**现读，见 draw-register.ts）。
+        if (hasEnabled) await syncDraw?.();
       } catch (error) {
         // 拒写（ADR-006：盘上是更新构建写的版本）与 IO 失败都在这里呈报——
         // 与 provider 路由同一方言：throw，不返回理由串让调用方各自解释。
@@ -201,6 +212,9 @@ export function registerDrawRoute(ctx: any, wiring: DrawRouteWiring) {
       await readJsonBody(request, MAX_JSON_BODY_BYTES).catch(() => ({ ok: false, error: "ignored" }));
       try {
         await drawStore.reset();
+        // reset 也可能把开关从「开」翻回 patch 默认（通常是关）：同样当场收敛，
+        // 否则工具会留在 registry 里而面板显示「已恢复默认」。
+        await syncDraw?.();
       } catch (error) {
         respondError(response, error);
         return;

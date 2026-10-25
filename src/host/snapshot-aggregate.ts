@@ -236,13 +236,12 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
       preferredSource: switchSource(panelModel),
       effectiveModel: choice.id,
       effectiveSource: choice.source,
-      // 缺席原因由 draw-register 在挂载时写入（仅内存）；开关未开时它也是 null，
-      // 面板据 enabled 区分「没开」与「开了但不在」。
+      // 缺席原因由 draw-register 的挂载控制器在每次收敛时写入（仅内存）；开关未开
+      // 时它也是 null，面板据 enabled 区分「没开」与「开了但不在」。
       absentReason: drawToolNote(),
-      // 「待重启」的真判据是**本次挂载没注册上**，不是「有缺席原因」——两者恰好
-      // 互补：缺席原因非 null = 注册尝试过且失败，而挂载那一刻开关是关的（用户
-      // 之后才翻开）时 absentReason 是 null、却同样没注册上。用后者当判据会把
-      // 最常见的「刚打开开关」场景漏掉。见 `draw-tool-state.ts` 文件头。
+      // 「开关开着但此刻还没挂上」：正常收敛会在 POST 响应前落定，所以这里通常是
+      // 瞬态（进程刚起 / 连续翻转尚未收敛），不是「要等下次启动」。判据仍用
+      // 「没注册上」而不是「有缺席原因」——两者互补，后者会让「还没跑完」漏报。
       mountPending: resolveSwitchEnabled(panel, settings.drawEnabled) === true && drawToolMounted() !== true,
       // 首选模型还在不在目录里。`false` = 目录读到了、它不在（模型下架/改名，
       // 但快照仍按「用户点了谁就是谁」照显这个 id）；`null` = 目录读不到或没设

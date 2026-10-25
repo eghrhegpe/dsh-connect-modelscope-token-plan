@@ -96,8 +96,8 @@ export interface Wiring {
    *
    * 它必须挂在 wiring 上、由 `index.ts` 建与销毁，**不能**在 `draw-register.ts`
    * 里现建：那样没有任何人持有它的引用，`DrawJobs.dispose()` 永远走不到（2026-10-19
-   * 锐评实测：`dispose()` 的调用方只剩测试）。表随插件卸载清空是安全的——工具无法
-   * 从 peer registry 注销，但 `execute` 的 `isDisposed` 闸已在拒绝卸载后的调用。
+   * 锐评实测：`dispose()` 的调用方只剩测试）。表随插件卸载清空是安全的——挂载控制器
+   * 会先摘掉工具并 `drawJobs.dispose()`，`execute` 的 `isDisposed` 闸再兜一道。
    */
   drawJobs: ReturnType<typeof import("./draw-jobs.ts").createDrawJobs>;
   /**
@@ -130,3 +130,12 @@ export interface Wiring {
   reconcile: () => Promise<void>;
   logger?: { warn?: (message: string, error?: unknown) => void };
 }
+
+/**
+ * 路由门面拿到的 wiring：装配 wiring 加上「出图工具同步」这一个钩子。
+ *
+ * 为什么钩子走这里而不是让 `routes/draw.ts` 自己去解析 `tools` 服务：路由只该
+ * 改 desired state 并等它被消费（与 `reconcile` 同一条纪律）。挂载/注销的控制面
+ * 在 `draw-register.ts`，`apply()` 是唯一接线处。
+ */
+export type RouteWiring = Wiring & { syncDraw?: () => Promise<void> };

@@ -281,8 +281,8 @@ export const DEGRADED_DRAW: DrawStatus = Object.freeze({
 /**
  * 把 wire/路由返回的出图块归一成 `DrawStatus`；不合法一律降级。
  *
- * 与 `providerOf` 同一套防御性归一（旧 Host 可能缺字段）。`absentReason` 只认三个
- * 已知码——上游若新增第四个，归一到 `null` 而不是把它透传成渲染不出的值；面板的
+ * 与 `providerOf` 同一套防御性归一（旧 Host 可能缺字段）。`absentReason` 只认四个
+ * 已知码——上游若新增第五个，归一到 `null` 而不是把它透传成渲染不出的值；面板的
  * 「缺席」措辞有兜底键，但**状态本身**宁可显示「未知」也不假装认识它。
  * @param {unknown} raw - 原始块。
  * @returns {DrawStatus} 归一后的状态。
@@ -294,7 +294,7 @@ export function drawOf(raw: unknown): DrawStatus {
     ? (d.candidateIds as unknown[]).map((id) => String(id ?? "")).filter((id) => id !== "")
     : [];
   const reason = d.absentReason;
-  const absentReason = reason === "no-tools-service" || reason === "peer-load-failed" || reason === "registry-refused"
+  const absentReason = reason === "no-tools-service" || reason === "peer-load-failed" || reason === "registry-refused" || reason === "not-removable"
     ? reason
     : null;
   // 候选明细：旧 Host 只给 `candidateIds`。**不**从 id 编一档能力出来——编出来

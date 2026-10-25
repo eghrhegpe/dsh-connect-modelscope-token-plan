@@ -5,7 +5,7 @@
 //   正则认不全导入形态。具名导入（`import { a } from "p"`）只是其中一种；默认
 //   导入、命名空间导入、动态 `import("p")`、再导出（`export { a } from "p"`）
 //   都是合法的取符号姿势，而本仓真的有一处动态 import
-//   （src/host/draw-register.ts:110）。正则漏掉一处真导入不是「判错」，是「没判」——
+//   （src/host/draw-register.ts:158）。正则漏掉一处真导入不是「判错」，是「没判」——
 //   绿灯比红灯危险，因为它连提示都没有。
 //
 //   而且正则会误捕：注释里提到 peer 名字（本仓 13 处）会被当成导入点，
@@ -302,9 +302,30 @@ export function scanImportsByTokens(text, options = {}) {
     text,
   );
   const tokens = [];
+  // 带 `${}` 的模板字面量必须按词法规则续扫：`scan()` 只给出 TemplateHead，后续片段要
+  // `reScanTemplateToken()` 才拿得到。不续扫的话，成对的 backtick 会互相错位——夹在中间
+  // 的 `import("peer")` 会被吞进一个假的「模板 token」，于是另一条路（AST）看见了、这条路
+  // 看不见，门禁红却指向错的地方（src/host/draw-register.ts 就这么被漏过过一次）。
+  const templateDepths = []; // 每个未闭合模板里 `${ … }` 的花括号深度
   for (;;) {
-    const kind = scanner.scan();
+    let kind = scanner.scan();
     if (kind === ts.SyntaxKind.EndOfFileToken) break;
+    if (kind === ts.SyntaxKind.TemplateHead) {
+      templateDepths.push(0);
+    } else if (kind === ts.SyntaxKind.OpenBraceToken && templateDepths.length > 0) {
+      templateDepths[templateDepths.length - 1] += 1;
+    } else if (kind === ts.SyntaxKind.CloseBraceToken && templateDepths.length > 0) {
+      const top = templateDepths.length - 1;
+      if (templateDepths[top] > 0) {
+        templateDepths[top] -= 1;
+      } else {
+        // 这个 `}` 结束的是 `${ … }`，不是普通代码块：从它开始重扫模板片段。
+        kind = scanner.reScanTemplateToken(false);
+        if (kind === ts.SyntaxKind.TemplateTail) templateDepths.pop();
+        tokens.push({ kind, text: scanner.getTokenText() });
+        continue;
+      }
+    }
     tokens.push({ kind, text: scanner.getTokenText() });
   }
 

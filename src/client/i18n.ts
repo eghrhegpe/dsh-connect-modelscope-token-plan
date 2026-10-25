@@ -138,7 +138,7 @@ export const zh = {
   "draw.busy": "切换中…",
   "draw.mounted": "已注册：{tool}",
   "draw.notMounted": "未注册——打开上方开关即可开启。",
-  "draw.restartHint": "开关立即保存；工具要到下次启动 DSH 才挂载（挂载后无法撤销）。",
+  "draw.restartHint": "开关立即生效；工具正在挂载，若几秒后仍未挂上，上方会给出原因。",
   "draw.currentNone": "当前目录里没有可出图的模型——出图会失败（先确认访问令牌已配置、目录已拉到）。",
   "draw.currentSrc.declaredTextToImage": "平台声明为文生图",
   "draw.currentSrc.knownTextToImage": "已知可纯文生图",
@@ -160,6 +160,7 @@ export const zh = {
   "draw.absent.noTools": "开关已开，但本机没有 tools 服务，工具没挂上（Host 侧限制，不是配置问题）。",
   "draw.absent.peerLoad": "开关已开，但 tools 模块加载失败，出图工具缺席（Host 问题，非配置）。",
   "draw.absent.registry": "开关已开，但工具注册被 Host 拒绝，出图工具缺席（Host 问题，非配置）。",
+  "draw.absent.notRemovable": "工具已注册，但本机 Host 不返回注销句柄——关掉开关也摘不掉它（旧 Host 限制）。",
   "draw.absent.unknown": "开关已开，但出图工具未挂载，原因未知。",
   // 首选模型从目录消失：`resolveDrawModelChoice` 按「用户点了谁就是谁」不校验目录
   // 在场，所以快照仍照显「当前使用：xxx」，而实际出图会失败。这句把真相说出来。
@@ -342,7 +343,7 @@ export const en: typeof zh = {
   "draw.busy": "Switching…",
   "draw.mounted": "Registered: {tool}",
   "draw.notMounted": "Not registered — turn the switch above on.",
-  "draw.restartHint": "The switch saves at once; the tool mounts the next time DSH starts (a mount cannot be undone).",
+  "draw.restartHint": "The switch takes effect immediately; the tool is still mounting. If it stays unmounted, the reason appears above.",
   "draw.currentNone": "No image model in the catalogue right now — drawing will fail (check the access token and that the catalogue has loaded).",
   "draw.currentSrc.declaredTextToImage": "platform-declared text-to-image",
   "draw.currentSrc.knownTextToImage": "known to accept text-to-image",
@@ -364,6 +365,7 @@ export const en: typeof zh = {
   "draw.absent.noTools": "The switch is on, but this Host has no tools service, so the tool is not mounted (a Host limitation, not a config problem).",
   "draw.absent.peerLoad": "The switch is on, but the tools module failed to load; the draw tool is absent (a Host fault, not config).",
   "draw.absent.registry": "The switch is on, but the Host refused the tool registration; the draw tool is absent (a Host fault, not config).",
+  "draw.absent.notRemovable": "The tool is registered, but this Host returns no disposer — turning the switch off cannot unmount it (an older Host limitation).",
   "draw.absent.unknown": "The switch is on, but the draw tool is not mounted; the reason is unknown.",
   // The saved preferred model vanished from the catalogue: resolveDrawModelChoice
   // honours "whoever the user picked" without checking catalogue presence, so the

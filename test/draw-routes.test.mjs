@@ -28,8 +28,20 @@ const credentialsService = {
   async unset(ref) { this.store.delete(ref); },
   async resolve(ref) { return this.store.has(ref) ? { value: this.store.get(ref) } : null; }
 };
+// 出图工具的注册位：本套件用一张真 Map 顶替 peer 的 tools registry（重名抛错、
+// register 返回注销句柄），这样「开关翻转当场挂/卸」能被观测，而不是只看状态位。
+const toolRegistry = new Map();
+const toolsService = {
+  register(definition) {
+    if (toolRegistry.has(definition.name)) {
+      throw new Error('tool "' + definition.name + '" is already registered');
+    }
+    toolRegistry.set(definition.name, definition);
+    return () => { toolRegistry.delete(definition.name); };
+  }
+};
 const makeCtx = (capture) => ({
-  get: (service) => (service === "credentials" ? credentialsService : undefined),
+  get: (service) => (service === "credentials" ? credentialsService : service === "tools" ? toolsService : undefined),
   logger: { warn: () => {} },
   effect: (_fn, _label) => {},
   webServer: {
@@ -88,7 +100,7 @@ currentFetch = async (url) => {
 };
 
 const handlers = new Map();
-apply(makeCtx(handlers), {}, { env: {} });
+apply(makeCtx(handlers), {}, { env: {}, loadToolsModule: async () => ({ defineTool: (definition) => definition }) });
 assert.ok(handlers.has(DRAW_PATH), "出图路由已注册");
 assert.ok(handlers.has(PROVIDER_PATH), "provider 路由仍注册（两条独立）");
 
@@ -135,11 +147,11 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由仍注册（两条独立�
   assert.equal(res.status, 200);
   assert.equal(res.body.enabled, true);
   assert.equal(res.body.source, "panel", "保存后来源是面板");
-  // 开关刚翻开、而本次挂载没注册上 → **正是**「待重启」场景。旧实现用「有缺席
-  // 原因」当判据，恰好漏掉这一种（挂载那一刻开关是关的，压根没尝试注册，所以
-  // 没有缺席原因）——面板于是什么都不说，用户以为开关坏了。
-  assert.equal(res.body.mountPending, true, "开关开着但本次挂载没注册上 → 要提示重启");
-  assert.equal(res.body.absentReason, null, "没尝试过注册 → 没有缺席原因（两者互补）");
+  // 现在开关翻转是**当场**挂载：POST 返回时工具已经在 registry 里，不该再出现
+  // 「pending」这个瞬时读数为真——它只该在 sync 还没跑完的那一瞬为真。
+  assert.equal(res.body.mountPending, false, "开关翻开当场挂上 → 不再 pending");
+  assert.equal(res.body.absentReason, null, "挂上了 → 没有缺席原因");
+  assert.ok(toolRegistry.has("modelscope_draw_image"), "POST 开开关 → 工具当场进 registry");
 }
 
 // ── 开关持久化到 GET ──
@@ -151,6 +163,9 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由仍注册（两条独立�
 // ── 缺席原因进快照 ──
 {
   setDrawToolNote("no-tools-service");
+  // 注册位也要置 false：现在是动态读数，工具真在 registry 里时它会是 true，
+  // 那样 mountPending 天然为 false，这条断言就永远绿——必须自己摆出「没挂上」。
+  setDrawToolMounted(false);
   try {
     const res = await call(handlers, DRAW_PATH, makeReq("GET"));
     assert.equal(res.body.absentReason, "no-tools-service");
@@ -238,6 +253,8 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由仍注册（两条独立�
   assert.equal(res.body.enabled, false, "reset 回到 patch 默认（false）");
   assert.equal(res.body.source, "config");
   assert.equal(res.body.preferredModel, null);
+  assert.equal(toolRegistry.has("modelscope_draw_image"), false, "reset 关掉开关 → 工具当场摘掉");
+  assert.equal(res.body.mountPending, false, "关掉之后不是 pending（pending 只描述「该挂没挂」）");
 }
 
 // ── 两条路由互不干扰 ──

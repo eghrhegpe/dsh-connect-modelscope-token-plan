@@ -223,7 +223,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.busy": "切换中…",
 			"draw.mounted": "已注册：{tool}",
 			"draw.notMounted": "未注册——打开上方开关即可开启。",
-			"draw.restartHint": "开关立即保存；工具要到下次启动 DSH 才挂载（挂载后无法撤销）。",
+			"draw.restartHint": "开关立即生效；工具正在挂载，若几秒后仍未挂上，上方会给出原因。",
 			"draw.currentNone": "当前目录里没有可出图的模型——出图会失败（先确认访问令牌已配置、目录已拉到）。",
 			"draw.currentSrc.declaredTextToImage": "平台声明为文生图",
 			"draw.currentSrc.knownTextToImage": "已知可纯文生图",
@@ -245,6 +245,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.absent.noTools": "开关已开，但本机没有 tools 服务，工具没挂上（Host 侧限制，不是配置问题）。",
 			"draw.absent.peerLoad": "开关已开，但 tools 模块加载失败，出图工具缺席（Host 问题，非配置）。",
 			"draw.absent.registry": "开关已开，但工具注册被 Host 拒绝，出图工具缺席（Host 问题，非配置）。",
+			"draw.absent.notRemovable": "工具已注册，但本机 Host 不返回注销句柄——关掉开关也摘不掉它（旧 Host 限制）。",
 			"draw.absent.unknown": "开关已开，但出图工具未挂载，原因未知。",
 			"draw.preferredGone": "已保存的默认模型 {model} 已不在当前目录（下架或改名）——出图会用它失败，请在下面重选。",
 			"trend.none": "还没有本地调用记录。",
@@ -386,7 +387,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.busy": "Switching…",
 			"draw.mounted": "Registered: {tool}",
 			"draw.notMounted": "Not registered — turn the switch above on.",
-			"draw.restartHint": "The switch saves at once; the tool mounts the next time DSH starts (a mount cannot be undone).",
+			"draw.restartHint": "The switch takes effect immediately; the tool is still mounting. If it stays unmounted, the reason appears above.",
 			"draw.currentNone": "No image model in the catalogue right now — drawing will fail (check the access token and that the catalogue has loaded).",
 			"draw.currentSrc.declaredTextToImage": "platform-declared text-to-image",
 			"draw.currentSrc.knownTextToImage": "known to accept text-to-image",
@@ -408,6 +409,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"draw.absent.noTools": "The switch is on, but this Host has no tools service, so the tool is not mounted (a Host limitation, not a config problem).",
 			"draw.absent.peerLoad": "The switch is on, but the tools module failed to load; the draw tool is absent (a Host fault, not config).",
 			"draw.absent.registry": "The switch is on, but the Host refused the tool registration; the draw tool is absent (a Host fault, not config).",
+			"draw.absent.notRemovable": "The tool is registered, but this Host returns no disposer — turning the switch off cannot unmount it (an older Host limitation).",
 			"draw.absent.unknown": "The switch is on, but the draw tool is not mounted; the reason is unknown.",
 			"draw.preferredGone": "The saved default model {model} is no longer in the catalogue (delisted or renamed) — drawing with it will fail. Pick another one below.",
 			"trend.none": "No local call records yet.",
@@ -1288,8 +1290,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	/**
 	* 把 wire/路由返回的出图块归一成 `DrawStatus`；不合法一律降级。
 	*
-	* 与 `providerOf` 同一套防御性归一（旧 Host 可能缺字段）。`absentReason` 只认三个
-	* 已知码——上游若新增第四个，归一到 `null` 而不是把它透传成渲染不出的值；面板的
+	* 与 `providerOf` 同一套防御性归一（旧 Host 可能缺字段）。`absentReason` 只认四个
+	* 已知码——上游若新增第五个，归一到 `null` 而不是把它透传成渲染不出的值；面板的
 	* 「缺席」措辞有兜底键，但**状态本身**宁可显示「未知」也不假装认识它。
 	* @param {unknown} raw - 原始块。
 	* @returns {DrawStatus} 归一后的状态。
@@ -1299,7 +1301,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const d = raw;
 		const candidates = Array.isArray(d.candidateIds) ? d.candidateIds.map((id) => String(id ?? "")).filter((id) => id !== "") : [];
 		const reason = d.absentReason;
-		const absentReason = reason === "no-tools-service" || reason === "peer-load-failed" || reason === "registry-refused" ? reason : null;
+		const absentReason = reason === "no-tools-service" || reason === "peer-load-failed" || reason === "registry-refused" || reason === "not-removable" ? reason : null;
 		const rawCandidates = Array.isArray(d.candidates) ? d.candidates.map((entry) => {
 			const row = entry ?? {};
 			return {
@@ -2210,15 +2212,15 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	/**
 	* 出图工具卡：开关、候选模型、挂载状态。
 	*
-	* **与 ProviderCard 的关键差异，也是这张卡存在的主要理由**：provider 开关翻转会
-	* 立即重注册，而出图工具的开关翻转**要等下次 Host 启动**——peer 的 tools registry
-	* 没有 unregister（完整论述见 src/host/draw-register.ts 文件头注）。所以这张卡必须
-	* 把这件事说出来（`draw.restartHint`），否则用户
-	* 翻开关后看不到任何变化，会以为坏了。
+	* **与 ProviderCard 的关键差异**：provider 开关翻转是「重建 provider 对」，出图工具
+	* 的开关翻转是「注册/注销一个 agent 工具」——两者都在**本次 Host 生命周期内**生效
+	* （peer 的 `tools.register` 返回 disposer，完整论述见 src/host/draw-register.ts 文件
+	* 头注）。保存后路由会等挂载收敛完再回快照，所以这张卡通常直接显示「已注册」；
+	* `draw.restartHint` 只在瞬时未挂上（或挂载失败）时出现，不再宣称「要等下次启动」。
 	*
-	* 缺席原因是**分开渲染**的：`no-tools-service` 是「这个 Host 没提供该服务」（正常），
-	* 另两种是 Host 缺陷。三种都给出各自的一句话，因为「开关开着但工具不在」如果没有
-	* 解释，用户没有任何办法自己诊断。
+	* 缺席/不可摘原因是**分开渲染**的：`no-tools-service` 是「这个 Host 没提供该服务」
+	* （正常），`not-removable` 是「能用但关不掉」，另两种是 Host 缺陷。每种都给出各自
+	* 的一句话，因为「开关开着但工具不在」如果没有解释，用户没有任何办法自己诊断。
 	* @param {object} props - 渲染参数。
 	* @returns {unknown} 卡片节点。
 	*/
@@ -2273,7 +2275,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			},
 			role: "status"
 		}, tt("draw.notMounted"));
-		const restartHint = enabled && status.mountPending === true ? h("div", { style: {
+		const restartHint = enabled && status.mountPending === true && status.absentReason === null ? h("div", { style: {
 			...S.formNote,
 			color: "var(--dsw-alias-state-warn-primary)"
 		} }, tt("draw.restartHint")) : null;
@@ -2431,7 +2433,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		DRAW_ABSENT_KEY = {
 			"no-tools-service": "draw.absent.noTools",
 			"peer-load-failed": "draw.absent.peerLoad",
-			"registry-refused": "draw.absent.registry"
+			"registry-refused": "draw.absent.registry",
+			"not-removable": "draw.absent.notRemovable"
 		};
 	}));
 

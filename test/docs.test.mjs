@@ -438,11 +438,12 @@ const FACTS = [
     pointer: "usage-observer.ts"
   },
   {
-    id: "出图工具注册不可撤销：peer 的 tools registry 没有 unregister，开关翻转要下次 Host 启动",
-    // 用机制核心「没有 unregister」当指纹，不用结论「下次启动才生效」——结论各文件
-    // 都换成了自己的写法（cordis 说「挂载发生在下次 Host 启动」，routes/draw 说「要
-    // 等下次 Host 启动」，cards 说「开关翻转要等下次 Host 启动」），机制只有一种写法。
-    needles: [/没有 unregister/],
+    id: "出图工具注册可撤销：peer 的 tools.register 返回 disposer，开关翻转即时挂/卸",
+    // 用机制核心「tools.register 返回 disposer」当指纹，不用结论「当场生效」——结论
+    // 各文件各有写法（AGENTS 说「当场挂/卸」，CONFIG 说「开关值立即生效」），机制只有
+    // 归属文件写全。反向证据也在这条上：旧版把它写成「没有 unregister」，是把宿主
+    // 能力说小了，而三处实现（workbuddy / trae / 本仓）都只是没接住返回值。
+    needles: [/tools\.register 返回 disposer/],
     canonical: "src/host/draw-register.ts",
     pointer: "draw-register.ts"
   },

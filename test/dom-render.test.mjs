@@ -848,13 +848,13 @@ assert.equal(toggleSwitches()[0].disabled, false, "写盘结束后开关恢复�
 // 不做乐观更新：POST 只回 ok:true，面板上的开关状态由**刷新回来的快照**决定，而默认
 // fixture 里 provider 仍是关的。写成功就把标签翻成「已接入」是面板对 Host 撒谎。
 assert.equal(toggleSwitches()[0].closest("label").textContent.trim(), tt("provider.off"), "写成功后仍显示 Host 回显的值（不做乐观更新）");
-// 下一次刷新带回 enabled=true，标签与「下次启动才生效」那句才该出现。
+// 下一次刷新带回 enabled=true，标签与「正在挂载」那句才该出现。
 snapshotResponses = [{ body: snapshotWith({ draw: { ...SNAPSHOT.draw, enabled: true, mountPending: true } }) }];
 toggleSwitches()[1].click();
 await settle();
 assert.deepEqual(jsonOf(lastPost(HOST.DRAW_PATH)), { enabled: true }, "出图开关 POST /draw（与 provider 各自一条路由）");
 assert.equal(toggleSwitches()[1].closest("label").textContent.trim(), tt("draw.on"), "回显 enabled=true → 标签「已开启」");
-assert.ok(bodyText().includes(tt("draw.restartHint")), "enabled=true 的出图卡把「下次 Host 启动才挂载」说出来");
+assert.ok(bodyText().includes(tt("draw.restartHint")), "enabled=true 且还在挂载 → 说出「正在挂载」，而不是宣称要重启");
 
 // `draw.restartHint` 与 `draw.preferredGone` 都是「条件性的一句提示」：条件对就
 // 出现、不对就消失，都不留占位节点。客户端那半的判据修正是这一节存在的理由——
@@ -864,6 +864,9 @@ assert.ok(bodyText().includes(tt("draw.restartHint")), "enabled=true 的出图�
 const cases = [
   { draw: { mountPending: true }, key: "draw.restartHint", want: true },
   { draw: { mountPending: false }, key: "draw.restartHint", want: false },
+  // 挂载失败时**不**再说「正在挂载」：`absentReason` 那行已经给出具体原因，两句一起
+  // 出现会互相打架（一句说还在挂、一句说注册被拒）。判据就是 absentReason === null。
+  { draw: { mountPending: true, absentReason: "registry-refused" }, key: "draw.restartHint", want: false },
   {
     draw: {
       mountPending: false,

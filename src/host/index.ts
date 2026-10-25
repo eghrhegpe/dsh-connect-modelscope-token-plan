@@ -52,7 +52,7 @@
  *
  *   **出图工具**
  *   - `draw.ts`               协议纯逻辑半边（peer-free）
- *   - `draw-register.ts`      工具注册（挂载时一次性，不可撤销）
+ *   - `draw-register.ts`      工具挂载控制器（开关翻转现挂现卸）
  *   - `draw-runtime.ts`       运行时（两段式：提交 → 轮询）
  *   - `draw-jobs.ts`          作业表（本次挂载内有效）
  *   - `draw-tool-state.ts`    缺席原因 + 本次挂载注册位（内存）
@@ -77,7 +77,7 @@ import { createFileDrawStore } from "./draw-store.ts";
 import { createDrawJobs } from "./draw-jobs.ts";
 import { createFileUsagePrefsStore } from "./usage-prefs-store.ts";
 import { createFileRosterSeenStore } from "./roster-seen-store.ts";
-import { registerDrawTool } from "./draw-register.ts";
+import { createDrawToolMount } from "./draw-register.ts";
 import { resetDrawToolNote } from "./draw-tool-state.ts";
 import { createProviderPublisher } from "./provider-publish.ts";
 import { createProviderReconciler } from "./provider-reconcile.ts";
@@ -221,7 +221,12 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     logger: ctx.logger
   };
 
-  const offs = registerRoutes(ctx, wiring);
+  // 出图工具的挂载控制器：路由（开关保存/reset）与挂载共用**同一个**实例，所以
+  // 「注册」与「注销」不会各持一份状态。它不产生副作用，第一次 `sync()` 才读开关。
+  const drawMount = createDrawToolMount(ctx, wiring, deps);
+  // 路由拿到的是同一个 sync：POST /draw 保存后**等**它跑完再回快照，面板读到的
+  // 就是翻转后的真实挂载状态（而不是旧版的「等下次重启」）。
+  const offs = registerRoutes(ctx, { ...wiring, syncDraw: () => drawMount.sync() });
   ctx.effect(() => {
     // M4 seed：挂载时立即收敛一次，让重启的 Host 在第一次目录拉到后就有模型，
     // 且**用落盘的允许清单**注册（reconciler 读 desired 时走 resolveEnabledIds，
@@ -237,10 +242,10 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     // 出图工具（opt-in，默认关）：与 provider 注册是**两条独立的开关**——「把魔搭
     // 当 chat provider」和「给 agent 一个出图工具」回答的是不同问题，合并没有好处。
     //
-    // 注册时机承重：**工具注册不可撤销**（peer 的 tools registry 没有 unregister），
-    // 所以这里只在挂载时尝试一次，且 `isDisposed` 闸住已在途的调用。开关在挂载后
-    // 翻转要到下次 Host 启动才生效——这正是 sensenova 那份的面板文案也要说明的事。
-    void registerDrawTool(ctx, wiring, deps);
+    // 挂载一次读开关（关闭则什么都不做）；此后每次开关翻转由路由触发同一个控制器
+    // 的 `sync()`——开则注册、关则调 disposer 摘掉，都在本次 Host 生命周期内生效。
+    // `isDisposed` 闸住已在途的工具调用（卸载后不再提交新任务）。
+    void drawMount.sync();
 
     // 目录轮询：每 `pollSeconds` 一次触发收敛。变化检测在 `publishProviderOnce`
     // 内按 `catalogSignature` 比对——未变则空转不重建（见 fix B）；开关翻转、
@@ -257,9 +262,10 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     // 路由当场注销。
     return () => {
       clearInterval(timer);
-      // 出图工具的缺席原因只对**本次挂载**有意义：清掉，下一个生命周期从干净的
-      // 「未登记」开始（否则一次成功挂载后会残留上一轮的缺席原因）。
-      // 缺席原因 + 「本次是否注册上」一起清：下一个生命周期从干净的「未登记、
+      // 出图工具：先摘掉已注册的那个（disposer 是注册时存下的句柄），再清状态。
+      // 顺序承重：先 dispose 控制器（此后 sync 不再注册），再清「缺席原因 + 注册位」。
+      drawMount.dispose();
+      // 缺席原因 + 「此刻是否注册上」一起清：下一个生命周期从干净的「未登记、
       // 未注册」开始（否则一次成功挂载后会残留上一轮的缺席原因或注册位）。
       resetDrawToolNote();
       // 作业表只对本进程、本次挂载有意义：撤下插件时清空，别把「哪些 jobId 还能

@@ -174,43 +174,53 @@
     "mutants": [
       {
         "name": "面板开关被忽略（裁决塌回「配置说了算」，用户关掉的工具会复活）",
-        "from": "    const effective = resolveSwitchEnabled(panelValue, settings.drawEnabled === true);",
-        "to": "    const effective = resolveSwitchEnabled(null, settings.drawEnabled === true);"
+        "from": "      const effective = resolveSwitchEnabled(panelValue, settings.drawEnabled === true);",
+        "to": "      const effective = resolveSwitchEnabled(null, settings.drawEnabled === true);"
       },
       {
         "name": "面板开关读失败当成「关」（一次状态文件抖动就让出图工具消失）",
-        "from": "    const panelValue = drawStore ? await drawStore.enabled().catch(() => null) : null;",
-        "to": "    const panelValue = drawStore ? await drawStore.enabled().catch(() => false) : null;"
+        "from": "      const panelValue = drawStore ? await drawStore.enabled().catch(() => null) : null;",
+        "to": "      const panelValue = drawStore ? await drawStore.enabled().catch(() => false) : null;"
       },
       {
-        "name": "缺席原因不再清空（迟到的 tools 服务注册成功后，面板仍挂着「没有 tools 服务」）",
-        "from": "  setDrawToolNote(null);\n",
-        "to": "  // 过期原因不再清空\n"
+        "name": "注册成功后不清过期缺席原因（迟到的 tools 服务到位了，面板仍挂着「没有 tools 服务」）",
+        "from": "        setDrawToolNote(null);\n        setDrawToolMounted(true);\n      } else {",
+        "to": "        setDrawToolMounted(true);\n      } else {"
       },
       {
         "name": "没有 tools 服务时不记原因（面板只显示「开关：开」，用户找不到工具为什么不在）",
-        "from": "      setDrawToolNote(\"no-tools-service\");\n      return;",
-        "to": "      return;"
+        "from": "        setDrawToolNote(\"no-tools-service\");\n        setDrawToolMounted(false);\n        return;",
+        "to": "        setDrawToolMounted(false);\n        return;"
       },
       {
         "name": "peer 加载失败时不记原因（只剩一行日志，面板上工具无声缺席）",
-        "from": "      setDrawToolNote(\"peer-load-failed\");\n      loggerFor?.warn?.(",
-        "to": "      loggerFor?.warn?.("
-      },
-      {
-        "name": "缺 defineTool 时不记原因（peer 版本不对被当成「没有 tools 服务」之外的无原因缺席）",
-        "from": "      // 加载成功却不带 defineTool = 同一个 Host 问题（peer 版本不对）。\n      setDrawToolNote(\"peer-load-failed\");",
-        "to": "      // 加载成功却不带 defineTool = 同一个 Host 问题（peer 版本不对）。"
+        "from": "        setDrawToolNote(\"peer-load-failed\");\n        setDrawToolMounted(false);\n        return;",
+        "to": "        setDrawToolMounted(false);\n        return;"
       },
       {
         "name": "registry 拒收时不记原因（工具没注册上，面板却说一切正常）",
-        "from": "    setDrawToolNote(\"registry-refused\");",
-        "to": "    setDrawToolNote(null);"
+        "from": "      setDrawToolNote(\"registry-refused\");",
+        "to": "      setDrawToolNote(null);"
+      },
+      {
+        "name": "注册后不存注销句柄（关掉开关也摘不掉 → registry 里留僵尸，再开直接撞重名）",
+        "from": "      if (typeof dispose === \"function\") {\n        disposeTool = dispose;",
+        "to": "      if (typeof dispose === \"function\") {\n        disposeTool = null;"
+      },
+      {
+        "name": "旧 Host 不返回句柄时谎报成功（不记 not-removable，用户关掉开关还看得见工具）",
+        "from": "        setDrawToolNote(\"not-removable\");",
+        "to": "        setDrawToolNote(null);"
+      },
+      {
+        "name": "开关关掉时不调 disposer（unmount 只清状态位，工具继续留在 registry 里）",
+        "from": "        dispose();",
+        "to": "        void dispose;"
       },
       {
         "name": "首选模型不再「面板值优先」（面板里挑的模型对下一次出图不生效）",
-        "from": "      return resolveSwitchValue(panelValue, settings.drawModelId === \"\" ? undefined : settings.drawModelId) ?? null;",
-        "to": "      return resolveSwitchValue(null, settings.drawModelId === \"\" ? undefined : settings.drawModelId) ?? null;"
+        "from": "            return resolveSwitchValue(panelValue, settings.drawModelId === \"\" ? undefined : settings.drawModelId) ?? null;",
+        "to": "            return resolveSwitchValue(null, settings.drawModelId === \"\" ? undefined : settings.drawModelId) ?? null;"
       }
     ]
   },

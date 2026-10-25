@@ -109,6 +109,30 @@ async function load() {
   assert.equal(groups[0].paths.length, 2);
 }
 
+// 模板字面量不能把动态 import 吞掉：token 路靠 `ts.createScanner` 的词法流，带 `${` 的
+// 模板只给出 TemplateHead，后续片段必须 `reScanTemplateToken()` 续扫。不续扫时成对的
+// backtick 会互相错位，把夹在中间的 `import("peer")` 吞进一个假的「模板 token」而另一条路
+// （AST）看得见——2026-10-18 本次改动就撞上了这一条：src/host/draw-register.ts 的模板字面量
+// 一变，token 路立刻扫不出那处动态导入。
+{
+  const peer = "@deepseek-ai/dsh-tools";
+  const src = [
+    "/** 文档里也可以有反引号：`tools.register` 返回 disposer。 */",
+    'const warn = (name) => log(`draw tool ${name} failed`);',
+    'const fail = (name) => log(`another ${name} template`);',
+    'async function load() { return await import("' + peer + '"); }',
+    'const after = (x) => `tail ${x} done`;',
+  ].join("\n");
+  const ast = scanImportsInText(src, { file: "<template-fixture>", peerNames: [peer] });
+  const tokens = scanImportsByTokens(src, { peerNames: [peer] });
+  assert.deepEqual(
+    tokens.map((hit) => hit.spec),
+    ast.map((site) => site.spec),
+    "模板字面量把动态 import 从 token 路吞掉了",
+  );
+  assert.equal(tokens.length, 1, `token 路数出 ${tokens.length} 个导入点`);
+}
+
 // --- 3. 两套独立实现必须数出同一批导入点 ------------------------------------
 //
 // AST 路认形态、算绑定名与属性路径；token 路只看词法，只回答「几次、什么 spec」。

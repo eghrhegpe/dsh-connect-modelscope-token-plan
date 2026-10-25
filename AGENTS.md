@@ -13,7 +13,7 @@ Host（Node/cordis）走静态令牌（`ms-…`，无 OIDC / 无 refresh）；Cl
 **三条事实**（写代码前先认清你在动哪一条）：
 
 1. **面板是地基**：官方魔粒余额（真实值）+ 本地调用计数（按模型分布/趋势/429 事件流）。本地计数只统计**经本插件的调用**，且**按 profile（客户端）分段**——注册 provider 后该客户端的全部魔搭调用都经本插件，但桌面端与 Web 端各记各的账、互不可见（`$DSH_HOME/state/<profile>/<插件名>/`，裁定见 `usage-store.ts` 头注；`npm run doctor` 并排列出各 profile）。别把它当跨端总量——这是被实测抓过一次的过度宣称。
-2. **Provider 注册与出图工具是两条独立开关**，都是 **opt-in 默认关**，任何失败必须降级为「面板照常用、该模块缺席」。出图工具注册**不可撤销**（peer 的 tools registry 没有 unregister），开关翻转要**下次 Host 启动**才生效。
+2. **Provider 注册与出图工具是两条独立开关**，都是 **opt-in 默认关**，任何失败必须降级为「面板照常用、该模块缺席」。出图工具注册**可撤销**（peer 的 `tools.register` 返回 disposer），开关翻转**当场**挂/卸；只有旧 Host 不返回句柄时才退化为「挂上了摘不掉」（`not-removable`，面板会说）。
 3. **凭据只有一把静态钥匙**（`MODELSCOPE_API_KEY`，形如 `ms-…`）：无 OIDC、无密码、无 refresh。默认读 DSH 凭据服务已有的 `MODELSCOPE_API_KEY` 引用；令牌永不入日志、永不进插件目录。
 
 **定位变更**：从「只做额度信息」转向**额度 + provider + 出图 + 上下文窗口策展**的多功能集成。
@@ -31,7 +31,7 @@ Host（Node/cordis）走静态令牌（`ms-…`，无 OIDC / 无 refresh）；Cl
 | 改面板 UI / 三 tab | `src/client/cards.ts` + `panel-page.ts` | `docs/IMPLEMENTATION.md`「面板收敛」 | 改 `src/` 必 `npm run build` 且 `lib/` 与源码同次提交（并行会话纪律） |
 | 改 Provider 注册 / 开关 | `src/host/provider-publish.ts` + `provider-reconcile.ts` | `docs/PROVIDER-M4.md`（实现契约） | 任意失败必须降级为「面板照常用、该模块缺席」（事实 2） |
 | 动凭据 / 令牌 | `src/host/ms-auth.ts`（红线 1/2 落点） | 红线 1、2 | 令牌永不入日志/插件目录；credentials kind 只 `grant`/`api-key` |
-| 改出图工具 | `src/host/draw*.ts` + `docs/SPIKE-image-gen.md` | `draw-register.ts` 头注（注册不可撤销） | 开关翻转下次 Host 启动才生效（事实 2） |
+| 改出图工具 | `src/host/draw*.ts` + `docs/SPIKE-image-gen.md` | `draw-register.ts` 头注（挂载控制器：现挂现卸） | 开关翻转当场生效；注册句柄必须存住并绑到卸载（事实 2） |
 | 改本地计数口径 | `src/host/usage-store.ts` + `usage-observer.ts` | `docs/IMPLEMENTATION.md` 用量相关 | 按 profile 分段、桌面/Web 互不可见（事实 1）——别当跨端总量 |
 | 加 / 改测试 | `test/` 对应 `.test.mjs`（`assert` 的 name 是契约） | `test/docs.test.mjs` §14 / §14b / §6③（登记表真源） | 新文件必须进本文件代码地图 / 测试树，否则门禁红 |
 | 查市场规则 / 投稿漂移 | `npm run market-rules:check`（联网） | `test/helpers/market-rules.mjs` | 取不到上游≠上游没变（会话工具踩坑末条） |
@@ -55,7 +55,7 @@ npm run context-catalog:check   # 内置策展表 × models.dev 上游 + live �
 - **改了契约/接缝文件，跑全量**。`src/shared/*`、`client.js`、`lib/index.js` 以及被多个模块消费的文件，消费者不可枚举——按域裁剪会漏掉跨域契约。判断标准：这个文件的消费者我数得清吗？数不清就全量。
 - **全量现在是安全的**：跑完所有套件再汇总，失败项逐个点名。别因为怕卡机器而只跑自己那一个域。
 - **`--only` / `--skip` 给了值才算数**：从前 runner 只认 `--only <值>` 空格式，而本文件写的正是 `--only=<子串>` 等号式——等号式取不到值就**静默退化成全量**（你以为在裁剪，实际跑了 39 个套件），还因为 build-gate 当时挂在「未裁剪」分支里，连唯一的产物门禁一起跳过。现在两种写法都认，解析不出值或以 `--only-wire` 这种连字符形式出现就直接以退出码 2 报错；裁剪时 build-gate 照跑（「只跑一个域」恰恰是「改了 src 没重建」最容易蒙混的场景）。
-- **撞了封闭集合检查，别绕过，按它的修法补进去**。仓库的高 ROI 门禁都是闭合清单，每条都能在 `test/docs.test.mjs` 里点出行号：**§14（:692）**`src/` 四目录文件登记表（每个 `.ts` 都得在地图里，且不许写幽灵行）、**§14b（:721）**地图第三列的关键导出名必须真的导得出、**§15（:797）**口径表面集合 `SCOPE_FILES`（新增规范性表面必须补进这个数组）、**§17（:873）**状态 store 头注裁定集合、**§13（:616）**根目录手册禁令、**§6（:156）**套件数与 runner 契约。被它拦住 = 你动了未登记成员，正确动作是把新成员补进清单（连代码带测试），不是放宽或删掉这条检查。
+- **撞了封闭集合检查，别绕过，按它的修法补进去**。仓库的高 ROI 门禁都是闭合清单，每条都能在 `test/docs.test.mjs` 里点出行号：**§14（:693）**`src/` 四目录文件登记表（每个 `.ts` 都得在地图里，且不许写幽灵行）、**§14b（:722）**地图第三列的关键导出名必须真的导得出、**§15（:798）**口径表面集合 `SCOPE_FILES`（新增规范性表面必须补进这个数组）、**§17（:874）**状态 store 头注裁定集合、**§13（:617）**根目录手册禁令、**§6（:157）**套件数与 runner 契约。被它拦住 = 你动了未登记成员，正确动作是把新成员补进清单（连代码带测试），不是放宽或删掉这条检查。
   - 判断「这条检查到底在哪」时**先跑命令再写进文档**：本文件曾把三条门禁写成「panel 的 tt 白名单 / degrade marker grep / 聚合器纯度断言」，2026-10-18 清点发现前两条在代码里查无此物（`test/panel.test.mjs` 只有 zh/en 键集一致 + 值域断言，没有白名单；degrade 留痕只有 `test/draw-store.test.mjs:211` 一处 warn 日志断言），第三条同样不存在。指导文档点名门禁时必须带**文件:行**。
 - **测试期望要对齐实现语义**：改测试前先读被测模块的注释——很多「看起来怪」的行为（如 `valid: null` 不是 `false`）是刻意的语义区分。
 - **投稿门禁要装依赖**：投稿副本与市场条目这两个门禁共用 `test/helpers/submission-entry.mjs`，它用 **js-yaml**——市场的同款解析器（上游 `scripts/lib/entries.mjs` 就用它），所以我们读到的是市场看到的那份条目。js-yaml 是 `devDependencies`，裸 checkout 上跑这两个套件会抛「js-yaml is not installed」：先 `npm install`。
@@ -164,11 +164,11 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 | `coalesced-fetch.ts` | 有界并发缓存（目录/余额/标签共用） | `createCoalescedFetch()` |
 | **── 出图工具 ──** | | |
 | `draw.ts` | **出图协议纯逻辑半边**（endpoint/请求体/响应解析/状态判定/失败分诊，peer-free） | `parseDrawResult()`, `readTaskStatus()`, `buildDrawBody()`, `describeDrawFailure()` |
-| `draw-register.ts` | 出图工具注册（挂载时一次性） | `registerDrawTool()` |
+| `draw-register.ts` | 出图工具挂载控制器（开关翻转现挂现卸，卸载时销毁） | `createDrawToolMount()` |
 | `draw-store.ts` | 出图开关 + 模型偏好的持久化 | `createFileDrawStore()` |
 | `draw-runtime.ts` | 出图运行时（两段式：提交→轮询） | `submitDrawTask()`, `awaitDrawTask()` |
 | `draw-jobs.ts` | 出图任务状态管理 | `createDrawJobs()` |
-| `draw-tool-state.ts` | 出图缺席原因 + 本次挂载注册位（内存） | `setDrawToolNote()`, `drawToolNote()`, `setDrawToolMounted()`, `drawToolMounted()` |
+| `draw-tool-state.ts` | 出图缺席/不可摘原因 + 此刻注册位（内存） | `setDrawToolNote()`, `drawToolNote()`, `setDrawToolMounted()`, `drawToolMounted()` |
 | **── 路由 ──** | | |
 | `routes/snapshot.ts` | 面板轮询的唯一只读路由 | `registerSnapshotRoute()` |
 | `routes/models.ts` | 模型目录路由 | `registerModelsRoute()` |
@@ -184,7 +184,7 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 | `doctor.ts` | 只读盘点工具（排查用） | `diagnose()`, `renderReport()` |
 | `codes.ts` | 错误分类单一真源 | `classifyRateLimit()`, `parseRetryAfterMs()` |
 | `util.ts` | 通用工具（脱敏/错误消息/类型守卫） | `redactSecrets()`, `pluginError()` |
-| `types.ts` | Host 侧类型定义 | `Wiring`, `HostDeps` |
+| `types.ts` | Host 侧类型定义 | `Wiring`, `RouteWiring`, `HostDeps` |
 
 ### Client 侧（`src/client/`）— 跑在浏览器里
 
@@ -268,7 +268,7 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 | 为什么本地计数和官方余额是两个数？ | `README.md` 三条事实 #2 |
 | 为什么读不到 ≠ 0？ | `usage-store.ts` `daily()` 注释 |
 | 为什么 reasoning 恒为 false？ | `docs/PROVIDER-M4.md` §4 |
-| 为什么出图开关要下次启动才生效？ | `src/host/draw-register.ts` 文件头注释 |
+| 为什么出图开关能当场挂/卸？ | `src/host/draw-register.ts` 文件头注释（`tools.register` 返回 disposer） |
 | 为什么重分类层在观察层之内？ | `src/host/llm-adapter.ts` 注释 |
 | 为什么 commitPublish 不是 async？ | `src/host/provider-publish.ts` |
 | 为什么策展表只收 21 个模型？ | `src/host/context-catalog.ts` |

@@ -840,15 +840,15 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
 /**
  * 出图工具卡：开关、候选模型、挂载状态。
  *
- * **与 ProviderCard 的关键差异，也是这张卡存在的主要理由**：provider 开关翻转会
- * 立即重注册，而出图工具的开关翻转**要等下次 Host 启动**——peer 的 tools registry
- * 没有 unregister（完整论述见 src/host/draw-register.ts 文件头注）。所以这张卡必须
- * 把这件事说出来（`draw.restartHint`），否则用户
- * 翻开关后看不到任何变化，会以为坏了。
+ * **与 ProviderCard 的关键差异**：provider 开关翻转是「重建 provider 对」，出图工具
+ * 的开关翻转是「注册/注销一个 agent 工具」——两者都在**本次 Host 生命周期内**生效
+ * （peer 的 `tools.register` 返回 disposer，完整论述见 src/host/draw-register.ts 文件
+ * 头注）。保存后路由会等挂载收敛完再回快照，所以这张卡通常直接显示「已注册」；
+ * `draw.restartHint` 只在瞬时未挂上（或挂载失败）时出现，不再宣称「要等下次启动」。
  *
- * 缺席原因是**分开渲染**的：`no-tools-service` 是「这个 Host 没提供该服务」（正常），
- * 另两种是 Host 缺陷。三种都给出各自的一句话，因为「开关开着但工具不在」如果没有
- * 解释，用户没有任何办法自己诊断。
+ * 缺席/不可摘原因是**分开渲染**的：`no-tools-service` 是「这个 Host 没提供该服务」
+ * （正常），`not-removable` 是「能用但关不掉」，另两种是 Host 缺陷。每种都给出各自
+ * 的一句话，因为「开关开着但工具不在」如果没有解释，用户没有任何办法自己诊断。
  * @param {object} props - 渲染参数。
  * @returns {unknown} 卡片节点。
  */
@@ -916,13 +916,13 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, 
     statusNode = h("div", { style: { ...S.muted, fontSize: 12 }, role: "status" }, tt("draw.notMounted"));
   }
 
-  // 挂载发生在下次 Host 启动——开关翻转后本次不生效。
+  // 开关翻转是当场收敛的：正常保存后马上就是「已注册」，这句提示只在 `mountPending`
+  // 仍为 true 时出现（进程刚起还没跑到 sync，或这次收敛失败但还没记下原因）。
   //
-  // 判据是 Host 给的 `mountPending`（= 开关为开且本次挂载没注册上），不是「开关
-  // 为开」。后者会把**已经挂好**的情况也提示一遍重启，等于每时每刻都在撒谎；
-  // 而 Host 那一侧的 `mountPending` 曾误用「有缺席原因」当判据，恰好漏掉最常见
-  // 的「挂载时开关是关的、之后才翻开」——那种情况没有缺席原因。两侧都已修正。
-  const restartHint = enabled && status.mountPending === true
+  // 有缺席原因时**不再**叠这句：原因本身已经说明了「为什么没挂上」，再补一句
+  // 「正在挂载」会自相矛盾。判据是 Host 给的 `mountPending`（= 开关为开且此刻没
+  // 注册上），不是「开关为开」——后者会把已经挂好的情况也提示一遍。
+  const restartHint = enabled && status.mountPending === true && status.absentReason === null
     ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("draw.restartHint"))
     : null;
 
@@ -1100,5 +1100,6 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, 
 const DRAW_ABSENT_KEY: Record<string, DictionaryKey> = {
   "no-tools-service": "draw.absent.noTools",
   "peer-load-failed": "draw.absent.peerLoad",
-  "registry-refused": "draw.absent.registry"
+  "registry-refused": "draw.absent.registry",
+  "not-removable": "draw.absent.notRemovable"
 };

@@ -162,8 +162,9 @@ export interface ProviderStatus {
  * 出图工具的状态（`DRAW_PATH` 的响应形状，也进快照）。
  *
  * **刻意与 `ProviderStatus` 分开**：那个说「魔搭作为 chat provider 提供什么模型」，
- * 这个说「给 agent 一个出图工具」。两者的开关、候选集合、生效时机都不同——出图
- * 开关翻转**不会**立刻改变挂载（工具无法注销），这正是 `mountPending` 要表达的。
+ * 这个说「给 agent 一个出图工具」。两者的开关与候选集合都不同；出图开关翻转会
+ * **当场**挂/卸（peer 的 `tools.register` 返回 disposer），所以 `mountPending` 只是
+ * 「正在收敛 / 收敛失败」的瞬时读数，不再是「等下次启动」。
  *
  * 实测依据见 docs/SPIKE-image-gen.md。
  */
@@ -204,22 +205,21 @@ export interface DrawStatus {
    */
   effectiveSource?: "preferred" | "declared-text-to-image" | "known-text-to-image" | "catalog-first" | null;
   /**
-   * 工具缺席的原因；`null` = 开关没开，或已成功挂载。
+   * 工具缺席（或不可摘）的原因；`null` = 开关没开，或已成功挂载。
    *
-   * 三种原因里只有 `no-tools-service` 是「正常」（Host 没提供该服务），另两种是
-   * Host 缺陷。面板必须分开措辞，否则用户没法自己诊断「开关开着但工具不在」。
+   * 四种原因里只有 `no-tools-service` 是「正常」（Host 没提供该服务）；`not-removable`
+   * 是「能用但关不掉」的降级；另两种是 Host 缺陷。面板必须分开措辞，否则用户没法
+   * 自己诊断「开关开着但工具不在 / 关了却还在」。
    */
-  absentReason: "no-tools-service" | "peer-load-failed" | "registry-refused" | null;
+  absentReason: "no-tools-service" | "peer-load-failed" | "registry-refused" | "not-removable" | null;
   /**
-   * 开关已开，但本次挂载**没有**把工具注册上。
+   * 开关已开，但工具此刻**还没**在 registry 里。
    *
    * 与 `absentReason` 的区别（两者互补，不要互相代替）：
-   * - `absentReason !== null`：注册尝试过且失败（三种缺席原因之一）；
-   * - `absentReason === null && mountPending === true`：挂载那一刻开关是关的，
-   *   压根没走到注册（或还没走完），用户之后翻开开关。这是翻转开关到下次 Host
-   *   启动之间**最常见**的状态，不是故障，但必须提示重启——否则用户以为开关坏了。
-   *
-   * 曾有实现用 `absentReason !== null` 充当本字段的判据，恰好漏掉了第二种场景。
+   * - `absentReason !== null`：收敛已尝试且失败（或挂上了却摘不掉）；
+   * - `absentReason === null && mountPending === true`：开关开着，但 `sync()` 还没
+   *   跑完（进程刚起 / 连续翻转尚未收敛）。翻转后正常会在同一次 POST 响应里落定，
+   *   所以这通常是瞬态，不再是「要等下次 Host 启动」。
    */
   mountPending: boolean;
   /**

@@ -1,20 +1,21 @@
-// draw-register.test.mjs —— 出图工具装配层的**第一条**测试。
+// draw-register.test.mjs —— 出图工具**挂载控制器**的测试。
 //
-// 补的是一条被文件头自己承认的缺口：`draw-register.ts` 的头注释写着「本文件目前
-// 没有测试覆盖——`registerDrawTool` 在 test/ 里零引用」，并把 `llm-adapter.ts` 的
-// peer-stub-loader 当作「这类模块离线可测」的例证。那条例证成立，但它其实**过谦**
-// 了：本文件根本不需要 loader——`registerDrawTool` 早就留了 `deps.loadToolsModule`
-// 这条缝（`deps.loadToolsModule ? … : import("@deepseek-ai/dsh-tools")`），伪一个
-// `{ defineTool }` 即可让真装配链原样跑起来。所以这里不用 module hooks，只注入。
+// 这个套件最早钉的是「一次性注册」。被测对象现在是 createDrawToolMount：开关翻转要
+// **当场**挂/卸，卸载要销毁。留给测试的缝没变——deps.loadToolsModule 注入一个
+// { defineTool } 就够，不需要 module hooks。
 //
 // 钉住的都是**承重纪律**，不是实现细节：
 //   · 开关裁决（面板赢配置，两个方向）；
+//   · sync() 是收敛器：关 → 摘、开 → 挂，反复翻转与并发调用都不重复注册；
+//   · peer 的 tools.register 返回 disposer；拿不到句柄时记 not-removable 并 warn
+//     （能挂上但摘不掉，面板得说实话），不能假装「能摘」；
+//   · dispose() 之后 sync() 不得复活工具（卸载与开关是两条独立的路）；
 //   · 目录/偏好必须**调用时现读**（文件头承诺的「目录变化不需要重注册」全靠这条）；
-//   · 缺席原因三态各归各位，且只有 Host 侧缺陷才 warn；
+//   · 缺席原因各归各位，且只有 Host 侧缺陷才 warn；
 //   · 迟到的 tools 服务最终注册时必须**清掉**过期的缺席原因（否则面板一直挂着谎）。
 
 import { strict as assert } from "node:assert";
-import { registerDrawTool } from "../src/host/draw-register.ts";
+import { createDrawToolMount } from "../src/host/draw-register.ts";
 import { drawToolNote, setDrawToolNote } from "../src/host/draw-tool-state.ts";
 import { DRAW_TOOL_NAME } from "../src/host/draw-runtime.ts";
 import { DRAW_TIMEOUT_MS, DRAW_WAIT_BUDGET_MS } from "../src/host/draw.ts";
@@ -23,11 +24,30 @@ import { CONFIG_DEFAULTS, name } from "../src/host/host-config.ts";
 
 const IMAGE_ENTRY = { id: "Qwen/Qwen-Image-Edit", tasks: ["image-to-image"] };
 
-/** 记录式 tools 服务：只记注册了什么，不模拟 peer 行为。 */
-function toolsService(sink) {
+/**
+ * 记录式 tools 服务：模仿 peer 的两条承重行为。
+ *
+ * 1) register 返回**注销句柄**（宿主契约就是 () => void）；
+ * 2) 重名注册直接抛错（宿主 NamedEntries.insert 的行为）——挂载控制器若在「以为已卸」
+ *    的状态上再挂一次，这里会红，比断言 registered.length 更早暴露。
+ *
+ * stats.registerCalls 让「幂等」那几节数得清到底调了几次 register。
+ */
+function toolsService(sink, stats = null) {
+  const live = new Map();
   return {
     register(definition) {
+      if (stats !== null) stats.registerCalls += 1;
+      if (live.has(definition.name)) {
+        throw new Error('tool "' + definition.name + '" is already registered');
+      }
+      live.set(definition.name, definition);
       sink.push(definition);
+      return () => {
+        if (!live.delete(definition.name)) return;
+        const at = sink.indexOf(definition);
+        if (at !== -1) sink.splice(at, 1);
+      };
     }
   };
 }
@@ -35,7 +55,7 @@ function toolsService(sink) {
 /**
  * 离线默认：任何没被显式装桩的出图请求都拒绝。
  *
- * 这不是洁癖，是本套件第一版踩到的坑：`registerDrawTool` 的 `deps.drawFetch` 缺省
+ * 这不是洁癖，是本套件第一版踩到的坑：挂载控制器的 `deps.drawFetch` 缺省
  * 是**真的全局 fetch**，于是「isDisposed 为真时 execute 必须拒绝」那节写错了前置
  * 条件（传的是未卸载的 publisher），execute 就一路走到提交，对本机网络打了一次
  * 真实请求并拿回上游 401——测试仍然「通过」到下一行才因为断言不符而失败。离线
@@ -67,7 +87,7 @@ function wiringFor(overrides = {}) {
 /**
  * 开关**开着**的 wiring。
  *
- * 需要它是因为 `registerDrawTool` 的第一道闸就是开关：开关没开时后面所有分支都走
+ * 需要它是因为挂载控制器的第一道闸就是开关：开关没开时后面所有分支都走
  * 不到，缺席原因也一律不记（那时工具「不缺席」，只是「没被要」）。下面每一节想验
  * 的东西都在闸门之后，所以必须先过闸——第一版这里漏了，于是「没有 tools 服务」
  * 那节读到的是 `null`。
@@ -87,10 +107,10 @@ function onWiring(overrides = {}) {
  * （`tools/dev/mutate-spec.json`）抓出来的，不是靠眼睛看出来的：
  * 「缺席原因不再清空」那个变异第一轮是 STILL-GREEN。
  */
-async function mount({ wiring = wiringFor(), tools = toolsService, deps = {}, getService, keepNote = false } = {}) {
+async function mount({ wiring = wiringFor(), tools = toolsService, deps = {}, getService, keepNote = false, stats = null } = {}) {
   const warnings = [];
   const registered = [];
-  const sink = tools === null ? null : tools(registered);
+  const sink = tools === null ? null : tools(registered, stats);
   const ctx = {
     get: (key) => {
       if (key !== "tools") return undefined;
@@ -100,13 +120,14 @@ async function mount({ wiring = wiringFor(), tools = toolsService, deps = {}, ge
   };
   const effectiveWiring = { ...wiring, logger: { warn: (message) => warnings.push(message) } };
   if (!keepNote) setDrawToolNote(null);
-  await registerDrawTool(ctx, effectiveWiring, {
+  const controller = createDrawToolMount(ctx, effectiveWiring, {
     loadToolsModule: async () => ({ defineTool: (definition) => definition }),
     // 默认断网（见 NO_NETWORK 的注释）；要验提交形状的节自己装桩。
     drawFetch: NO_NETWORK,
     ...deps
   });
-  return { registered, warnings };
+  await controller.sync();
+  return { registered, warnings, mount: controller };
 }
 
 // ── §1 开关裁决：面板保存值赢配置，两个方向都要成立 ──
@@ -169,7 +190,7 @@ async function mount({ wiring = wiringFor(), tools = toolsService, deps = {}, ge
   assert.notEqual(DRAW_WAIT_BUDGET_MS, DRAW_TIMEOUT_MS, "两个预算常量本身不能又合并回去");
 }
 
-// ── §3 三种缺席原因各归各位，且只有 Host 侧缺陷才 warn ──
+// ── §3 缺席原因各归各位（含「能挂上但摘不掉」），且只有 Host 侧缺陷才 warn ──
 {
   const noTools = await mount({ tools: null, wiring: onWiring() });
   assert.equal(noTools.registered.length, 0);
@@ -448,6 +469,78 @@ async function mount({ wiring = wiringFor(), tools = toolsService, deps = {}, ge
   const resumed = await registered[0].execute({ jobId: "t-wired" });
   assert.equal(resumed.status, "pending", "续查读的也是同一张表（两张表就会「jobId 查不到」）");
   assert.ok(calls.length >= 2, "续查只发 GET 轮询，不重新提交");
+}
+
+// ── §7 热挂/热卸：开关翻转当场生效，反复翻转与并发 sync 都不重复注册 ──
+{
+  let panel = null;
+  const stats = { registerCalls: 0 };
+  const { registered, mount: controller } = await mount({
+    wiring: onWiring({ drawStore: { enabled: async () => panel, modelId: async () => null } }),
+    tools: (sink) => toolsService(sink, stats)
+  });
+  assert.equal(registered.length, 1, "开关开着 → sync 挂上一次");
+  assert.equal(stats.registerCalls, 1);
+  assert.equal(controller.mounted(), true);
+
+  panel = false;
+  await controller.sync();
+  assert.equal(registered.length, 0, "关掉开关 → 当场从 registry 摘掉（不用重启）");
+  assert.equal(controller.mounted(), false, "mounted() 必须跟着变，否则面板的瞬时读数会撒谎");
+  assert.equal(drawToolNote(), null, "用户主动关掉不是「缺席」，不该留原因");
+
+  panel = true;
+  await controller.sync();
+  assert.equal(registered.length, 1, "再打开 → 再挂上（disposer 已调过，不能因为残留状态拒绝）");
+  assert.equal(stats.registerCalls, 2);
+
+  // 已经挂着再 sync 一次：幂等，不能再调 register（重名会抛，peer 就是这么做的）。
+  await controller.sync();
+  assert.equal(stats.registerCalls, 2, "已挂载时 sync 必须幂等，不得重复注册");
+  assert.equal(registered.length, 1);
+
+  // 并发：一次关闭触发的两个 sync 必须串行，不互相踩。
+  panel = false;
+  await Promise.all([controller.sync(), controller.sync()]);
+  assert.equal(registered.length, 0, "并发 sync 后只应剩零个注册");
+  assert.equal(controller.mounted(), false);
+}
+
+// ── §8 dispose()：卸载销毁，且之后 sync 不得复活 ──
+{
+  let panel = null;
+  const { registered, mount: controller } = await mount({
+    wiring: onWiring({ drawStore: { enabled: async () => panel, modelId: async () => null } })
+  });
+  assert.equal(registered.length, 1, "先在 registry 里挂一个");
+  controller.dispose();
+  assert.equal(registered.length, 0, "dispose 必须摘掉工具（Host 卸载不该留下僵尸注册）");
+  assert.equal(controller.mounted(), false);
+  controller.dispose();
+  assert.equal(registered.length, 0, "dispose 必须幂等");
+
+  panel = true;
+  await controller.sync();
+  assert.equal(registered.length, 0, "dispose 之后 sync 不得复活（卸载是终态，开关再开也不回来）");
+  assert.equal(controller.mounted(), false);
+}
+
+// ── §9 旧 Host：register 不返回句柄 → not-removable，说实话而不是假装能摘 ──
+{
+  const registered = [];
+  const legacy = await mount({
+    wiring: onWiring(),
+    tools: () => ({
+      register(definition) {
+        registered.push(definition);
+      }
+    })
+  });
+  assert.equal(registered.length, 1, "没有 disposer 也要把工具挂上（能用）");
+  assert.equal(legacy.mount.mounted(), true, "挂上了就是挂上了，mounted 不能因为摘不掉而说 false");
+  assert.equal(drawToolNote(), "not-removable", "必须记下「摘不掉」，面板才能如实告诉用户");
+  assert.equal(legacy.warnings.length, 1, "旧 Host 是新出现的缺陷面，必须 warn 一次");
+  assert.ok(legacy.warnings[0].includes("disposer"), "warn 要指名 disposer，否则后人以为是注册失败");
 }
 
 console.log("draw-register.test.mjs: all checks passed");
