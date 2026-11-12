@@ -570,4 +570,39 @@ for (const state of [
   assert.equal(publisherPhaseOf(state, true), "disposed", "disposed 压过一切相位");
 }
 
+// §14 quota 抑制闸：抑制位 true 时 publish 走与「开关关」同一条 unregister 路径，
+// 连 settings 目录行一起摘（picker 行消失）；false 时恢复注册。状态机上
+// `state.suppressed` 记录最近一次 publish 入口看到的抑制位（快照聚合读它渲染
+// `suppressedToday`）。
+{
+  // ① 抑制 = 摘除：开关开着也 unregister，且 registered 翻 false。
+  const llm = makeLlm();
+  const { publisher } = makePublisher({ llm });
+  await publisher.publish(ENTRIES, [], []);
+  assert.equal(llm.adapters.has("modelscope-token-plan"), true, "先正常注册（前置）");
+  const removed = await publisher.publish(ENTRIES, [], [], true);
+  assert.equal(removed.ok, true, "抑制路径本身是成功的 no-op 语义");
+  assert.equal(llm.adapters.has("modelscope-token-plan"), false, "抑制 → 适配器被摘下");
+  assert.equal(publisher.state.registered, false, "抑制 → registered 翻 false");
+  assert.equal(publisher.state.suppressed, true, "state.suppressed 记录抑制位");
+  // 空转守卫：同样输入的下一轮不 churn。
+  const skipped = await publisher.publish(ENTRIES, [], [], true);
+  assert.equal(skipped.ok && skipped.skipped, true, "已摘除且 offer 没变 → 空转跳过");
+  // ② 解除 = 重挂：第 4 参 false 走正常注册路径。
+  const restored = await publisher.publish(ENTRIES, [], [], false);
+  assert.equal(restored.ok, true);
+  assert.equal(llm.adapters.has("modelscope-token-plan"), true, "解除 → 重新注册");
+  assert.equal(publisher.state.registered, true);
+  assert.equal(publisher.state.suppressed, false, "state.suppressed 复位");
+  publisher.release();
+}
+{
+  // ③ 缺省缝：不传第 4 参 = false（老调用方逐字不变）。
+  const llm = makeLlm();
+  const { publisher } = makePublisher({ llm });
+  await publisher.publish(ENTRIES, [], []);
+  assert.equal(publisher.state.suppressed, false, "不传抑制位 = 不抑制（缺省缝）");
+  publisher.release();
+}
+
 console.log("provider-publish.test.mjs: all checks passed");

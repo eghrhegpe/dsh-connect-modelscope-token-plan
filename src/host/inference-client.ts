@@ -137,14 +137,26 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
    * 后面的请求开始排队。
    *
    * `cancel()` 是显式的弃权：告诉 undici「这个 body 我不要了」，它会立刻释放
-   * 连接而不是等GC。用 `void` 前缀是因为这是best-effort——取消失败不影响我们
-   * 已经决定的结果。
+   * 连接而不是等GC。
+   *
+   * **`cancel()` 返回 Promise，失败是 rejection 不是 throw**（0.7.0 的崩溃）：
+   * Node 的 `ReadableStream.cancel` 在 body 已 locked 时不抛，而是返回一个以
+   * `ERR_INVALID_STATE: ReadableStream is locked` 拒绝的 promise。原来的 `void`
+   * 把它丢掉 = 未处理的 rejection；宿主把加载期的这一条当成
+   * `fatal load failure` 直接杀进程。触发路径很普通：详情端点返回非 JSON 时
+   * `json()` 半路抛错，body 仍被 reader 锁着（实测 locked=true），紧接着
+   * `discardBody` 一 cancel 就炸。
+   * 所以挡两层：locked 直接跳过（拿不到锁，本来也 cancel 不了，body 由持锁方
+   * 收尾），真发起了也要 `.catch` 吞掉——弃权永远不该变成一个致命错误。
    */
   const discardBody = (response: Response): void => {
     try {
-      void response.body?.cancel();
+      // 测试桩的 response 常省略 body（类型上只能是流或 null），故按可空处理。
+      const body = response.body;
+      if (body == null || body.locked) return;
+      void body.cancel().catch(() => {});
     } catch {
-      // body 已 locked / 已读完 / 不支持 cancel：无可做，也不该因此改结论。
+      // 少数 fetch 实现可能同步抛；best-effort，不因此改结论。
     }
   };
 
@@ -429,9 +441,9 @@ function tokenFingerprint(token: string): string {
         throw pluginError(CODE.UPSTREAM_ERROR, "modelscope returned HTTP " + String(response.status) + " (validity probe)");
       }
       // 其余（含 200 空壳与 400 校验层拒绝）都判**令牌好**：probe 的成功判据是
-      // 鉴权，不是这次请求本身做了什么。响应体不消费（discardBody 的同类处理）——
-      // 这里只看 status。
-      void response.body?.cancel();
+      // 鉴权，不是这次请求本身做了什么。响应体不消费——这里只看 status，统一走
+      // discardBody，别在第二处重复「cancel 的 rejection 要吞掉」这条纪律。
+      discardBody(response);
       return { ok: true, status: response.status, modelId, elapsedMs };
     }
   };

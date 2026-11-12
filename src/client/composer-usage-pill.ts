@@ -6,10 +6,13 @@
  * 没人公布过的数字（口径纪律见 README「诚实声明」一节：本仓库没有单独的计量文档，
  * 那两段就是唯一家）。所以胶囊只显示两个
  * 真实存在的读数，且各标各的来源：
- *   - 官方魔粒余额：`snapshot.balance.available`，来自官方 `openapi/v1/magicubes/balance`；
+ *   - 官方魔粒余额：`snapshot.accounts[]` 的逐源站官方余额（双账户池，CN|AI），
+ *     老 Host / 软失败省略该块时退回头条 `snapshot.balance.available`，来自官方
+ *     `openapi/v1/magicubes/balance`；正文拼成 `0|1 魔粒` 表示 `CN|AI` 两站各自读数；
  *   - 今日本地调用次数：`snapshot.quota.daily.usedLocal`，Host 侧按本地日聚合、
  *     只统计经本插件的调用——所以正文里必须带「本地」二字，否则会被读成官方口径。
- * 正因为两个数字来源不同，正文写成 `魔搭 · 143 魔粒 · 今日本地 7 次`：前缀说
+ *     本地计数按 profile 分段、**不按源站拆分**，所以次数段是单值（不是 `|`）。
+ * 正因为两个数字来源不同，正文写成 `魔搭 · 0|1 魔粒 · 今日本地 7 次`：前缀说
  * 「哪套额度」，后两段各自说「这个数字是谁给的」。
  *
  * **null ≠ 0**：读不到（Host 软失败、上游没给该字段）渲染「—」，绝不渲染 0。
@@ -54,7 +57,7 @@ import { S } from "./styles.ts";
 import { count, format, isoTime, statedCadenceMs } from "./format.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
 import type { Tt } from "./runtime.ts";
-import type { BalanceData, Snapshot } from "../shared/wire.ts";
+import type { AccountSnapshot, BalanceData, Snapshot } from "../shared/wire.ts";
 
 /**
  * 本胶囊认领的 provider id，与 Host 侧 `src/host/llm-models.ts` 的
@@ -63,6 +66,24 @@ import type { BalanceData, Snapshot } from "../shared/wire.ts";
  * 「接入了魔搭模型但胶囊永远不出现」。
  */
 export const MODELSCOPE_PROVIDER = "modelscope-token-plan";
+
+/**
+ * 国际版 provider id（拓扑修订：两个 provider，各绑各账户的令牌）。客户端不能
+ * import host 模块，所以这个字面量由测试静态读取 Host 的 `LLM_PROVIDER_ID_INTERNATIONAL`
+ * 核对（与 CN 那条同族）。
+ */
+export const MODELSCOPE_PROVIDER_INTERNATIONAL = "modelscope-token-plan-international";
+
+/** 「本插件家族」= CN + 国际两个 provider id。选中任一站的模型，胶囊都该出现。 */
+const MODELSCOPE_PROVIDERS: ReadonlySet<string> = new Set([
+  MODELSCOPE_PROVIDER,
+  MODELSCOPE_PROVIDER_INTERNATIONAL
+]);
+
+/** 归属判定：两站任一 provider 都算本插件；其它 provider / 判不出 → false。 */
+export function isModelscopeProvider(id: string | undefined): boolean {
+  return id !== undefined && MODELSCOPE_PROVIDERS.has(id);
+}
 
 /** 面板默认轮询周期（Host 未声明 `pollSeconds` 时的回退，与 useSnapshotPolling 同值）。 */
 const DEFAULT_CADENCE_MS = 30_000;
@@ -153,10 +174,35 @@ const TIER_INK: Record<Tier, string> = {
   unknown: S.pillTierUnknown
 };
 
+/** 余额的纯数值（不带单位）：读不到画「—」，读到了画数字。 */
+function balanceValue(available: number | null, tt: Tt): string {
+  return available === null ? "—" : count(available);
+}
+
 /** 「余额」段的正文：读不到画「—」+ 单位，读到了画数字 + 单位。 */
 export function balanceText(available: number | null, tt: Tt): string {
-  const value = available === null ? "—" : count(available);
-  return `${value} ${tt("composer.balanceUnit")}`;
+  return `${balanceValue(available, tt)} ${tt("composer.balanceUnit")}`;
+}
+
+/**
+ * 双账户余额正文（M3）：有 `accounts[]` 时拼成 `CN|AI 魔粒`——每段是各自源站的
+ * 官方魔粒读数，各读不到各画「—」（如 `0|— 魔粒` 表示国际站没读到）。单值
+ * `balanceText` 是它的退化形：老 Host / 软失败省略 `accounts` 时，退回头条
+ * `balance`（仍是官方读数），不补假的第二段。
+ *
+ * 本地次数不在这里（只统计经本插件、按 profile 分段的聚合账，不按源站切），所以
+ * 这一行只负责余额的「两段」显示，次数的「单段」由 {@link callsText} 另算。
+ */
+export function balanceSegmentText(
+  accounts: { region: "cn" | "ai"; available: number | null }[] | undefined,
+  fallback: number | null,
+  tt: Tt
+): string {
+  if (!accounts || accounts.length === 0) return balanceText(fallback, tt);
+  const cn = accounts.find((account) => account.region === "cn")?.available ?? null;
+  const ai = accounts.find((account) => account.region === "ai")?.available ?? null;
+  const unit = tt("composer.balanceUnit");
+  return `${balanceValue(cn, tt)}|${balanceValue(ai, tt)} ${unit}`;
 }
 
 /** 「今日本地」段的正文：读不到画「—」，读到了画次数。 */
@@ -169,8 +215,14 @@ export function callsText(usedToday: number | null, tt: Tt): string {
  * 一段会让「哪一段是空的」变成排版事故（读者分不清是没读到还是这一栏根本不在），
  * 而「—」明确说了是前者。
  */
-export function readingText(available: number | null, usedToday: number | null, tt: Tt): string {
-  return `${balanceText(available, tt)} · ${callsText(usedToday, tt)}`;
+export function readingText(
+  available: number | null,
+  usedToday: number | null,
+  tt: Tt,
+  accounts?: { region: "cn" | "ai"; available: number | null }[]
+): string {
+  const balance = accounts && accounts.length > 0 ? balanceSegmentText(accounts, available, tt) : balanceText(available, tt);
+  return `${balance} · ${callsText(usedToday, tt)}`;
 }
 
 /**
@@ -252,6 +304,31 @@ export function newModelsOf(snapshot: Snapshot | null | undefined): string[] {
 }
 
 /**
+ * 双账户余额行（M4）：从可选块 `accounts[]` 取每站官方魔粒余额的**可用读数**。
+ *
+ * **只读、纯函数**：老 Host / Host 软失败省略该块时返回空数组——胶囊正文仍用
+ * 兼容聚合的 `snapshot.balance`，不谎称第二个账户。每站各自 `null ≠ 0` 由
+ * {@link availableOf} 守：读不到就是 null，绝不推成 0。两站是两份独立的官方读数，
+ * 不合并成一个总数（把两把账户的钱说成一笔比不显示更糟）。
+ * @param {Snapshot|null|undefined} snapshot
+ * @returns {{ region: "cn"|"ai", available: number|null }[]}
+ */
+export function accountsOf(snapshot: Snapshot | null | undefined): { region: "cn" | "ai"; available: number | null }[] {
+  const raw = snapshot?.accounts;
+  if (!Array.isArray(raw)) return [];
+  const out: { region: "cn" | "ai"; available: number | null }[] = [];
+  const seen = new Set<string>();
+  for (const account of raw as AccountSnapshot[]) {
+    if (account === null || typeof account !== "object") continue;
+    if (account.region !== "cn" && account.region !== "ai") continue;
+    if (seen.has(account.region)) continue;   // 脏快照里重复行只认第一份
+    seen.add(account.region);
+    out.push({ region: account.region, available: availableOf(account.balance) });
+  }
+  return out;
+}
+
+/**
  * 点面板外面或按 Escape 关面板。
  *
  * 三处细节各有理由：
@@ -308,8 +385,10 @@ function QuotaPopover(props: {
   usedToday: number | null;
   balance: BalanceData | null;
   newModels: string[];
+  /** 双账户余额行（M4）：空数组 = 老 Host / 软失败省略，块整体不渲染。 */
+  accounts: { region: "cn" | "ai"; available: number | null }[];
 }): unknown {
-  const { tt, title, stale, available, usedToday, balance, newModels } = props;
+  const { tt, title, stale, available, usedToday, balance, newModels, accounts } = props;
   const fetchedAt = balance?.fetchedAt;
   const failure = balance?.error;
   return h(
@@ -349,6 +428,28 @@ function QuotaPopover(props: {
         h("span", { style: S.pillPopoverFigure }, usedToday === null ? "—" : format(tt("composer.localCalls"), { calls: count(usedToday) }))
       )
     ),
+    // 双账户各自官方余额（M4）：本地次数仍是上面那一行的合并账，这里只把「两把
+    // 账户各自的官方读数」摊开，各标各的来源、各读不到各画「—」。accounts 为空
+    // （老 Host / 省略该块）时整段不渲染——胶囊正文继续用兼容聚合的那一笔。
+    accounts.length === 0
+      ? null
+      : h(
+          "div",
+          { style: S.pillPopoverRow },
+          h(
+            "div",
+            { style: S.pillPopoverRowLine },
+            h("span", { style: S.pillPopoverLabel }, tt("composer.accountsBalance"))
+          ),
+          ...accounts.map((account) =>
+            h(
+              "div",
+              { key: account.region, style: S.pillPopoverRowLine },
+              h("span", { style: S.pillPopoverLabel }, tt(account.region === "ai" ? "composer.accountIntlBalance" : "composer.accountCnBalance")),
+              h("span", { style: S.pillPopoverFigure }, balanceText(account.available, tt))
+            )
+          )
+        ),
     // 新模型行只在真的有时才出现：一个恒亮的「0 新模型」会变成背景噪声，
     // 而它的价值全在「有」的那几轮。
     newModels.length === 0
@@ -399,6 +500,7 @@ export function ModelscopePill(props: { tt: Tt }): unknown {
   const available = availableOf(balance);
   const usedToday = usedTodayOf(data);
   const newModels = newModelsOf(data);
+  const accounts = accountsOf(data);
 
   // cadence 跟 Host 声明走（`pollSeconds`），不跟常量走：Host 改声明周期，
   // 「多久算陈旧」必须跟着改，否则退避期里每一帧都误报陈旧。
@@ -441,7 +543,7 @@ export function ModelscopePill(props: { tt: Tt }): unknown {
         // 胶囊才安静——否则一个正常数字会和模型选择器本身的字样一样吵。
         style: tier === "exhausted" ? S.pillTierExhaustedText : undefined
       },
-      pending ? "…" : readingText(available, usedToday, tt)
+      pending ? "…" : readingText(available, usedToday, tt, accounts)
     ),
     stale
       ? h("span", { className: "dsh-modelscope-composer-pill-stale", style: S.pillStale }, ` · ${tt("composer.stale")}`)
@@ -477,7 +579,7 @@ export function ModelscopePill(props: { tt: Tt }): unknown {
     },
     trigger,
     open
-      ? h(QuotaPopover, { tt, title, stale, available, usedToday, balance, newModels })
+      ? h(QuotaPopover, { tt, title, stale, available, usedToday, balance, newModels, accounts })
       : null
   );
 }
@@ -488,6 +590,8 @@ export function ModelscopePill(props: { tt: Tt }): unknown {
  */
 export function ComposerUsagePill(props: ComposerPillProps): unknown {
   const selection = props.useProjection?.("modelSelection");
-  if (selectedProviderOf(selection) !== MODELSCOPE_PROVIDER) return null;
+  // 两个 provider 都算归属：选中 CN 或国际站的模型，胶囊都应出现（拓扑修订后
+  // 家族有两个 provider id，只认 CN 会让国际模型那一半会话整块缺席）。
+  if (!isModelscopeProvider(selectedProviderOf(selection))) return null;
   return h(ModelscopePill, { tt: props.tt });
 }

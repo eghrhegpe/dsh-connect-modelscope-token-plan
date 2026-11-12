@@ -103,7 +103,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const m = tokens / 1e6;
 		return `${m >= 10 || Number.isInteger(m) ? Math.round(m) : Math.round(m * 10) / 10}M`;
 	}
-	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
+	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, PROVIDER_QUOTA_RESUME_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH, MODELSCOPE_TOKEN_URL, MODELSCOPE_INTERNATIONAL_SITE_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
 	var init_const = __esmMin((() => {
 		init_wire();
 		NS = "dsh-connect-modelscope-token-plan";
@@ -117,10 +117,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		PROVIDER_ROSTER_PATH = `/api/${NS}/provider/roster`;
 		PROVIDER_CONTEXT_PATH = `/api/${NS}/provider/context`;
 		PROVIDER_RESET_PATH = `/api/${NS}/provider/reset`;
+		PROVIDER_QUOTA_RESUME_PATH = `/api/${NS}/provider/quota-resume`;
 		DRAW_PATH = `/api/${NS}/draw`;
 		DRAW_RESET_PATH = `/api/${NS}/draw/reset`;
 		TREND_WINDOW_PATH = `/api/${NS}/trend/window`;
 		MODELSCOPE_TOKEN_URL = "https://modelscope.cn/my/myaccesstoken";
+		MODELSCOPE_INTERNATIONAL_SITE_URL = "https://www.modelscope.ai";
 		MODELSCOPE_USAGE_URL = "https://modelscope.cn/magicube/usage?tab=consume";
 		MODELSCOPE_MODEL_URL_BASE = "https://www.modelscope.cn/models";
 		FEATURED_OWNERS = Object.freeze([
@@ -150,6 +152,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"panel.shapeDrift": "上游返回的结构可能有变：{detail}",
 			"panel.payloadError": "Host 返回了无法读取的响应（可能页面被登录墙或代理截获）。",
 			"shape.missingKeys": "Host 快照缺少必需的顶层键：{keys}",
+			"account.cn": "魔搭社区 · CN",
+			"account.international": "国际版 · modelscope.ai",
+			"account.balanceSection": "魔粒余额（官方数据 · 两个账户）",
+			"account.balanceEmpty": "该账户还没有余额读数（未配置令牌或本次读不到）。",
+			"account.tokenRegion": "选择要管理的账户",
 			"common.httpError": "无法读取 Host 响应（非预期响应，可能页面被登录墙截获）。",
 			"common.timeout": "请求超时，请重试。",
 			"tab.quota": "额度",
@@ -193,6 +200,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.llmMissing": "本机 Host 未提供 LLM 注册服务",
 			"provider.error": "接入失败：{error}",
 			"provider.models": "启用哪些模型",
+			"provider.regionModels": "按源站选择模型",
+			"provider.regionHint": "两个源站的允许清单各自保存（国际站没单独保存过时跟随国内清单）；DSH 模型选择器里只会出现该源站目录里的模型。",
 			"provider.allowAll": "全部",
 			"provider.hideAll": "全部隐藏",
 			"provider.saveList": "保存清单",
@@ -204,6 +213,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.groupCount": "{count} 个",
 			"provider.groupSelected": "已选 {count}",
 			"provider.quotaExhausted": "额度耗尽",
+			"provider.suppressedToday": "该源站今日免费额度已耗尽（quota 429）——相关模型已从 DSH 模型选择器临时移除，本地日期翻页后自动恢复。",
+			"provider.quotaResume": "立即恢复",
 			"provider.vision": "视觉",
 			"provider.notConfigured": "还没有访问令牌，先到「接入」tab 配置",
 			"provider.source.panel": "面板",
@@ -274,6 +285,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"token.ephemeral": "此 Host 没有凭据服务：面板保存的令牌重启即丢，请改用凭据服务或环境变量。",
 			"token.readError": "读不到凭据存储，无法确认令牌状态（不代表没配令牌）：{error}",
 			"token.link": "打开魔搭访问令牌页 →",
+			"token.hintInternational": "在 ModelScope International「访问令牌」页生成。保存即生效（写入 DSH 凭据服务的 MODELSCOPE_INTERNATIONAL_API_KEY 引用，不依赖重启）。环境变量同名者只在 DSH 启动时读一次，优先级高于此处保存的值。",
+			"token.linkInternational": "打开国际版站点 →",
 			"source.credentials": "凭据服务",
 			"source.env": "环境变量",
 			"source.memory": "内存",
@@ -296,7 +309,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"composer.newModelsRow": "本机首次见到的模型",
 			"composer.newModelsTitle": "本机首次见到的模型：",
 			"composer.newModelsSep": "、",
-			"composer.newModelsNote": "「新」指本机首次记到它，与上游何时上架无关。只列最近 7 天内首见的。"
+			"composer.newModelsNote": "「新」指本机首次记到它，与上游何时上架无关。只列最近 7 天内首见的。",
+			"composer.accountsBalance": "两个账户的官方魔粒余额",
+			"composer.accountCnBalance": "魔搭社区 · CN",
+			"composer.accountIntlBalance": "国际版 · modelscope.ai"
 		};
 		en = {
 			"panel.refresh": "Refresh",
@@ -314,6 +330,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"panel.shapeDrift": "Upstream shape may have changed: {detail}",
 			"panel.payloadError": "Host returned an unreadable response (a login wall or proxy may have intercepted it).",
 			"shape.missingKeys": "Host snapshot omitted required top-level key(s): {keys}",
+			"account.cn": "ModelScope · CN",
+			"account.international": "International · modelscope.ai",
+			"account.balanceSection": "Magicube balance (official · two accounts)",
+			"account.balanceEmpty": "No balance reading for this account yet (no token configured, or unreadable this time).",
+			"account.tokenRegion": "Choose the account to manage",
 			"common.httpError": "Unexpected Host response (a login wall or proxy may have intercepted it).",
 			"common.timeout": "Request timed out; please retry.",
 			"tab.quota": "Quota",
@@ -357,6 +378,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.llmMissing": "This Host exposes no LLM service",
 			"provider.error": "Provider error: {error}",
 			"provider.models": "Which models to enable",
+			"provider.regionModels": "Model list by source site",
+			"provider.regionHint": "Each source site keeps its own allow-list (the international site follows the CN list until you save one of its own); the DSH model picker only offers models from that site's catalogue.",
 			"provider.allowAll": "All",
 			"provider.hideAll": "Hide all",
 			"provider.saveList": "Save list",
@@ -368,6 +391,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.groupCount": "{count}",
 			"provider.groupSelected": "{count} selected",
 			"provider.quotaExhausted": "Quota exhausted",
+			"provider.suppressedToday": "This site's free quota ran out today (quota 429) — its models were removed from the DSH model picker until the local date rolls over.",
+			"provider.quotaResume": "Restore now",
 			"provider.vision": "vision",
 			"provider.notConfigured": "No token yet — configure it in the Access tab",
 			"provider.source.panel": "panel",
@@ -438,6 +463,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"token.ephemeral": "This Host has no credentials service: a token saved in the panel is lost on restart. Use the credentials service or an environment variable.",
 			"token.readError": "Could not read the credential store, so the token state is unknown (this does NOT mean no token is configured): {error}",
 			"token.link": "Open the ModelScope access-token page →",
+			"token.hintInternational": "Generate one on the ModelScope International access-token page. Saving takes effect immediately (written to the MODELSCOPE_INTERNATIONAL_API_KEY reference in the DSH credentials service, no restart needed). A same-named environment variable is read once at DSH launch and ranks ABOVE a value saved here.",
+			"token.linkInternational": "Open the International site →",
 			"source.credentials": "credentials",
 			"source.env": "environment",
 			"source.memory": "memory",
@@ -460,7 +487,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"composer.newModelsRow": "First seen on this device",
 			"composer.newModelsTitle": "First seen on this device: ",
 			"composer.newModelsSep": ", ",
-			"composer.newModelsNote": "\"New\" means first recorded on this device, not newly listed by the gateway. Only models first seen within the last 7 days are listed."
+			"composer.newModelsNote": "\"New\" means first recorded on this device, not newly listed by the gateway. Only models first seen within the last 7 days are listed.",
+			"composer.accountsBalance": "Official Magicube balance by account",
+			"composer.accountCnBalance": "ModelScope · CN",
+			"composer.accountIntlBalance": "International · modelscope.ai"
 		};
 	}));
 
@@ -1267,8 +1297,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		return {
 			enabled: p.enabled === true,
 			source: p.source === "panel" ? "panel" : "config",
+			region: p.region === "ai" ? "ai" : "cn",
 			llmAvailable: p.llmAvailable === true,
 			registered: p.registered === true,
+			suppressedToday: p.suppressedToday === true,
 			error: typeof p.error === "string" ? p.error : null,
 			modelCount: typeof p.modelCount === "number" && Number.isFinite(p.modelCount) ? p.modelCount : roster.length,
 			enabledCount: typeof p.enabledCount === "number" && Number.isFinite(p.enabledCount) ? p.enabledCount : 0,
@@ -1278,6 +1310,35 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			newModelIds: Array.isArray(p.newModelIds) ? p.newModelIds.map((id) => String(id ?? "")).filter((id) => id !== "") : [],
 			roster
 		};
+	}
+	/**
+	* 把快照里**按源站分段**的 `providers` 块归一成 `ProviderStatus` 映射（M6）。
+	*
+	* 逐键走 `providerOf`（与单块 `provider` 同一条防御线：旧 Host 缺字段、脏值一律
+	* 归成可渲染的形状），只认 `cn` / `ai` 两个键——别的键没有渲染方，带进来只会
+	* 在面板上伪造一个不存在的源站。
+	*
+	* 返回 `null` 的两种情形是同一件事的两面：**没有可用的分段状态**。
+	*   - 整块不是对象（旧 Host 不给 / 形状漂移）：面板退回单 `provider` 路径；
+	*   - 没有任何有效键（`{}`、或 `{cn: null}` 这类值不是对象的形状）：同样退回。
+	* 第二种刻意不把 `null` 归一成 DEGRADED_PROVIDER：wire.ts 的语义是「缺这个键 =
+	* 那个源站这块读不到」，把「读不到」编成一份降级块会让面板显示一个其实不存在的
+	* 第二源站，切换器也就会对着两份编出来的状态说话。
+	* @param {unknown} raw - 快照的 `providers` 块。
+	* @returns {Partial<Record<ProviderRegion, ProviderStatus>> | null} 归一后的映射；无有效键为 null。
+	*/
+	function providersOf(raw) {
+		if (raw === null || typeof raw !== "object") return null;
+		const block = raw;
+		const out = {};
+		let valid = 0;
+		for (const region of ["cn", "ai"]) {
+			const value = block[region];
+			if (value === null || typeof value !== "object") continue;
+			out[region] = providerOf$1(value);
+			valid += 1;
+		}
+		return valid === 0 ? null : out;
 	}
 	/** 非 2xx 响应的降级读法（无 body，状态码是唯一线索）。 */
 	function errorOfStatus(status) {
@@ -1602,6 +1663,48 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, tt("balance.usagePage"))));
 	}
 	/**
+	* 双账户并排余额卡（M4）：CN / 国际各一张有标签的小卡，各显官方魔粒余额。
+	*
+	* **只在 `accounts[]` 在场时由 panel-page 渲染**（旧 Host 或过渡期省略 accounts，
+	* 面板继续用上面那张单账户 BalanceCard，DOM 逐字不变）。两站是各自独立的一份官方
+	* 读数，绝不合并成一个总数——那会把两把不同账户的钱说成一笔。
+	*
+	* 三格读数各自遵守「读不到 ≠ 0」：null 画「—」，与 BalanceCard 同口径。令牌未配
+	* 时 Host 会把该账户余额整块软失败成 null（不是报错），这里补一行 `account.balanceEmpty`
+	* 把「还没接」说出口，而不是让一张空卡看起来像「0 魔粒」。
+	*
+	* 本地用量**不在这里**：它是按 profile 分段的一本合并账（事实 1），由下面的
+	* LocalDailyCard 画一张，不按账户切两份。
+	*/
+	function AccountsBalanceCard({ accounts, tt }) {
+		if (!Array.isArray(accounts) || accounts.length === 0) return null;
+		const stat = (label, value) => h("div", { style: S.statCard }, h("div", { style: S.statValue }, typeof value === "number" && Number.isFinite(value) ? count(value) : "—"), h("div", { style: S.quotaLabel }, label));
+		const tile = (account) => {
+			const b = account.balance;
+			const label = account.region === "ai" ? tt("account.international") : tt("account.cn");
+			const error = b !== null && typeof b === "object" && typeof b.error === "string" && b.error !== "" ? b.error : null;
+			return h("div", {
+				key: account.region,
+				style: {
+					...S.card,
+					flex: "1 1 220px",
+					minWidth: 0,
+					margin: 0
+				}
+			}, h("div", { style: S.poolName }, label), error !== null ? h("div", { style: {
+				...S.formNote,
+				color: "var(--dsw-alias-state-error-primary)",
+				margin: 0
+			} }, format(tt("balance.unavailable"), { error })) : h("div", { style: S.statGrid }, stat(tt("balance.available"), b?.available), stat(tt("balance.total"), b?.total), stat(tt("balance.frozen"), b?.frozen)), account.token?.present === false ? h("div", { style: S.formNote }, tt("account.balanceEmpty")) : null, h("div", { style: S.trendLegend }, account.registered ? tt("provider.registered") : tt("provider.notRegistered")));
+		};
+		return h("div", { style: {
+			display: "flex",
+			gap: 12,
+			flexWrap: "wrap",
+			alignItems: "stretch"
+		} }, accounts.map(tile));
+	}
+	/**
 	* 本地调用卡：纯统计口径——今日次数 + 按模型分布 + 一句口径说明。
 	* 刻意**不画**「推算剩余/参考上限」进度条：官方已改为魔粒计费，「2000 次」
 	* 是次数口径的社区快照，与魔粒余额并排展示是误导（README「三条事实」#2）。
@@ -1833,13 +1936,24 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			title: event.message
 		}, event.message))));
 	}
-	/** 令牌表单：保存 / 忘掉 / 验令牌 + 状态行 + 外链。唯一持 state 的展示组件。 */
-	function TokenForm({ token, busy, error, onSave, onForget, onVerify, verifyTitle, tt }) {
+	/**
+	* 令牌表单：保存 / 忘掉 / 验令牌 + 状态行 + 外链。唯一持 state 的展示组件。
+	*
+	* M4 双账户：`region` 缺省（或 "cn"）时行为与单账户时代逐字一致；传 "ai" 时改用
+	* 国际站的提示/外链（引用名是 MODELSCOPE_INTERNATIONAL_API_KEY，不是 CN 那把），
+	* 并在表单上方显示所属账户的标签。写哪个账户由调用方的 onSave/onForget/onVerify
+	* 决定——组件自己只认一个 `region` 用于文案，不碰路由。
+	*/
+	function TokenForm({ token, busy, error, onSave, onForget, onVerify, verifyTitle, region = "cn", label = null, tt }) {
 		const [value, setValue] = useState("");
+		const international = region === "ai";
+		const hint = tt(international ? "token.hintInternational" : "token.hint");
+		const linkText = tt(international ? "token.linkInternational" : "token.link");
+		const linkHref = international ? MODELSCOPE_INTERNATIONAL_SITE_URL : MODELSCOPE_TOKEN_URL;
 		const source = token?.source ?? "none";
 		const sourceKey = source === "credentials" ? "source.credentials" : source === "env" ? "source.env" : source === "memory" ? "source.memory" : "source.none";
 		const validKey = token?.valid === true ? "validity.yes" : token?.valid === false ? "validity.bad" : "validity.no";
-		return h("div", null, token?.readError ? h("div", { style: {
+		return h("div", null, label !== null ? h("div", { style: S.poolName }, label) : null, token?.readError ? h("div", { style: {
 			...S.formNote,
 			color: "var(--dsw-alias-state-warn-primary)"
 		} }, format(tt("token.readError"), { error: token.readError })) : h("div", { style: S.quotaUsed }, format(tt("token.status"), {
@@ -1875,12 +1989,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, tt("probe.validity")) : null), error !== null ? h("div", {
 			style: S.formError,
 			role: "alert"
-		}, error) : null, h("div", { style: S.formNote }, tt("token.hint")), h("a", {
+		}, error) : null, h("div", { style: S.formNote }, hint), h("a", {
 			style: S.formNote,
-			href: MODELSCOPE_TOKEN_URL,
+			href: linkHref,
 			target: "_blank",
 			rel: "noreferrer"
-		}, tt("token.link")));
+		}, linkText));
 	}
 	/**
 	* 按 owner 把清单分组，**推荐的三家置顶**（组内保持目录首见序）。
@@ -1933,9 +2047,20 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	*
 	* 额度耗尽的模型保留在清单里（灰显、勾选框禁用），这是故意的：roster 是目录
 	* 事实，picker 那边由 Host 自己丢掉它们，面板不替它删。
+	*
+	* M6 按源站分段（`providers` prop，见 `shared/wire.ts`）：CN 与国际站（modelscope.ai）
+	* 的目录不同，**允许清单也各自落盘**（`enabledIds` / `enabledIdsAi`）。所以状态行、
+	* roster、勾选计数与三个清单按钮都作用于**当前选中的源站**；切换器只在两站的状态
+	* 都在场时渲染。开关、上下文窗口覆盖与 reset 仍是两站共用的一份 store 字段，因此
+	* 在卡片里**只渲染一次**，不跟着源站切换。`providers` 缺席（旧 Host / 单账户装配）
+	* 时整张卡退回单块 `provider` 的老路径，DOM 与从前逐字一致。
 	*/
-	function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSaveContextWindow, onReset, tokenPresent, tt }) {
-		const status = providerOf$1(provider);
+	function ProviderCard({ provider, providers, busy, error, onToggle, onSaveList, onSaveContextWindow, onReset, onResumeQuota, tokenPresent, tt }) {
+		const regionKeys = providers === void 0 ? [] : ["cn", "ai"].filter((key) => providers[key] !== void 0);
+		const dualRegions = regionKeys.length === 2;
+		const [pickedRegion, setPickedRegion] = useState("cn");
+		const region = providers === void 0 ? "cn" : providers[pickedRegion] !== void 0 ? pickedRegion : regionKeys[0] ?? "cn";
+		const status = providerOf$1(providers?.[region] ?? provider);
 		const enabled = status.enabled === true;
 		const hostIds = status.enabledIds;
 		const hostKey = useMemo(() => JSON.stringify(hostIds), [hostIds]);
@@ -1945,7 +2070,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const hideAllMode = parseAllowedList(draft).mode === "none";
 		useEffect(() => {
 			setDraft(normalizeRosterSave(hostIds));
-		}, [hostKey]);
+		}, [hostKey, region]);
 		const roster = status.roster;
 		const rosterIds = roster.map((row) => row.id);
 		const toggleOne = (id) => setDraft((current) => {
@@ -1972,6 +2097,18 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			...S.formNote,
 			color: "var(--dsw-alias-state-warn-primary)"
 		} }, tt("provider.notConfigured")) : null;
+		const suppressedNode = !(status.suppressedToday === true) ? null : h("div", {
+			style: {
+				...S.formNote,
+				color: "var(--dsw-alias-state-warn-primary)"
+			},
+			role: "alert"
+		}, tt("provider.suppressedToday"), onResumeQuota === void 0 ? null : h("button", {
+			type: "button",
+			style: S.button,
+			disabled: busy,
+			onClick: () => onResumeQuota(region)
+		}, tt("provider.quotaResume")));
 		const sourceKey = status.source === "panel" ? "provider.source.panel" : "provider.source.config";
 		const CONTEXT_TIERS = [
 			{
@@ -2108,6 +2245,24 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const query = search.trim().toLowerCase();
 		const visibleRows = query === "" ? roster : roster.filter((row) => `${row.id} ${String(row.name ?? "")}`.toLowerCase().includes(query));
 		const ownerGroups = groupByOwner(visibleRows);
+		const regionSwitcher = dualRegions ? h("div", { style: { marginBottom: 10 } }, h("div", {
+			style: S.trendMetricBar,
+			role: "group",
+			"aria-label": tt("provider.regionModels")
+		}, ...regionKeys.map((key) => h("button", {
+			key,
+			type: "button",
+			"aria-pressed": region === key,
+			style: region === key ? {
+				...S.trendMetricBtn,
+				...S.trendMetricBtnActive
+			} : S.trendMetricBtn,
+			onClick: () => {
+				setPickedRegion(key);
+				const nextStatus = providerOf$1(providers?.[key] ?? provider);
+				setDraft(normalizeRosterSave(nextStatus.enabledIds));
+			}
+		}, tt(key === "ai" ? "account.international" : "account.cn")))), h("div", { style: S.advancedHint }, tt("provider.regionHint"))) : null;
 		const rosterBlock = roster.length === 0 ? h("div", { style: {
 			...S.muted,
 			fontSize: 12,
@@ -2141,7 +2296,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			disabled: busy,
 			onClick: () => {
 				setDraft(rosterIds.slice());
-				onSaveList(rosterIds.slice());
+				onSaveList(rosterIds.slice(), region);
 			}
 		}, tt("provider.allowAll")), h("button", {
 			type: "button",
@@ -2150,13 +2305,13 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			onClick: () => {
 				const none = hideAllRoster();
 				setDraft(none);
-				onSaveList(none);
+				onSaveList(none, region);
 			}
 		}, tt("provider.hideAll")), h("button", {
 			type: "button",
 			style: S.primary,
 			disabled: busy,
-			onClick: () => onSaveList(draft.slice())
+			onClick: () => onSaveList(draft.slice(), region)
 		}, tt("provider.saveList"))), h("div", { style: S.advancedHint }, tt("provider.maxOutputHint")), visibleRows.length === 0 ? h("div", { style: {
 			...S.muted,
 			fontSize: 12,
@@ -2201,10 +2356,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			disabled: busy,
 			onClick: onReset
 		}, tt("provider.reset")));
-		return h("div", null, switchRow, alertNode, tokenHint, h("div", { style: {
+		return h("div", null, switchRow, alertNode, suppressedNode, tokenHint, h("div", { style: {
 			...S.sectionTitle,
 			margin: "18px 0 8px"
-		} }, tt("provider.models")), rosterBlock, contextNode, resetRow, error !== null ? h("div", {
+		} }, tt("provider.models")), regionSwitcher, rosterBlock, contextNode, resetRow, error !== null ? h("div", {
 			style: S.formError,
 			role: "alert"
 		}, error) : null);
@@ -2669,6 +2824,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			token: true
 		});
 		const [activeTab, setActiveTab] = useState("quota");
+		const [tokenRegion, setTokenRegion] = useState("cn");
+		const accounts = Array.isArray(data?.accounts) ? data.accounts : null;
+		const hasAccounts = accounts !== null && accounts.length > 0;
 		useEffect(() => {
 			if (typeof localeSubscribe !== "function") return void 0;
 			return localeSubscribe(() => setLocaleRevision((revision) => revision + 1));
@@ -2684,6 +2842,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const hasProviderBlock = rawProvider !== void 0 && rawProvider !== null;
 		const [fetchedProvider, setFetchedProvider] = useState(null);
 		const provider = hasProviderBlock ? providerOf$1(rawProvider) : fetchedProvider ?? DEGRADED_PROVIDER;
+		const providers = providersOf(data?.providers);
 		useEffect(() => {
 			if (hasProviderBlock) return void 0;
 			let cancelled = false;
@@ -2738,10 +2897,16 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			tt
 		]);
 		const toggleProvider = useCallback((enabled) => void runProviderWrite(PROVIDER_PATH, { enabled }), [runProviderWrite]);
-		const saveRoster = useCallback((enabledIds) => {
-			runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds: normalizeRosterSave(enabledIds) });
+		const saveRoster = useCallback((enabledIds, region) => {
+			runProviderWrite(PROVIDER_ROSTER_PATH, {
+				enabledIds: normalizeRosterSave(enabledIds),
+				...regionField(region)
+			});
 		}, [runProviderWrite]);
 		const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
+		const resumeProviderQuota = useCallback((region) => {
+			runProviderWrite(PROVIDER_QUOTA_RESUME_PATH, { ...regionField(region) });
+		}, [runProviderWrite]);
 		const saveContextWindow = useCallback((contextWindow) => {
 			runProviderWrite(PROVIDER_CONTEXT_PATH, { contextWindow });
 		}, [runProviderWrite]);
@@ -2786,11 +2951,14 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		]);
 		const [tokenBusy, setTokenBusy] = useState(false);
 		const [tokenError, setTokenError] = useState(null);
-		const saveToken = useCallback(async (value) => {
+		const saveToken = useCallback(async (value, region) => {
 			setTokenBusy(true);
 			setTokenError(null);
 			try {
-				await postWrite(TOKEN_PATH, { token: value });
+				await postWrite(TOKEN_PATH, {
+					token: value,
+					...regionField(region)
+				});
 				load();
 			} catch (reason) {
 				setTokenError(writeErrorText(reason, tt));
@@ -2802,11 +2970,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			postWrite,
 			tt
 		]);
-		const forgetToken = useCallback(async () => {
+		const forgetToken = useCallback(async (region) => {
 			setTokenBusy(true);
 			setTokenError(null);
 			try {
-				await postWrite(TOKEN_FORGET_PATH, {});
+				await postWrite(TOKEN_FORGET_PATH, regionField(region));
 				load();
 			} catch (reason) {
 				setTokenError(writeErrorText(reason, tt));
@@ -2818,17 +2986,20 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			postWrite,
 			tt
 		]);
-		const tokenState = data?.token ?? null;
+		const tokenState = hasAccounts ? accounts.find((a) => a.region === tokenRegion)?.token ?? null : data?.token ?? null;
 		const sampleModel = data?.models?.sample?.[0] ?? null;
 		const [verifyBusy, setVerifyBusy] = useState(false);
 		const [verifyNote, setVerifyNote] = useState(null);
 		const [verifyError, setVerifyError] = useState(null);
-		const runValidity = useCallback(async (modelId) => {
+		const runValidity = useCallback(async (modelId, region) => {
 			setVerifyBusy(true);
 			setVerifyNote(null);
 			setVerifyError(null);
 			try {
-				const body = await postJson(PROBE_PATH, { modelId });
+				const body = await postJson(PROBE_PATH, {
+					modelId,
+					...regionField(region)
+				});
 				if (body !== null) load();
 				if (body !== null && body.ok === true) setVerifyNote(format(tt("probe.validOk"), { status: Number(body.status ?? 0) }));
 				else setVerifyError(typeof body?.error === "string" ? body.error : tt("common.httpError"));
@@ -2845,11 +3016,14 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				style: S.formNote,
 				role: "status"
 			}, tt("panel.noToken")) : null, h(SectionCard, {
-				title: tt("section.balance"),
+				title: tt(hasAccounts ? "account.balanceSection" : "section.balance"),
 				open: openSections.balance,
 				onToggle: () => toggleSection("balance"),
 				tt
-			}, h(BalanceCard, {
+			}, hasAccounts ? h(AccountsBalanceCard, {
+				accounts,
+				tt
+			}) : h(BalanceCard, {
 				balance: snap.balance,
 				tt
 			})), h(SectionCard, {
@@ -2892,12 +3066,14 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			tt
 		}, h(ProviderCard, {
 			provider,
+			providers: providers ?? void 0,
 			busy: providerBusy,
 			error: providerError,
 			onToggle: toggleProvider,
 			onSaveList: saveRoster,
 			onSaveContextWindow: saveContextWindow,
 			onReset: resetProvider,
+			onResumeQuota: resumeProviderQuota,
 			tokenPresent: data?.token?.present === true,
 			tt
 		})), h(SectionCard, {
@@ -2921,13 +3097,36 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			open: openSections.token,
 			onToggle: () => toggleSection("token"),
 			tt
-		}, h(TokenForm, {
+		}, hasAccounts ? h("div", {
+			style: {
+				display: "flex",
+				gap: 8,
+				alignItems: "center",
+				flexWrap: "wrap",
+				marginBottom: 12
+			},
+			role: "group",
+			"aria-label": tt("account.tokenRegion")
+		}, ...[["cn", () => tt("account.cn")], ["ai", () => tt("account.international")]].map(([region, label]) => h("button", {
+			key: region,
+			type: "button",
+			"aria-pressed": tokenRegion === region,
+			style: tokenRegion === region ? {
+				...S.trendMetricBtn,
+				...S.trendMetricBtnActive
+			} : S.trendMetricBtn,
+			onClick: () => setTokenRegion(region)
+		}, label()))) : null, h(TokenForm, {
 			token: tokenState,
 			busy: tokenBusy || verifyBusy,
 			error: tokenError,
-			onSave: (value) => void saveToken(value),
-			onForget: () => void forgetToken(),
-			onVerify: sampleModel === null ? void 0 : () => void runValidity(sampleModel),
+			...hasAccounts ? {
+				region: tokenRegion,
+				label: tokenRegion === "ai" ? tt("account.international") : tt("account.cn")
+			} : {},
+			onSave: (value) => void saveToken(value, tokenRegion),
+			onForget: () => void forgetToken(tokenRegion),
+			onVerify: sampleModel === null ? void 0 : () => void runValidity(sampleModel, tokenRegion),
 			verifyTitle: sampleModel ?? void 0,
 			tt
 		}), verifyNote !== null ? h("div", {
@@ -2983,6 +3182,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			role: "status"
 		}, format(tt("panel.shapeDrift"), { detail: shapeWarnings.join("; ") })) : null, activeTab === "quota" ? quotaBody() : activeTab === "models" ? modelsBody() : accessBody()))));
 	}
+	var regionField;
 	var init_panel_page = __esmMin((() => {
 		init_cards();
 		init_const();
@@ -2993,11 +3193,16 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		init_runtime();
 		init_styles();
 		init_allow_list();
+		regionField = (region) => region === "ai" ? { region: "ai" } : {};
 	}));
 
 //#endregion
 //#region src/client/composer-usage-pill.ts
-/**
+/** 归属判定：两站任一 provider 都算本插件；其它 provider / 判不出 → false。 */
+	function isModelscopeProvider(id) {
+		return id !== void 0 && MODELSCOPE_PROVIDERS.has(id);
+	}
+	/**
 	* 一个候选自带的 provider，空串算「没有」。
 	*
 	* `typeof provider === "string"` 是不够的判据：`""` 也是字符串。照类型判定会让
@@ -3042,9 +3247,29 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		if (available === null) return "unknown";
 		return available > 0 ? "ok" : "exhausted";
 	}
+	/** 余额的纯数值（不带单位）：读不到画「—」，读到了画数字。 */
+	function balanceValue(available, tt) {
+		return available === null ? "—" : count(available);
+	}
 	/** 「余额」段的正文：读不到画「—」+ 单位，读到了画数字 + 单位。 */
 	function balanceText(available, tt) {
-		return `${available === null ? "—" : count(available)} ${tt("composer.balanceUnit")}`;
+		return `${balanceValue(available, tt)} ${tt("composer.balanceUnit")}`;
+	}
+	/**
+	* 双账户余额正文（M3）：有 `accounts[]` 时拼成 `CN|AI 魔粒`——每段是各自源站的
+	* 官方魔粒读数，各读不到各画「—」（如 `0|— 魔粒` 表示国际站没读到）。单值
+	* `balanceText` 是它的退化形：老 Host / 软失败省略 `accounts` 时，退回头条
+	* `balance`（仍是官方读数），不补假的第二段。
+	*
+	* 本地次数不在这里（只统计经本插件、按 profile 分段的聚合账，不按源站切），所以
+	* 这一行只负责余额的「两段」显示，次数的「单段」由 {@link callsText} 另算。
+	*/
+	function balanceSegmentText(accounts, fallback, tt) {
+		if (!accounts || accounts.length === 0) return balanceText(fallback, tt);
+		const cn = accounts.find((account) => account.region === "cn")?.available ?? null;
+		const ai = accounts.find((account) => account.region === "ai")?.available ?? null;
+		const unit = tt("composer.balanceUnit");
+		return `${balanceValue(cn, tt)}|${balanceValue(ai, tt)} ${unit}`;
 	}
 	/** 「今日本地」段的正文：读不到画「—」，读到了画次数。 */
 	function callsText(usedToday, tt) {
@@ -3055,8 +3280,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	* 一段会让「哪一段是空的」变成排版事故（读者分不清是没读到还是这一栏根本不在），
 	* 而「—」明确说了是前者。
 	*/
-	function readingText(available, usedToday, tt) {
-		return `${balanceText(available, tt)} · ${callsText(usedToday, tt)}`;
+	function readingText(available, usedToday, tt, accounts) {
+		return `${accounts && accounts.length > 0 ? balanceSegmentText(accounts, available, tt) : balanceText(available, tt)} · ${callsText(usedToday, tt)}`;
 	}
 	/**
 	* 数字是否已经算「上次数据」。
@@ -3121,6 +3346,33 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		return ids;
 	}
 	/**
+	* 双账户余额行（M4）：从可选块 `accounts[]` 取每站官方魔粒余额的**可用读数**。
+	*
+	* **只读、纯函数**：老 Host / Host 软失败省略该块时返回空数组——胶囊正文仍用
+	* 兼容聚合的 `snapshot.balance`，不谎称第二个账户。每站各自 `null ≠ 0` 由
+	* {@link availableOf} 守：读不到就是 null，绝不推成 0。两站是两份独立的官方读数，
+	* 不合并成一个总数（把两把账户的钱说成一笔比不显示更糟）。
+	* @param {Snapshot|null|undefined} snapshot
+	* @returns {{ region: "cn"|"ai", available: number|null }[]}
+	*/
+	function accountsOf(snapshot) {
+		const raw = snapshot?.accounts;
+		if (!Array.isArray(raw)) return [];
+		const out = [];
+		const seen = /* @__PURE__ */ new Set();
+		for (const account of raw) {
+			if (account === null || typeof account !== "object") continue;
+			if (account.region !== "cn" && account.region !== "ai") continue;
+			if (seen.has(account.region)) continue;
+			seen.add(account.region);
+			out.push({
+				region: account.region,
+				available: availableOf(account.balance)
+			});
+		}
+		return out;
+	}
+	/**
 	* 点面板外面或按 Escape 关面板。
 	*
 	* 三处细节各有理由：
@@ -3169,7 +3421,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	* `<span>` 同理。
 	*/
 	function QuotaPopover(props) {
-		const { tt, title, stale, available, usedToday, balance, newModels } = props;
+		const { tt, title, stale, available, usedToday, balance, newModels, accounts } = props;
 		const fetchedAt = balance?.fetchedAt;
 		const failure = balance?.error;
 		return h("div", {
@@ -3178,7 +3430,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			role: "dialog",
 			"aria-label": title,
 			style: S.pillPopover
-		}, h("div", { style: S.pillPopoverHead }, h("span", { style: S.pillPopoverTitle }, tt("composer.panelTitle")), stale ? h("span", { style: S.pillPopoverStale }, tt("composer.stale")) : null), h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.panelBalance")), h("span", { style: S.pillPopoverFigure }, balanceText(available, tt)))), h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.panelCalls")), h("span", { style: S.pillPopoverFigure }, usedToday === null ? "—" : format(tt("composer.localCalls"), { calls: count(usedToday) })))), newModels.length === 0 ? null : h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.newModelsRow")), h("span", { style: S.pillPopoverFigure }, newModels.join(tt("composer.newModelsSep"))))), failure !== void 0 && typeof failure === "string" && failure !== "" ? h("div", { style: S.pillPopoverNote }, format(tt("balance.unavailable"), { error: failure })) : null, fetchedAt !== void 0 && typeof fetchedAt === "string" && fetchedAt !== "" ? h("div", { style: S.pillPopoverNote }, format(tt("balance.fetched"), { time: isoTime(fetchedAt) })) : null, h("div", { style: S.pillPopoverNote }, tt("composer.panelNote")), newModels.length === 0 ? null : h("div", { style: S.pillPopoverNote }, tt("composer.newModelsNote")));
+		}, h("div", { style: S.pillPopoverHead }, h("span", { style: S.pillPopoverTitle }, tt("composer.panelTitle")), stale ? h("span", { style: S.pillPopoverStale }, tt("composer.stale")) : null), h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.panelBalance")), h("span", { style: S.pillPopoverFigure }, balanceText(available, tt)))), h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.panelCalls")), h("span", { style: S.pillPopoverFigure }, usedToday === null ? "—" : format(tt("composer.localCalls"), { calls: count(usedToday) })))), accounts.length === 0 ? null : h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.accountsBalance"))), ...accounts.map((account) => h("div", {
+			key: account.region,
+			style: S.pillPopoverRowLine
+		}, h("span", { style: S.pillPopoverLabel }, tt(account.region === "ai" ? "composer.accountIntlBalance" : "composer.accountCnBalance")), h("span", { style: S.pillPopoverFigure }, balanceText(account.available, tt))))), newModels.length === 0 ? null : h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.newModelsRow")), h("span", { style: S.pillPopoverFigure }, newModels.join(tt("composer.newModelsSep"))))), failure !== void 0 && typeof failure === "string" && failure !== "" ? h("div", { style: S.pillPopoverNote }, format(tt("balance.unavailable"), { error: failure })) : null, fetchedAt !== void 0 && typeof fetchedAt === "string" && fetchedAt !== "" ? h("div", { style: S.pillPopoverNote }, format(tt("balance.fetched"), { time: isoTime(fetchedAt) })) : null, h("div", { style: S.pillPopoverNote }, tt("composer.panelNote")), newModels.length === 0 ? null : h("div", { style: S.pillPopoverNote }, tt("composer.newModelsNote")));
 	}
 	/**
 	* 内层：只在会话选中本插件的模型时挂载。轮询 hook 在这里，被挂/摘即起停——
@@ -3201,6 +3456,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const available = availableOf(balance);
 		const usedToday = usedTodayOf(data);
 		const newModels = newModelsOf(data);
+		const accounts = accountsOf(data);
 		const cadenceMs = statedCadenceMs(data?.pollSeconds, DEFAULT_CADENCE_MS);
 		const stale = staleOf({
 			error,
@@ -3240,7 +3496,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, `${tt("composer.prefix")} · `), h("span", {
 			className: "dsh-modelscope-composer-pill-text",
 			style: tier === "exhausted" ? S.pillTierExhaustedText : void 0
-		}, pending ? "…" : readingText(available, usedToday, tt)), stale ? h("span", {
+		}, pending ? "…" : readingText(available, usedToday, tt, accounts)), stale ? h("span", {
 			className: "dsh-modelscope-composer-pill-stale",
 			style: S.pillStale
 		}, ` · ${tt("composer.stale")}`) : null, newModels.length === 0 ? null : h("span", {
@@ -3259,7 +3515,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			available,
 			usedToday,
 			balance,
-			newModels
+			newModels,
+			accounts
 		}) : null);
 	}
 	/**
@@ -3268,16 +3525,18 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	*/
 	function ComposerUsagePill(props) {
 		const selection = props.useProjection?.("modelSelection");
-		if (selectedProviderOf(selection) !== "modelscope-token-plan") return null;
+		if (!isModelscopeProvider(selectedProviderOf(selection))) return null;
 		return h(ModelscopePill, { tt: props.tt });
 	}
-	var MODELSCOPE_PROVIDER, DEFAULT_CADENCE_MS, STALE_CADENCES, TIER_INK, POPOVER_ID;
+	var MODELSCOPE_PROVIDER, MODELSCOPE_PROVIDER_INTERNATIONAL, MODELSCOPE_PROVIDERS, DEFAULT_CADENCE_MS, STALE_CADENCES, TIER_INK, POPOVER_ID;
 	var init_composer_usage_pill = __esmMin((() => {
 		init_runtime();
 		init_styles();
 		init_format();
 		init_use_snapshot_polling();
 		MODELSCOPE_PROVIDER = "modelscope-token-plan";
+		MODELSCOPE_PROVIDER_INTERNATIONAL = "modelscope-token-plan-international";
+		MODELSCOPE_PROVIDERS = /* @__PURE__ */ new Set([MODELSCOPE_PROVIDER, MODELSCOPE_PROVIDER_INTERNATIONAL]);
 		DEFAULT_CADENCE_MS = 3e4;
 		STALE_CADENCES = 3;
 		TIER_INK = {
@@ -3402,18 +3661,23 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 					postJson,
 					writeFailure,
 					MODELSCOPE_PROVIDER,
+					MODELSCOPE_PROVIDER_INTERNATIONAL,
+					isModelscopeProvider,
 					selectedProviderOf,
 					availableOf,
 					usedTodayOf,
 					tierOf,
 					balanceText,
+					balanceSegmentText,
 					callsText,
 					readingText,
 					staleOf,
-					newModelsOf
+					newModelsOf,
+					accountsOf
 				}),
 				components: Object.freeze({
 					BalanceCard,
+					AccountsBalanceCard,
 					ComposerUsagePill,
 					EventsList,
 					LocalDailyCard,

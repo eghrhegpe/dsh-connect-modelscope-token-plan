@@ -1219,6 +1219,275 @@ await settle();
   failNonSnapshotGets = false;
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// §18 M4 双账户：accounts[] 在场才渲染并排余额卡 + 接入 tab 的账户切换器；
+//     写操作按账户带 region，CN（缺省）逐字保持单账户 payload。
+//
+// 这一节是「绿灯不撒谎」的那一半：前面所有用例的 fixture 都**没有** accounts，
+// 走的是兼容路径（单 BalanceCard、单个 TokenForm）。这里给它塞上两站装配，
+// 真正把 M4 新增的渲染分支与 region 写路径跑一遍。
+// ══════════════════════════════════════════════════════════════════════════
+{
+  const twoAccounts = [
+    {
+      region: "cn", providerId: "modelscope-token-plan",
+      token: { present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false, readError: null },
+      balance: { available: 143, total: 200, frozen: 7, fetchedAt: null, error: null },
+      registered: true, llmAvailable: true
+    },
+    {
+      region: "ai", providerId: "modelscope-token-plan-international",
+      token: { present: false, source: "none", valid: null, checkedAt: null, ephemeral: true, readError: null },
+      balance: { available: null, total: null, frozen: null, fetchedAt: null, error: null },
+      registered: false, llmAvailable: true
+    }
+  ];
+  const dualSnapshot = snapshotWith({ accounts: twoAccounts });
+
+  // 先证明「不带 accounts」时绝不误画第二张卡（兼容分支逐字不变）。
+  snapshotResponses = [{ body: SNAPSHOT }];
+  renderer.mount(PanelPage, { tt, localeSubscribe: null });
+  await settle();
+  assert.ok(!bodyText().includes(tt("account.cn")), "无 accounts：不画账户标签（单账户时代原样）");
+  assert.ok(byText("button", tt("section.balance")), "无 accounts：仍是单账户的 section.balance 标题");
+  assert.ok(!bodyText().includes(tt("account.tokenRegion")), "无 accounts：接入 tab 不画账户切换器");
+  renderer.unmount();
+  await settle();
+
+  // 带 accounts：额度 tab 换成两站并排卡，标题改「两个账户」。
+  // defaultSnapshot 也要换成 dual：写操作成功后会 load() 再拉一次快照，若回落到
+  // 不带 accounts 的 SNAPSHOT，双账户 UI 会在保存后当场消失（不是产品行为，是测试
+  // 桩的供数问题）。
+  defaultSnapshot = { body: dualSnapshot };
+  snapshotResponses = [{ body: dualSnapshot }];
+  renderer.mount(PanelPage, { tt, localeSubscribe: null });
+  await settle();
+  assert.ok(byText("button", tt("account.balanceSection")), "双账户：section 标题改为「两个账户」");
+  assert.ok(bodyText().includes(tt("account.cn")), "双账户：CN 标签");
+  assert.ok(bodyText().includes(tt("account.international")), "双账户：国际标签");
+  const dualBalance = sectionBody("account.balanceSection")?.textContent ?? "";
+  assert.ok(dualBalance.includes("143"), "CN 这份官方余额 143 上屏");
+  assert.ok(dualBalance.includes("—"), "国际这份读不到 → 「—」（null ≠ 0）");
+  assert.ok(!dualBalance.includes("NaN") && !dualBalance.includes("undefined"), "双账户卡不画脏值");
+
+  // 接入 tab：切换器两枚按钮；默认 CN，save/forget/probe 都不带 region。
+  tabButton("tab.access").click();
+  await settle();
+  const regionGroup = qa('[role="group"][aria-label]').find((el) => el.getAttribute("aria-label") === tt("account.tokenRegion"));
+  assert.ok(regionGroup, "接入 tab 渲染账户切换器（role=group）");
+  const cnSwitch = byText("button", tt("account.cn"));
+  const intlSwitch = byText("button", tt("account.international"));
+  assert.ok(cnSwitch && intlSwitch, "切换器有 CN / 国际两枚按钮");
+  assert.equal(cnSwitch.getAttribute("aria-pressed"), "true", "默认选中 CN");
+  assert.equal(intlSwitch.getAttribute("aria-pressed"), "false", "国际默认未选");
+
+  // 国际表单的提示/外链换文案（不谎称 CN 的环境变量）。
+  assert.ok(bodyText().includes(tt("token.hint")) && !bodyText().includes(tt("token.hintInternational")), "选 CN 时用 CN 提示");
+
+  // CN 保存 → payload 精确 {token}（与 §4 一致，不带 region）。
+  q('input[type="password"]').value = "ms-cn-token-abc";
+  q('input[type="password"]').dispatchEvent(new window.Event("input", { bubbles: true }));
+  await settle();   // 受控输入回流 state → 重渲染，保存按钮的闭包才拿到新值
+  byText("button", tt("token.save")).click();
+  await settle();
+  assert.deepEqual(jsonOf(lastPost(HOST.TOKEN_PATH)), { token: "ms-cn-token-abc" }, "CN 保存不带 region（逐字兼容）");
+
+  // 切到国际账户：提示换文案，保存/忘掉/验令牌都带 region:"ai"。
+  // 重新按文本取活节点：保存触发的 load() 会重渲染，上面那批 node 引用已失效。
+  byText("button", tt("account.international")).click();
+  await settle();
+  assert.equal(byText("button", tt("account.international")).getAttribute("aria-pressed"), "true", "点击后选中切到国际");
+  assert.ok(bodyText().includes(tt("token.hintInternational")), "国际表单用国际站提示（MODELSCOPE_INTERNATIONAL_API_KEY）");
+  q('input[type="password"]').value = "ms-ai-token-xyz";
+  q('input[type="password"]').dispatchEvent(new window.Event("input", { bubbles: true }));
+  await settle();   // 同上：重渲染后保存闭包才带新值
+  byText("button", tt("token.save")).click();
+  await settle();
+  assert.deepEqual(jsonOf(lastPost(HOST.TOKEN_PATH)), { token: "ms-ai-token-xyz", region: "ai" }, "国际保存带 region:\"ai\"");
+
+  // 国际账户令牌未配 → 不渲染「忘掉已保存」（诚实降级，不谎称可忘掉）。
+  assert.equal(byText("button", tt("token.forget")), undefined, "国际账户没令牌：不画「忘掉已保存」");
+
+  // 验令牌也按 region 走（probe 用国际站的 inference + 国际令牌）。
+  const probeBefore = postCalls(HOST.PROBE_PATH).length;
+  const verifyBtn = byText("button", tt("probe.validity"));
+  if (verifyBtn !== undefined) {
+    verifyBtn.click();
+    await settle();
+    assert.deepEqual(jsonOf(lastPost(HOST.PROBE_PATH)), { modelId: DEEPSEEK, region: "ai" }, "国际验令牌带 region:\"ai\"");
+    assert.equal(postCalls(HOST.PROBE_PATH).length, probeBefore + 1, "验令牌确实发了一发 probe");
+  }
+  renderer.unmount();
+  await settle();
+  defaultSnapshot = { body: SNAPSHOT };   // 还原共享桩，别把后续用例喂成双账户
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// §19 M6 按源站分段的模型选择：两站都在时才渲染切换器；状态行/roster/计数/
+//      保存按钮跟着当前源站走；保存时只有国际站带 region:"ai"。
+//
+// 前面所有用例的 fixture 都**没有** `providers`，走的是单块兼容路径（§7 / §8
+// 就是那条路径的守护）。这一节塞进两站状态，把 M6 新增的渲染分支与 region 写
+// 路径真的跑一遍——包括「providers 缺席时 DOM 不得多出任何新节点」这条反向承诺。
+// ══════════════════════════════════════════════════════════════════════════
+{
+  const AI_DEEPSEEK = "deepseek-ai/DeepSeek-V3-Intl";
+  const AI_GLM = "ZhipuAI/GLM-4.6-Intl";
+  const cnStatus = {
+    ...SNAPSHOT.provider, region: "cn", enabled: true, registered: true,
+    enabledIds: [QWEN], enabledCount: 1, modelCount: 3, allowed: "list"
+  };
+  const aiStatus = {
+    enabled: true, source: "panel", llmAvailable: true, registered: true, error: null,
+    region: "ai", modelCount: 2, enabledCount: 2, allowed: "list",
+    enabledIds: [AI_DEEPSEEK, AI_GLM],
+    roster: [row(AI_DEEPSEEK, "DeepSeek V3 Intl"), row(AI_GLM, "GLM 4.6", { vision: true })]
+  };
+  const dualSnapshot = snapshotWith({ provider: cnStatus, providers: { cn: cnStatus, ai: aiStatus } });
+  /** 源站切换器（按 aria-label 找，别让 `role=group` 撞上趋势指标那组或令牌账户那组）。 */
+  const regionGroup = () => qa('[role="group"][aria-label]').find((el) => el.getAttribute("aria-label") === tt("provider.regionModels"));
+  const regionSwitchButtons = () => [...(regionGroup()?.querySelectorAll("button") ?? [])];
+
+  // ── ① providers 缺席：DOM 与旧版逐字一致（不许冒出任何新节点）──
+  snapshotResponses = [{ body: SNAPSHOT }];
+  renderer.mount(PanelPage, { tt, localeSubscribe: null });
+  await settle();
+  tabButton("tab.models").click();
+  await settle();
+  assert.equal(regionGroup(), undefined, "providers 缺席：不渲染源站切换器");
+  assert.equal(regionSwitchButtons().length, 0, "providers 缺席：切换按钮一个都没有");
+  assert.ok(!bodyText().includes(tt("provider.regionHint")), "providers 缺席：不渲染「两站清单各自保存」提示");
+  assert.equal(rosterChecks().length, 3, "providers 缺席：roster 仍是单块 provider 的那三行");
+  renderer.unmount();
+  await settle();
+
+  // ── ② 两站都在：切换器出现，默认 CN，三件共用控件只画一次 ──
+  defaultSnapshot = { body: dualSnapshot };
+  snapshotResponses = [{ body: dualSnapshot }];
+  renderer.mount(PanelPage, { tt, localeSubscribe: null });
+  await settle();
+  tabButton("tab.models").click();
+  await settle();
+
+  assert.ok(regionGroup(), "两站都在：渲染 role=group 的源站切换器");
+  assert.deepEqual(
+    regionSwitchButtons().map((el) => el.textContent.trim()),
+    [tt("account.cn"), tt("account.international")],
+    "按钮文案复用账户名（CN / 国际站），不另造一套叫法"
+  );
+  assert.equal(byText("button", tt("account.cn")).getAttribute("aria-pressed"), "true", "默认停在 CN（与 Host 的缺省 region 一致）");
+  assert.equal(byText("button", tt("account.international")).getAttribute("aria-pressed"), "false", "国际站默认未选");
+  assert.ok(bodyText().includes(tt("provider.regionHint")), "「两站清单各自保存」说出口了");
+  assert.equal(rosterChecks().length, 3, "CN 视图：roster 是 CN 目录那三行");
+  assert.equal(rosterCheckOf(QWEN)?.checked, true, "CN 清单勾中的是 QWEN");
+  assert.equal(rosterCheckOf(AI_DEEPSEEK), undefined, "CN 视图里不出现国际站的模型");
+  assert.match(bodyText(), /已启用 1 \/ 3/, "计数按 CN 那份清单算");
+  // 开关、上下文窗口覆盖、reset 仍是两站共用的一份 store 字段 → 只渲染一次。
+  assert.equal(toggleSwitches().length, 2, "两个滑杆开关（provider / 出图），不随源站翻倍");
+  assert.equal(qa("#provider-context-window").length, 1, "上下文窗口覆盖只渲染一次（两站共用）");
+
+  // ── ③ 切到国际站：roster / 计数换成国际站那份 ──
+  byText("button", tt("account.international")).click();
+  await settle();
+  assert.equal(byText("button", tt("account.international")).getAttribute("aria-pressed"), "true", "点击后选中切到国际站");
+  assert.deepEqual(
+    rosterChecks().map((el) => el.getAttribute("aria-label")).sort(),
+    [AI_DEEPSEEK, AI_GLM].sort(),
+    "roster 换成国际站目录（选择器里只出现该站目录的模型）"
+  );
+  assert.equal(rosterCheckOf(QWEN), undefined, "切走后 CN 独有的模型不再显示");
+  assert.match(bodyText(), /已启用 2 \/ 2/, "计数按国际站那份清单算，不沿用 CN 的");
+  assert.equal(rosterCheckOf(AI_DEEPSEEK)?.checked, true, "国际站清单逐行勾中");
+  assert.equal(rosterCheckOf(AI_GLM)?.checked, true, "国际站清单逐行勾中（第二个）");
+
+  // 开关是两站共用的一份 store 字段：在国际站视图里翻，payload 仍不带 region。
+  toggleSwitches()[0].click();
+  await settle();
+  assert.deepEqual(jsonOf(lastPost(HOST.PROVIDER_PATH)), { enabled: false }, "开关不按源站写（两站共用一份）");
+
+  // ── ④ 保存走当前源站：国际站带 region:"ai" ──
+  byText("button", tt("provider.saveList")).click();
+  await settle();
+  assert.deepEqual(
+    jsonOf(lastPost(PROVIDER_ROSTER_PATH)),
+    { enabledIds: [AI_DEEPSEEK, AI_GLM], region: "ai" },
+    "国际站保存带 region:\"ai\""
+  );
+
+  // 勾掉一个再保存：draft 就是国际站那份的编辑，落盘也只动国际站。
+  rosterCheckOf(AI_GLM).click();
+  await settle();
+  byText("button", tt("provider.saveList")).click();
+  await settle();
+  assert.deepEqual(
+    jsonOf(lastPost(PROVIDER_ROSTER_PATH)),
+    { enabledIds: [AI_DEEPSEEK], region: "ai" },
+    "国际站的勾选草稿原样落盘"
+  );
+
+  byText("button", tt("provider.allowAll")).click();
+  await settle();
+  assert.deepEqual(
+    jsonOf(lastPost(PROVIDER_ROSTER_PATH)),
+    { enabledIds: [AI_DEEPSEEK, AI_GLM], region: "ai" },
+    "「全部」= 当前源站目录里的全部（不是 CN 那份）"
+  );
+  byText("button", tt("provider.hideAll")).click();
+  await settle();
+  assert.deepEqual(
+    jsonOf(lastPost(PROVIDER_ROSTER_PATH)),
+    { enabledIds: [HIDE_ALL_MODELS], region: "ai" },
+    "「全部隐藏」在国际站也带 region，哨兵仍是纯哨兵"
+  );
+
+  // ── ⑤ 切回 CN：draft 从 CN 的 Host 值重取，payload 逐字不带 region ──
+  byText("button", tt("account.cn")).click();
+  await settle();
+  assert.equal(rosterCheckOf(QWEN)?.checked, true, "切回 CN：draft 从 CN 的 Host 值重取（国际站的未保存编辑被丢弃）");
+  assert.equal(rosterCheckOf(AI_DEEPSEEK), undefined, "切回 CN：国际站的模型不再显示");
+  byText("button", tt("provider.saveList")).click();
+  await settle();
+  const cnPayload = jsonOf(lastPost(PROVIDER_ROSTER_PATH));
+  assert.deepEqual(cnPayload, { enabledIds: [QWEN] }, "CN 保存请求体逐字仍是 {enabledIds}（老客户端/老 Host 形状）");
+  assert.equal("region" in (cnPayload ?? {}), false, "CN 不带 region 字段");
+
+  // reset 仍是一条两站共用的路由，payload 是空对象（不按源站分叉）。
+  buttons().filter((el) => el.textContent.trim() === tt("provider.reset"))[0].click();
+  await settle();
+  assert.deepEqual(jsonOf(lastPost(PROVIDER_RESET_PATH)), {}, "reset 的 payload 仍是空对象（两站共用的那份 store）");
+  renderer.unmount();
+  await settle();
+
+  // ── ⑥ 只有一个源站（国际站）时：不渲染切换器，但保存必须落到它自己那份清单 ──
+  // 「缺一个键 = 那个源站这块读不到」不是「补一份降级块」：没有可切的东西就不给
+  // 切换器，但国际站那唯一一份仍要能被编辑并写到 enabledIdsAi（写进 CN 会静默
+  // 清空 CN 的选择）。
+  const aiOnlySnapshot = { ...SNAPSHOT, providers: { ai: aiStatus } };
+  delete aiOnlySnapshot.provider;
+  defaultSnapshot = { body: aiOnlySnapshot };
+  snapshotResponses = [{ body: aiOnlySnapshot }];
+  renderer.mount(PanelPage, { tt, localeSubscribe: null });
+  await settle();
+  tabButton("tab.models").click();
+  await settle();
+  assert.equal(regionGroup(), undefined, "只有一份源站状态：不渲染切换器");
+  assert.deepEqual(
+    rosterChecks().map((el) => el.getAttribute("aria-label")).sort(),
+    [AI_DEEPSEEK, AI_GLM].sort(),
+    "只有国际站一份时 roster 就是它那份（不被 CN 的降级块顶掉）"
+  );
+  byText("button", tt("provider.saveList")).click();
+  await settle();
+  assert.deepEqual(
+    jsonOf(lastPost(PROVIDER_ROSTER_PATH)),
+    { enabledIds: [AI_DEEPSEEK, AI_GLM], region: "ai" },
+    "单源站国际站保存仍写它自己那份清单"
+  );
+  renderer.unmount();
+  await settle();
+  defaultSnapshot = { body: SNAPSHOT };   // 还原共享桩
+}
+
 globalThis.setInterval = realSetInterval;
 globalThis.clearInterval = realClearInterval;
 console.log(`dom-render.test.mjs: all checks passed（${calls.length} 次真实请求，${renderer.renders()} 次重渲染）`);

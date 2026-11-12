@@ -45,6 +45,12 @@ export interface QuotaEvent {
   modelId: string;
   kind: "quota" | "rate_limit" | "error";
   message: string;
+  /**
+   * 事件发生在哪个源站。**可选**：旧事件行没有它（读侧按 cn 兜底即可——事件流
+   * 是展示用的）；两个源站共用一个 usageStore，没有它就无法区分「CN 打到 429」
+   * 与「国际站打到 429」，而 quota 抑制是按源站独立判定的。
+   */
+  region?: ProviderRegion;
 }
 
 /** 本地趋势天桶（dateKey = 本地日期 YYYY-MM-DD）。 */
@@ -92,7 +98,20 @@ export const HIDE_ALL_MODELS = "__hide_all__";
  * 软失败：目录读不到时 `modelCount` 为 0、`roster` 为空、`error` 说明原因；
  * 开关读不到时 `enabled:false, source:"config"`（patch 默认兜底）。
  */
+/**
+ * 源站标识：`cn` = 魔搭社区（modelscope.cn），`ai` = ModelScope International
+ * （modelscope.ai）。两个源站各注册一个 provider（拓扑修订，见 docs/PROVIDER-M4.md），
+ * 所以「这份状态/这个清单属于哪个源站」是跨 host ↔ client 的一等维度。
+ */
+export type ProviderRegion = "cn" | "ai";
+
 export interface ProviderStatus {
+  /**
+   * 这份状态属于哪个源站。**可选**：旧 Host 的响应不带它，读侧缺省按 `"cn"`
+   * 处理（单账户时代只有 CN）；新 Host 的顶层 `provider` 块与 `providers` 块里
+   * 的每一份都带上它。
+   */
+  region?: ProviderRegion;
   /** 生效开关（面板保存值优先，patch 默认兜底）。 */
   enabled: boolean;
   /** 生效值来自哪一侧。 */
@@ -101,6 +120,15 @@ export interface ProviderStatus {
   llmAvailable: boolean;
   /** 本插件的 provider 是否已注册且无错。 */
   registered: boolean;
+  /**
+   * 该源站今日是否因 `quota` 类 429 被**整体**摘出 DSH 模型选择器。
+   *
+   * **可选**：旧 Host 不带它（读侧 false 兜底 = 不抑制）。只由 `quota` 触发
+   * （`rate_limit` 走重试，不摘）；按源站独立判定；日期作用域——本地日期翻页
+   * 自动解除，面板也可手动恢复。摘的是整个 provider 行（`unregister()` 连
+   * `releaseDirectory` 一起摘），比逐模型灰显（`quotaExhausted`）激进一档。
+   */
+  suppressedToday?: boolean;
   /** 最近一次注册/读取的失败原因（已脱敏），null = 无错。 */
   error: string | null;
   /** roster 长度（面板清单里的模型数）。 */
@@ -270,6 +298,36 @@ export interface BalanceData {
   error: string | null;
 }
 
+/**
+ * 单个源站账户的快照（M3 双账户池）。
+ *
+ * 面板把 CN 与国际作为「ModelScope 家族」并排展示：每个账户各带**自己那把令牌**
+ * 的状态、**自己源站的官方魔粒余额**，以及它对应 provider 的注册态。两个 provider
+ * 各注册各的（plan「拓扑修订」），所以 `registered` / `llmAvailable` 逐账户，不是
+ * 「两站的与」。
+ *
+ * **本地用量不在这里**：`quota` / `events` / `trend` / `daily` 仍是顶层一份、按
+ * profile 分段的聚合账（事实 1：本地计数只统计经本插件的调用、按客户端分段，
+ * 桌面端与 Web 端各记各的；它不是按账户切的官方额度）。面板共享同一个「额度」
+ * tab——两站余额并排、本地计数共用一份，「并排展示」与「共享 tab」不矛盾。
+ *
+ * **可选块**：旧 Host / 过渡期没有账户池时省略整个 `accounts`（与 `provider` /
+ * `draw` 同一条纪律——省略是合法形状，客户端退回单源站视图，不补看起来像答案
+ * 的假块）。故它进 `OPTIONAL_BLOCK_KEYS`、**不进** `SNAPSHOT_REQUIRED_KEYS`。
+ */
+export interface AccountSnapshot {
+  /** 源站：cn = 魔搭社区；ai = ModelScope International。 */
+  region: "cn" | "ai";
+  /** 该账户绑定的 provider id（picker 里区分两站）。 */
+  providerId: string;
+  token: TokenStatus;
+  balance: BalanceData;
+  /** 这个账户对应的 provider 是否已注册且无错。 */
+  registered: boolean;
+  /** Host 上是否存在可应答 registerAdapter 的 llm 服务（两站共用同一服务）。 */
+  llmAvailable: boolean;
+}
+
 /** 成功快照。字段增删必须同步 test/wire.test.mjs 的钉死清单与面板 wire。 */
 export interface Snapshot {
   ok: true;
@@ -334,10 +392,32 @@ export interface Snapshot {
    */
   provider?: ProviderStatus;
   /**
+   * 两站各自的 provider 状态块（M6，按源站分段）。
+   *
+   * 两个源站的目录不同、允许清单也各自独立（`provider.json` 里 CN 是
+   * `enabledIds`、国际站是 `enabledIdsAi`），所以面板必须能看到「国际站自己那份
+   * roster 与勾选」，否则国际站根本没有选择模型的界面。
+   *
+   * **在场时**键是源站（`cn` / `ai`），每份 roster 只含该源站的目录；缺失的键 =
+   * 那个源站这块读不到（不是「没有模型」——读不到 ≠ 0）。顶层 `provider` 仍是
+   * **CN 别名**（与 `providers.cn` 同一份内容），老客户端读它、行为不变。
+   *
+   * **可选块**：旧 Host / 过渡期 / 聚合软失败时整块省略，面板退回单账户视图；
+   * 故它进 `test/wire.test.mjs` 的 `OPTIONAL_BLOCK_KEYS`、不进
+   * `SNAPSHOT_REQUIRED_KEYS`。
+   */
+  providers?: Partial<Record<ProviderRegion, ProviderStatus>>;
+  /**
    * 出图工具状态。**可选**：旧 Host 或过渡期可能不给这个块，面板走
    * `drawOf` 的降级形状（与 `provider` 同一套「resolver-not-snapshot」纪律）。
    */
   draw?: DrawStatus;
+  /**
+   * 双源站账户快照（M3）。**可选**，与 `provider` / `draw` 同一条纪律：旧 Host /
+   * 过渡期没有账户池时省略整块，面板据缺席退回单源站视图（读顶层 `token` /
+   * `balance` / `quota`），不补假块、不挂假的契约漂移警告。
+   */
+  accounts?: AccountSnapshot[];
   shapeWarnings: string[];
   quotaError: { code: string } | null;
 }

@@ -69,7 +69,7 @@ export interface DoctorScope {
   /** usage.json 的速览；`null` = 文件不在场（还没记过任何调用，不是故障）。 */
   usage: { versionKnown: boolean; days: number; events: number } | null;
   /** provider.json 的速览；`null` = 文件不在场（面板还没保存过开关/清单，不是故障）。 */
-  provider: { versionKnown: boolean; enabled: boolean | null; enabledIds: number | null } | null;
+  provider: { versionKnown: boolean; enabled: boolean | null; enabledIds: number | null; enabledIdsAi: number | null } | null;
   /** draw.json 的速览；`null` = 文件不在场（面板还没保存过出图开关/模型，不是故障）。 */
   draw: { versionKnown: boolean; enabled: boolean | null; modelId: string | null } | null;
   /** usage-prefs.json 的速览；`null` = 文件不在场（还没改过趋势显示窗口，不是故障）。 */
@@ -273,9 +273,15 @@ export function renderReport(report: DoctorReport): string {
     if (scope.provider !== null) {
       const provider = scope.provider;
       // switch 的三态要说清：not set 是「面板从没保存过」，off 是「保存了 false」。
+      //
+      // AI 那半句（M6）**只在有值时报**（`null` = 老文件没有 `enabledIdsAi` 键，
+      // 此时国际站**跟随 CN 清单**运行——不是「不过滤」，报一句 `not set` 会让人
+      // 以为国际站绕开了勾选约束）。CN 那半句的既有格式逐字不动：`allow-list`
+      // 说的是 CN 那份，报告里并列两站会让人读成「一份清单两个数」。
       lines.push(
         `${label}: provider.json — switch ${provider.enabled === null ? "not set" : provider.enabled ? "on" : "off"}` +
         `, allow-list ${provider.enabledIds === null ? "not set" : `${provider.enabledIds} model(s)`}` +
+        (provider.enabledIdsAi === null ? "" : `, ai allow-list ${provider.enabledIdsAi} model(s)`) +
         (provider.versionKnown ? "" : " [UNKNOWN VERSION]")
       );
     }

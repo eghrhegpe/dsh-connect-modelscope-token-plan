@@ -36,6 +36,26 @@
    > 「**本客户端（本 profile）内经本插件的调用**」；想并排看各 profile 的账用
    > `npm run doctor`，那是「另一个客户端的数字去哪了」的答案（README「诚实声明」
    > 同口径）。
+   >
+   > **再更正（2026-11-12，账户池 + 国际版）**：上面 §0 的「凭据只有一把钥匙」、
+   > 「上游 apiBase」、以及 §1 的「单一 provider 身份」是 M4 当时（单源站
+   > modelscope.cn）的事实记录，保留原文作为契约历史。此后加入**第二个源站**
+   > ModelScope International（modelscope.ai）：两把静态钥匙
+   > （`MODELSCOPE_API_KEY` / `MODELSCOPE_INTERNATIONAL_API_KEY`）、两套 apiBase、
+   > **两个** provider id（`modelscope-token-plan` / `modelscope-token-plan-international`）。
+   > 起因是一条 peer 约束——`llm-adapter-core.ts` 的 `resolveApiKey()` 不传模型 id、
+   > 每个 provider 只绑一个令牌解析器，做不到「单 provider 按 region 挑两把令牌」，
+   > 所以改为两个 provider 各绑各账户。两站共用一份 provider 开关与窗口覆盖；
+   > **模型允许清单按源站分段**（`enabledIds` = CN、`enabledIdsAi` = 国际站；
+   > 国际站键缺席时**跟随 CN 清单**，让两站都被「模型」tab 的勾选约束——把缺席
+   > 读成「不过滤」会让国际站在 DSH 选择器里放开全部模型，绕开面板勾选，2026-11-12
+   > 用户实测已修；面板「模型」tab 有 CN / 国际站切换器）；本地计数仍是
+   > **一份按 profile 分段的合并账**，不按账户切分。
+   > 两把钥匙/两套 base 的协调层是 `src/host/account-pool.ts`，双账户快照形状见
+   > `src/shared/wire.ts` 的 `AccountSnapshot`，面板双账户渲染见
+   > `src/client/panel-page.ts`。本文件其余各节描述的是 M4
+   > 当时的单源站实现机制（发布状态机 / 回滚 / 目录签名等），这些机制两个 provider
+   > 各自复用一份，**并未改变**。
 
 ## 1. Provider 身份（单一真源：`src/host/llm-models.ts`）
 
@@ -297,7 +317,7 @@ export function summarizeCatalog(entries: unknown): { modelCount: number; vision
   |---|---|---|
   | GET | `PROVIDER_PATH` | 读当前开关 + 目录 + 允许清单 + 注册状态（无副作用） |
   | POST | `PROVIDER_PATH` | body `{enabled?: boolean}` → 保存面板开关并触发重注册 |
-  | POST | `PROVIDER_PATH/roster` | body `{enabledIds?: string[]}` → 保存允许清单并触发重注册 |
+  | POST | `PROVIDER_PATH/roster` | body `{enabledIds?: string[], region?: "ai"}` → 保存**该源站**的允许清单并触发重注册（缺省/其它 region 值一律 CN） |
   | POST | `PROVIDER_PATH/reset` | 忘掉面板开关与允许清单，回到 patch 默认 |
 
   统一把 `HIDE_ALL_MODELS` 当作「什么都不提供」的哨兵（不是 `[]`——空清单的

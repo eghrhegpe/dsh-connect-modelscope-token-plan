@@ -34,6 +34,12 @@ export const PROVIDER_CONTEXT_PATH = `/api/${NS}/provider/context`;
 /** provider 开关 + 清单回到 patch 默认的路由。 */
 export const PROVIDER_RESET_PATH = `/api/${NS}/provider/reset`;
 /**
+ * 手动解除某源站今日 quota 抑制的路由（body `{region?}`）。quota 类 429 会把
+ * 整个 provider 从 picker 摘出（当日有效）；这是它的撤销按钮——恢复不等本地
+ * 日期翻页。
+ */
+export const PROVIDER_QUOTA_RESUME_PATH = `/api/${NS}/provider/quota-resume`;
+/**
  * 出图工具的开关/状态路由。
  *
  * **与 PROVIDER_PATH 是两条独立路由**：那个管「魔搭作为 chat provider」，这个管
@@ -57,6 +63,15 @@ export { HIDE_ALL_MODELS } from "../shared/wire.ts";
  * 打开它，绝不随凭据请求发出。
  */
 export const MODELSCOPE_TOKEN_URL = "https://modelscope.cn/my/myaccesstoken";
+
+/**
+ * 国际版站点入口（用户在需求里给出的地址）。
+ *
+ * 刻意**不猜**「访问令牌页」的深链：国际站该页的确切路径未经真机核实，编一个
+ * `/my/myaccesstoken` 会把用户送去 404。这里只指到站点根，由站内导航找到令牌页；
+ * 文案也据此写成「打开国际版站点」，不谎称是令牌页。
+ */
+export const MODELSCOPE_INTERNATIONAL_SITE_URL = "https://www.modelscope.ai";
 
 /**
  * 官方「魔粒用量明细」网页（消费记录只在这，OpenAPI 没有记录端点——

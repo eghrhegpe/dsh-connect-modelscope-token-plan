@@ -74,6 +74,14 @@ interface ProviderPublisherDeps {
   getLlm?: (service: string) => object | null;
   resolveApiKey?: () => Promise<string>;
   /**
+   * 注册到哪个 provider id。**两个 provider 共用同一套代码**：CN =
+   * `modelscope-token-plan`（沿用），国际 = `modelscope-token-plan-international`
+   * （见 llm-models.ts 的同名常量与 plan 的「拓扑修订」）。
+   */
+  providerId?: string;
+  /** picker 里显示的 provider 名（国际版传「ModelScope International」）。 */
+  displayName?: string;
+  /**
    * 本地计数的写入口，透传给适配器工厂（`usage-observer.ts`）。
    *
    * 缺省即「不套观察层」——那正是 M4 之前的状态：面板四块计数面板恒为 0 与空。
@@ -93,6 +101,13 @@ export interface ProviderPublisherState extends PublisherStateBase {
   enabledIds: string[];
   /** 上次发布给 picker 的额度耗尽模型 id。 */
   unavailableIds: string[];
+  /**
+   * 最近一次 publish 入口看到的 quota 抑制位（该源站今日因 quota 类 429 整体
+   * 摘出 picker）。true = gather 的开关判定被它压住（`registerWanted` 硬为
+   * false）。快照聚合读它渲染 `suppressedToday`；resume 路由走正常 publish
+   * （false）自然回挂。
+   */
+  suppressed: boolean;
   /** 已提供集合的廉价签名（目录 ids + vision 位 + 允许清单）。 */
   signature: string;
   /** 额度耗尽集合的廉价签名；某个池过零时翻转。 */
@@ -184,7 +199,9 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
     resolveApiKey,
     usage,
     emit,
-    logger
+    logger,
+    providerId: effectiveProviderId = LLM_PROVIDER_ID,
+    displayName: effectiveDisplayName = LLM_DISPLAY_NAME
   } = deps;
   const effectiveSettings = settings ?? {};
   const effectivePanelSwitch = panelSwitch ?? (async () => null);
@@ -206,6 +223,7 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
     entries: [],
     enabledIds: [],
     unavailableIds: [],
+    suppressed: false,
     signature: "",
     quotaSignature: "",
     /** 是否有应答 `registerAdapter` 的 `llm` 服务。 */
@@ -243,8 +261,8 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
    * @returns {void}
    */
   const registerPair = (llm: { registerAdapter: (providerIds: string[], adapter: unknown) => () => void; registerConfigurableProviders?: (rows: object[]) => () => void }, built: { providerIds: string[]; adapter: unknown }, target: PublisherStateBase) => registerProviderPair(llm, built, target, {
-    providerId: LLM_PROVIDER_ID,
-    displayName: LLM_DISPLAY_NAME
+    providerId: effectiveProviderId,
+    displayName: effectiveDisplayName
   });
 
   /**
@@ -283,9 +301,10 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
    * @param {unknown} entries - 归一目录条目。
    * @param {unknown} enabledIds - 允许清单（空 = 全部）。
    * @param {string[]} unavailableModelIds - 额度耗尽的模型 id。
+   * @param {boolean} [quotaSuppressed] - 该源站今日被 quota 抑制（429 耗尽摘除）。
    * @returns {Promise<PublishPlan>} 执行计划。
    */
-  const gatherPublish = async (entries: unknown, enabledIds: unknown, unavailableModelIds: string[]): Promise<PublishPlan> => {
+  const gatherPublish = async (entries: unknown, enabledIds: unknown, unavailableModelIds: string[], quotaSuppressed = false): Promise<PublishPlan> => {
     // 插件 dispose 之后才到的 publish，会把 provider 注册进一个已经撤下本
     // 插件的 Host：没有主人、没有 release，屏幕上也没说它从哪来。
     if (queue.isDisposed()) return { kind: "done", result: { ok: false, skipped: true } };
@@ -296,13 +315,17 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
     state.entries = Array.isArray(entries) ? entries : [];
     state.enabledIds = Array.isArray(enabledIds) ? enabledIds : [];
     state.unavailableIds = Array.isArray(unavailableModelIds) ? unavailableModelIds : [];
+    state.suppressed = quotaSuppressed === true;
     // Opt-in：开关关着时不能留下某一行把它翻关之后才注册的 registration。有效开关
     // 是 panel 优先（`provider-store.ts`），回退到 patch 值——这里每次 publish 重读，
     // 所以翻转不用重启就生效。
     const panelValue = await effectivePanelSwitch().catch(() => null);
     // `effectiveSettings` may be a bare `{}` (no settings passed, the tests), so
     // an absent patch default reads as "not registered" — never a crash.
-    const registerWanted = resolveSwitchEnabled(panelValue, effectiveSettings.registerProvider === true);
+    // quota 抑制是第三道闸：开关想注册、today 的 quota 429 也说不。走与「开关关」
+    // 完全同一条 unregister 路径（连 releaseDirectory 一起摘 = picker 行消失），
+    // 与逐模型灰显（unavailableIds）是两个不同的机制。
+    const registerWanted = resolveSwitchEnabled(panelValue, effectiveSettings.registerProvider === true) && quotaSuppressed !== true;
     if (!registerWanted) {
       // 空转守卫：开关关着、且上次也确实没注册、签名也没漂（offer 没变），就别跑
       // unregister——否则每个轮询周期都做一次无意义（且会发 llm/adapters-updated
@@ -335,6 +358,8 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
         resolveApiKey: effectiveResolveApiKey,
         get: effectiveGetLlm,
         unavailableModelIds: state.unavailableIds,
+        providerId: effectiveProviderId,
+        displayName: effectiveDisplayName,
         // 观察层缺席即不套（`exactOptionalPropertyTypes` 下条件展开，不能传
         // undefined 让它与「显式无观察层」变成两件事）。
         ...(usage !== undefined ? { usage } : {}),
@@ -440,8 +465,8 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
    * @param {string[]} [unavailableModelIds] - 要从 picker 的 offer 里丢掉的额度耗尽 id。
    * @returns {Promise<{ok: boolean, skipped?: boolean, error?: unknown}>}
    */
-  const publishProviderOnce = async (entries: unknown, enabledIds: unknown, unavailableModelIds: string[] = []) => {
-    const plan = await gatherPublish(entries, enabledIds, unavailableModelIds);
+  const publishProviderOnce = async (entries: unknown, enabledIds: unknown, unavailableModelIds: string[] = [], quotaSuppressed = false) => {
+    const plan = await gatherPublish(entries, enabledIds, unavailableModelIds, quotaSuppressed);
     return plan.kind === "done" ? plan.result : commitPublish(plan);
   };
 
@@ -453,10 +478,11 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
    * @param {object[]} entries - 归一目录条目。
    * @param {string[]} enabledIds - 允许清单（空 = 全部）。
    * @param {string[]} [unavailableModelIds] - 额度耗尽的模型 id。
+   * @param {boolean} [quotaSuppressed] - 该源站今日被 quota 抑制（摘除 picker 行）。
    * @returns {Promise<{ok: boolean, skipped?: boolean, error?: unknown}>}
    */
-  const publish = (entries: unknown, enabledIds: unknown, unavailableModelIds: string[] = []) =>
-    queue.enqueue(() => publishProviderOnce(entries, enabledIds, unavailableModelIds));
+  const publish = (entries: unknown, enabledIds: unknown, unavailableModelIds: string[] = [], quotaSuppressed = false) =>
+    queue.enqueue(() => publishProviderOnce(entries, enabledIds, unavailableModelIds, quotaSuppressed));
 
   /**
    * 标记 publisher 已 dispose：之后（或在途的）任何 publish 都变成 no-op，不能注册

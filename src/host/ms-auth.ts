@@ -41,6 +41,15 @@ import type { TokenStatus } from "../shared/wire.ts";
 export const TOKEN_REF = "MODELSCOPE_API_KEY";
 
 /**
+ * 国际版（ModelScope International，modelscope.ai）的引用名。
+ *
+ * 两站各是一把账户的池子（见 `account-pool.ts`）：CN 走 `MODELSCOPE_API_KEY`，
+ * 国际走本常量。两者都是凭据服务承认的 `api-key` kind，**绝不发明私有 kind**
+ * （那会让凭据文件对整个 Host 不可解析，Host 直接起不来）。
+ */
+export const TOKEN_REF_INTERNATIONAL = "MODELSCOPE_INTERNATIONAL_API_KEY";
+
+/**
  * 令牌形状：`ms-` + 至少 16 位十六进制，允许连字符分段（UUID 那种）。
  *
  * 存在的理由见 {@link createTokenStore} 的 `save`：脱敏闸是正则，遮不住它不
@@ -71,7 +80,7 @@ export function isPlausibleToken(value: string): boolean {
  *   「可选」不允许被显式赋值为 `undefined`，而 `apply()` 是原样转发 `deps.env`
  *   （产品侧不传时它就是 `undefined`）。不写这一半，转发点编译不过。
  */
-export function createTokenStore({ credentials = null, env = process.env }: { credentials?: unknown; env?: Record<string, string | undefined> | undefined } = {}) {
+export function createTokenStore({ credentials = null, env = process.env, ref = TOKEN_REF }: { credentials?: unknown; env?: Record<string, string | undefined> | undefined; ref?: string } = {}) {
   /** 无凭据服务的 Host 的内存兜底。 */
   const memory = new Map();
 
@@ -108,16 +117,16 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
     try {
       const service = resolveService();
       if (service !== null && typeof service.resolve === "function") {
-        const resolved = await service.resolve(TOKEN_REF).catch(() => undefined);
+        const resolved = await service.resolve(ref).catch(() => undefined);
         const value = verbatim(resolved?.value, "");
         if (typeof value === "string" && value.trim() !== "") return { value, source: "credentials" };
       }
     } catch {
       // 服务不可用：落回内存/env。
     }
-    const held = memory.get(TOKEN_REF);
+    const held = memory.get(ref);
     if (typeof held === "string" && held.trim() !== "") return { value: held, source: "memory" };
-    const fromEnv = verbatim(env[TOKEN_REF], "");
+    const fromEnv = verbatim(env[ref], "");
     if (typeof fromEnv === "string" && fromEnv.trim() !== "") return { value: fromEnv, source: "env" };
     return { value: "", source: null };
   };
@@ -159,11 +168,11 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
       const service = resolveService();
       if (service !== null && typeof service.set === "function") {
         // 先落持久层：服务拒绝的 save 必须传播出去，由路由呈报，不能留半态。
-        await service.set(TOKEN_REF, value);
+        await service.set(ref, value);
         // 镜像进内存：服务可能在下次 resolve 前注销，已落盘的值不能读成缺席。
-        memory.set(TOKEN_REF, value);
+        memory.set(ref, value);
       } else {
-        memory.set(TOKEN_REF, value);
+        memory.set(ref, value);
       }
       // 令牌换手：上一次探针的结论不再对这把令牌成立（见 lastCheck 注释）。
       lastCheck = null;
@@ -186,10 +195,10 @@ export function createTokenStore({ credentials = null, env = process.env }: { cr
     async forget() {
       const service = resolveService();
       if (service !== null && typeof service.unset === "function") {
-        await service.unset(TOKEN_REF);
+        await service.unset(ref);
       }
       // unset 成功后才删内存与旧结论（令牌换手，上次的探针结论不再成立）。
-      memory.delete(TOKEN_REF);
+      memory.delete(ref);
       lastCheck = null;
     },
 

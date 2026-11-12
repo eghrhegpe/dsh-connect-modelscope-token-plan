@@ -22,11 +22,20 @@ import { PROBE_PATH } from "./paths.ts";
 import { CODE } from "../codes.ts";
 import { writeJson, refuseMethod, withOrigin, redactedError, readJsonBodyOr400 } from "./http.ts";
 import type { Wiring } from "../types.ts";
+import type { Region } from "../account-pool.ts";
 import type { QuotaEvent } from "../../shared/wire.ts";
 
-/** 注册 probe 路由。wiring 子集：settings / tokenStore / usageStore / inference / logger。 */
-export function registerProbeRoute(ctx: any, wiring: Pick<Wiring, "settings" | "tokenStore" | "usageStore" | "inference" | "logger">) {
-  const { settings, usageStore, inference, logger } = wiring;
+/**
+ * 注册 probe 路由。wiring 子集：settings / tokenStore / usageStore / inference /
+ * logger，外加可选的 accountPool / providers（M4 双账户）。
+ *
+ * `region` 走请求体（与 token 路由同一条纪律，不新开路由）。缺省/其它值按 CN，
+ * 回落到注入的单 inference/tokenStore——直接构造本路由的离线用例（不带账户池）
+ * 因此与单账户时代逐字一致。国际账户的探针要用国际站的 inference（不同 apiBase、
+ * 不同令牌）并把结论记到国际那把令牌上，否则「验国际令牌」会拿 CN 的令牌去问。
+ */
+export function registerProbeRoute(ctx: any, wiring: Pick<Wiring, "settings" | "tokenStore" | "usageStore" | "inference" | "logger"> & Partial<Pick<Wiring, "accountPool" | "providers">>) {
+  const { settings, usageStore, logger } = wiring;
 
   return ctx.webServer.register({
     kind: "exact",
@@ -43,12 +52,20 @@ export function registerProbeRoute(ctx: any, wiring: Pick<Wiring, "settings" | "
         writeJson(response, 400, { ok: false, error: "modelId is required" }, { "cache-control": "no-store" });
         return;
       }
+      // 该 region 的探针出口：CN 回落注入的单 inference/tokenStore，国际用账户池 + providers。
+      const region: Region = body.region === "ai" ? "ai" : "cn";
+      const inference = region === "ai" && wiring.providers !== undefined
+        ? wiring.providers.ai.inference
+        : wiring.inference;
+      const tokenStore = region === "ai" && wiring.accountPool !== undefined
+        ? wiring.accountPool.tokenStoreOf("ai")
+        : wiring.tokenStore;
       try {
         const result = await inference.probe({ modelId });
         // 令牌好：200 空壳与 400（校验层拒绝）都说明鉴权过了。这条结论进快照的
         // `token.valid`，面板那行「状态：…（校验 …）」从此有答案——下游（client 的
         // validity.yes / wire 的 boolean|null）早就建好，此前只是没人填它。
-        wiring.tokenStore.noteValidity(true);
+        tokenStore.noteValidity(true);
         // 成功（200/400 都算令牌好）不记调用也不记事件——它不是一次用量，
         // 2026-10-04 实测它返回的是零 token 空壳（SPIKE.md）；是否耗一次免费
         // 次数未证实，所以宁可不计。
@@ -57,7 +74,7 @@ export function registerProbeRoute(ctx: any, wiring: Pick<Wiring, "settings" | "
         // 同形）：它住在**成功分支的 try 里**，一旦凭据服务读状态时抛错，控制流会
         // 落进 catch，于是一次**已经成功**的验令牌被回报成 ok:false，还在面板事件流
         // 里写进一条假 error——事件流是该面板的独家数据源，污染它比少一个字段糟得多。
-        writeJson(response, 200, { ...result, tokenState: await wiring.tokenStore.state().catch(() => null) }, { "cache-control": "no-store" });
+        writeJson(response, 200, { ...result, tokenState: await tokenStore.state().catch(() => null) }, { "cache-control": "no-store" });
       } catch (error) {
         const code = (error as { code?: unknown }).code;
         const message = redactedError(error);
@@ -66,7 +83,7 @@ export function registerProbeRoute(ctx: any, wiring: Pick<Wiring, "settings" | "
         // 「这次请求成没成」，不是「这把令牌好不好」——记成 valid:false 就是把限频
         // 说成令牌坏（与 429 分诊那条同一个误判）。它们不动 lastCheck，上一次的
         // 结论仍然是已知的最好答案。
-        if (code === CODE.AUTH_ERROR) wiring.tokenStore.noteValidity(false);
+        if (code === CODE.AUTH_ERROR) tokenStore.noteValidity(false);
         const eventKind: QuotaEvent["kind"] =
           code === CODE.QUOTA_EXCEEDED ? "quota" :
           code === CODE.RATE_LIMITED ? "rate_limit" : "error";
@@ -78,7 +95,7 @@ export function registerProbeRoute(ctx: any, wiring: Pick<Wiring, "settings" | "
           code: typeof code === "string" ? code : CODE.UPSTREAM_ERROR,
           error: message,
           ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
-          tokenState: await wiring.tokenStore.state().catch(() => null)
+          tokenState: await tokenStore.state().catch(() => null)
         }, { "cache-control": "no-store" });
       }
     }, settings.allowedHosts)

@@ -144,11 +144,12 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 | `ms-auth.ts` | 凭据存取（唯一出口，静态令牌） | `createTokenStore()` |
 | `inference-client.ts` | HTTP 出口：模型目录 + 魔粒余额 + 探针 | `createInferenceClient()` |
 | `usage-store.ts` | 本地计数持久化（天桶/单模型/事件流） | `createFileUsageStore()` |
-| `provider-store.ts` | 开关 + 允许清单 + 窗口覆盖的持久化 | `createFileProviderStore()` |
+| `provider-store.ts` | 开关 + 允许清单（按源站分段：CN `enabledIds` / 国际站 `enabledIdsAi`）+ 窗口覆盖的持久化 | `createFileProviderStore()` |
 | `state-store.ts` | 文件状态原语（原子写/版本守卫/读缓存/写队列） | 被上面四个 store 共用 |
 | `usage-prefs-store.ts` | 用量面板显示偏好（趋势显示窗口）的持久化 | `createFileUsagePrefsStore()`, `resolveWindowDays()` |
 | `roster-seen-store.ts` | 模型「本机首次见到」时间戳的持久化（胶囊「· N 新模型」的唯一写入口，写在收敛器里） | `createFileRosterSeenStore()`, `freshIdsOf()` |
 | `context-catalog.ts` | 内置上下文窗口策展表（models.dev 交叉真值） | `curatedWindowOf()` |
+| `account-pool.ts` | **账户池协调器**：CN/国际双源站令牌解析 + 健康态（轮询/故障转移）；协调器方法（非模块级导出）resolveToken / tokenStoreOf / apiBaseOf / siteBaseOf / regions / 冷却 | `createAccountPool()`, `REGIONS`, `Region`, `AccountToken` |
 | **── Provider 注册 ──** | | |
 | `llm-models.ts` | 目录→descriptor 映射（peer-free） | `buildDescriptors()`, `rosterWithAvailability()` |
 | `llm-adapter.ts` | 魔搭适配器装配（peer-dependent 半边） | `createModelScopeAdapter()` |
@@ -174,7 +175,7 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 | `routes/models.ts` | 模型目录路由 | `registerModelsRoute()` |
 | `routes/token.ts` | 令牌保存/忘掉/验证路由 | `registerTokenRoute()` |
 | `routes/probe.ts` | 零额度鉴权探针路由 | `registerProbeRoute()` |
-| `routes/provider.ts` | provider 开关/清单/窗口/重置路由 | `registerProviderRoute()` |
+| `routes/provider.ts` | provider 开关/清单/窗口/重置/quota 恢复路由 | `registerProviderRoute()` |
 | `routes/draw.ts` | 出图开关/模型/重置路由 | `registerDrawRoute()` |
 | `routes/usage-prefs.ts` | 趋势显示窗口路由 | `registerUsagePrefsRoute()` |
 | `routes/paths.ts` | 路由路径常量 | `SNAPSHOT_PATH`, `PROVIDER_PATH`, ... |
@@ -192,7 +193,7 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 |---|---|---|
 | `index.ts` | Client 入口（IIFE 注册物：id + 工厂，三模块世界共用） | `—`（无 ESM 导出；注册物经 __ModuleLoader__ 与 module.exports 交出） |
 | `panel-page.ts` | **面板主页面**：三 tab 布局 + 全部状态管理 | `PanelPage` |
-| `cards.ts` | 展示组件（余额/计数/趋势/事件/令牌/Provider/出图） | `BalanceCard`, `ProviderCard`, ... |
+| `cards.ts` | 展示组件（余额/双账户并排余额/计数/趋势/事件/令牌/Provider/出图） | `BalanceCard`, `AccountsBalanceCard`, `ProviderCard`, ... |
 | `snapshot.ts` | 快照解读（降级形状 + 兜底路由） | `viewOf()`, `providerOf()` |
 | `http.ts` | HTTP 客户端（GET/POST + 超时 + 错误） | `getJson()`, `postJson()` |
 | `format.ts` | 格式化辅助（数字/时间/错误） | `format()`, `isoTime()` |
@@ -200,7 +201,7 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 | `styles.ts` | 样式 token | `S` |
 | `runtime.ts` | React 运行时桥接（h/useState/useEffect） | `h`, `useState`, `useEffect` |
 | `i18n.ts` | 国际化字典 | — |
-| `composer-usage-pill.ts` | 对话框胶囊（魔粒余额 + 本地计数） | `ComposerUsagePill()`, `ModelscopePill()` |
+| `composer-usage-pill.ts` | 对话框胶囊（魔粒余额 + 本地计数 + 双账户余额行） | `ComposerUsagePill()`, `ModelscopePill()`, `accountsOf()` |
 | `toggle-switch.ts` | 开关组件 | `ToggleSwitch` |
 | `use-snapshot-polling.ts` | 快照轮询 hook（退避/后台暂停/慢响应保护） | `useSnapshotPolling()` |
 | `use-polling-interval.ts` | 轮询间隔计算 hook | `usePollingInterval()` |
@@ -312,6 +313,8 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 - **`usage.json` 版本守卫曾只置位不复位**：旧构建用空载荷把新构建的 usage.json 降级覆写（version 2 → 1，110 次历史归零），而日志还在说 "recording disabled"。写路径必须在 mutate 之前**自己**读盘。
 - **观察层与重分类层顺序不可反**：反了事件流会把纠正后的 RATE_LIMIT 又记成 QUOTA——面板说「额度耗尽」而退避策略按限频处理。
 - **允许清单的空 vs 缺失是两件事**：`[]` = 不过滤（全部提供），`null` = 没保存过。读侧必须能区分两者，否则「保存了空清单」会被读成「从未保存」。
+- **允许清单按源站分段**：`provider.json` 里 `enabledIds` 是 CN、`enabledIdsAi` 是国际站；`enabledIds()` / `saveEnabledIds()` 缺省 CN，只有字面 `region:"ai"` 走国际。任何读清单的路径（收敛器、快照聚合、provider 路由）都必须按 region 取——共用一份会让国际站没有模型选择界面（CN 独有的 `qwen-3.8-flash-next` 勾选会把国际站裁空或无处可选）。
+- **国际站清单缺席 = 跟随 CN 清单（不是「不过滤」）**：缺席读成 `[]` 会让 DSH 模型选择器放出国际站目录里的全部模型、绕开「模型」tab 的勾选（2026-11-12 用户实测）。跟随裁决只在 `provider-store.ts` 的 `storedIdsFor` 单点做；CN 独有 id 不在国际站目录里，`filterByEnabled` 天然裁掉，跟随是安全的。
 
 ---
 

@@ -8,11 +8,11 @@ import { compactCount, count, format, isoTime } from "./format.ts";
 import { h, useEffect, useMemo, useState } from "./runtime.ts";
 import type { DictionaryKey, Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
-import { MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, modelscopeModelUrl, FEATURED_OWNERS, catalogOwner, trimOwnerPrefix, formatWindow } from "./const.ts";
+import { MODELSCOPE_TOKEN_URL, MODELSCOPE_INTERNATIONAL_SITE_URL, MODELSCOPE_USAGE_URL, modelscopeModelUrl, FEATURED_OWNERS, catalogOwner, trimOwnerPrefix, formatWindow } from "./const.ts";
 import { providerOf, drawOf } from "./snapshot.ts";
 import { ToggleSwitch } from "./toggle-switch.ts";
 import { parseAllowedList, normalizeRosterSave, hideAllRoster } from "../shared/allow-list.ts";
-import type { BalanceData, ProviderStatus, DrawStatus, QuotaEvent, Snapshot, TrendBucket, TokenStatus } from "../shared/wire.ts";
+import type { AccountSnapshot, BalanceData, ProviderStatus, ProviderRegion, DrawStatus, QuotaEvent, Snapshot, TrendBucket, TokenStatus } from "../shared/wire.ts";
 
 /** 可折叠 section 卡：全宽头部按钮 + 旋转 chevron；open/onToggle 由 props 进。 */
 export function SectionCard({ title, open, onToggle, children, tt }: {
@@ -80,6 +80,64 @@ export function BalanceCard({ balance, tt }: { balance: BalanceData | null; tt: 
       " ",
       h("a", { style: S.formNote, href: MODELSCOPE_USAGE_URL, target: "_blank", rel: "noreferrer" }, tt("balance.usagePage"))
     )
+  );
+}
+
+/**
+ * 双账户并排余额卡（M4）：CN / 国际各一张有标签的小卡，各显官方魔粒余额。
+ *
+ * **只在 `accounts[]` 在场时由 panel-page 渲染**（旧 Host 或过渡期省略 accounts，
+ * 面板继续用上面那张单账户 BalanceCard，DOM 逐字不变）。两站是各自独立的一份官方
+ * 读数，绝不合并成一个总数——那会把两把不同账户的钱说成一笔。
+ *
+ * 三格读数各自遵守「读不到 ≠ 0」：null 画「—」，与 BalanceCard 同口径。令牌未配
+ * 时 Host 会把该账户余额整块软失败成 null（不是报错），这里补一行 `account.balanceEmpty`
+ * 把「还没接」说出口，而不是让一张空卡看起来像「0 魔粒」。
+ *
+ * 本地用量**不在这里**：它是按 profile 分段的一本合并账（事实 1），由下面的
+ * LocalDailyCard 画一张，不按账户切两份。
+ */
+export function AccountsBalanceCard({ accounts, tt }: { accounts: readonly AccountSnapshot[]; tt: Tt }): unknown {
+  if (!Array.isArray(accounts) || accounts.length === 0) return null;
+  const stat = (label: string, value: unknown) =>
+    h(
+      "div",
+      { style: S.statCard },
+      h("div", { style: S.statValue }, typeof value === "number" && Number.isFinite(value) ? count(value) : "—"),
+      h("div", { style: S.quotaLabel }, label)
+    );
+  const tile = (account: AccountSnapshot) => {
+    const b = account.balance;
+    const label = account.region === "ai" ? tt("account.international") : tt("account.cn");
+    const error = b !== null && typeof b === "object" && typeof b.error === "string" && b.error !== ""
+      ? b.error
+      : null;
+    return h(
+      "div",
+      { key: account.region, style: { ...S.card, flex: "1 1 220px", minWidth: 0, margin: 0 } },
+      h("div", { style: S.poolName }, label),
+      error !== null
+        ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-error-primary)", margin: 0 } }, format(tt("balance.unavailable"), { error }))
+        : h(
+            "div",
+            { style: S.statGrid },
+            stat(tt("balance.available"), b?.available),
+            stat(tt("balance.total"), b?.total),
+            stat(tt("balance.frozen"), b?.frozen)
+          ),
+      // 该账户令牌缺席 → 明确说「还没接」，别让全「—」的卡被读成「余额 0」。
+      account.token?.present === false
+        ? h("div", { style: S.formNote }, tt("account.balanceEmpty"))
+        : null,
+      // 两个 provider 各注册各的：把该账户对应的注册态点出来（与模型 tab 分开，因为
+      // 那边展示的是 CN 单源站的 roster）。
+      h("div", { style: S.trendLegend }, account.registered ? tt("provider.registered") : tt("provider.notRegistered"))
+    );
+  };
+  return h(
+    "div",
+    { style: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "stretch" } },
+    accounts.map(tile)
   );
 }
 
@@ -375,8 +433,15 @@ export function EventsList({ events, tt }: { events: QuotaEvent[] | null; tt: Tt
   );
 }
 
-/** 令牌表单：保存 / 忘掉 / 验令牌 + 状态行 + 外链。唯一持 state 的展示组件。 */
-export function TokenForm({ token, busy, error, onSave, onForget, onVerify, verifyTitle, tt }: {
+/**
+ * 令牌表单：保存 / 忘掉 / 验令牌 + 状态行 + 外链。唯一持 state 的展示组件。
+ *
+ * M4 双账户：`region` 缺省（或 "cn"）时行为与单账户时代逐字一致；传 "ai" 时改用
+ * 国际站的提示/外链（引用名是 MODELSCOPE_INTERNATIONAL_API_KEY，不是 CN 那把），
+ * 并在表单上方显示所属账户的标签。写哪个账户由调用方的 onSave/onForget/onVerify
+ * 决定——组件自己只认一个 `region` 用于文案，不碰路由。
+ */
+export function TokenForm({ token, busy, error, onSave, onForget, onVerify, verifyTitle, region = "cn", label = null, tt }: {
   token: TokenStatus | null;
   busy: boolean;
   error: string | null;
@@ -386,9 +451,17 @@ export function TokenForm({ token, busy, error, onSave, onForget, onVerify, veri
   onVerify?: (() => void) | undefined;
   /** 提示实际探的是哪个模型（validity 只关心鉴权，任意模型皆可）。 */
   verifyTitle?: string | undefined;
+  /** 该表单管理哪个账户："cn"（缺省）| "ai"。只影响文案与外链。 */
+  region?: "cn" | "ai";
+  /** 账户标签（双账户并排时显示，单账户时代不传 = 不渲染）。 */
+  label?: string | null;
   tt: Tt;
 }): unknown {
   const [value, setValue] = useState("");
+  const international = region === "ai";
+  const hint = tt(international ? "token.hintInternational" : "token.hint");
+  const linkText = tt(international ? "token.linkInternational" : "token.link");
+  const linkHref = international ? MODELSCOPE_INTERNATIONAL_SITE_URL : MODELSCOPE_TOKEN_URL;
   // 守卫必须用 `== null` 而不是 `=== null`：调用点是 `data?.token ?? null`，
   // 而 `??` 只在null/undefined 之间桥接——`data` 存在但 `token` 键缺失时
   // `data?.token` 是 undefined，喂进来就把这里带进崩路径（读 undefined.source）。
@@ -404,6 +477,7 @@ export function TokenForm({ token, busy, error, onSave, onForget, onVerify, veri
   return h(
     "div",
     null,
+    label !== null ? h("div", { style: S.poolName }, label) : null,
     // 读不到凭据存储时**不**渲染「状态：无（来源 无）」——那是对「没配令牌」的断言，
     // 而我们并不知道（见 wire.ts TokenStatus.readError）。这一行代替它，并说清它不
     // 代表没配令牌。
@@ -424,8 +498,8 @@ export function TokenForm({ token, busy, error, onSave, onForget, onVerify, veri
       onVerify !== undefined ? h("button", { type: "button", style: S.button, disabled: busy, onClick: onVerify, title: verifyTitle }, tt("probe.validity")) : null
     ),
     error !== null ? h("div", { style: S.formError, role: "alert" }, error) : null,
-    h("div", { style: S.formNote }, tt("token.hint")),
-    h("a", { style: S.formNote, href: MODELSCOPE_TOKEN_URL, target: "_blank", rel: "noreferrer" }, tt("token.link"))
+    h("div", { style: S.formNote }, hint),
+    h("a", { style: S.formNote, href: linkHref, target: "_blank", rel: "noreferrer" }, linkText)
   );
 }
 
@@ -483,23 +557,61 @@ export function groupByOwner(rows: RosterRow[]): { owner: string; rows: RosterRo
  *
  * 额度耗尽的模型保留在清单里（灰显、勾选框禁用），这是故意的：roster 是目录
  * 事实，picker 那边由 Host 自己丢掉它们，面板不替它删。
+ *
+ * M6 按源站分段（`providers` prop，见 `shared/wire.ts`）：CN 与国际站（modelscope.ai）
+ * 的目录不同，**允许清单也各自落盘**（`enabledIds` / `enabledIdsAi`）。所以状态行、
+ * roster、勾选计数与三个清单按钮都作用于**当前选中的源站**；切换器只在两站的状态
+ * 都在场时渲染。开关、上下文窗口覆盖与 reset 仍是两站共用的一份 store 字段，因此
+ * 在卡片里**只渲染一次**，不跟着源站切换。`providers` 缺席（旧 Host / 单账户装配）
+ * 时整张卡退回单块 `provider` 的老路径，DOM 与从前逐字一致。
  */
-export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSaveContextWindow, onReset, tokenPresent, tt }: {
+export function ProviderCard({ provider, providers, busy, error, onToggle, onSaveList, onSaveContextWindow, onReset, onResumeQuota, tokenPresent, tt }: {
   provider: ProviderStatus | null;
+  /**
+   * 按源站分段的 provider 状态（可选块）。缺席 = 旧 Host / 单账户装配，卡片完全
+   * 走单块 `provider` 路径；在场时 `provider` 只当兜底（顶层块是 CN 别名）。
+   */
+  providers?: Partial<Record<ProviderRegion, ProviderStatus>> | undefined;
   busy: boolean;
   /** 上一次开关/清单/窗口写盘的失败（调用方持有 busy 与错误，ProviderCard 只渲染）。 */
   error: string | null;
   onToggle: (enabled: boolean) => void;
-  onSaveList: (ids: string[]) => void;
+  /**
+   * 保存允许清单。`region` 指明这份清单属于哪个源站——Host 侧是两把平级键，
+   * 写错源站会静默清空另一站的选择。payload 形状由调用方决定（CN 不带 region）。
+   */
+  onSaveList: (ids: string[], region: ProviderRegion) => void;
   /** 保存全局上下文窗口覆盖；`null` = 跟随目录（清除覆盖）。 */
   onSaveContextWindow?: (contextWindow: number | null) => void;
   onReset: () => void;
+  /**
+   * 手动解除**当前源站**的今日 quota 抑制（把被 429 摘出的 provider 重新挂回
+   * picker）。可选：旧装配没有这条按钮。按 region 发请求——抑制是按源站独立
+   * 判定的，恢复也只恢复当前选中的那一站。
+   */
+  onResumeQuota?: (region: ProviderRegion) => void;
   /** 面板是否已有令牌；缺省 = 未知，不渲染「先去配置」提示。 */
   tokenPresent?: boolean | undefined;
   tt: Tt;
 }): unknown {
+  // ── 源站维度（M6）──
+  // 只有 providers 里**两个键都在**时才给切换器：缺一个键 = 那个源站这块读不到
+  // （wire.ts 的「省略而非填假块」纪律），此时不伪造第二份状态。
+  const regionKeys: ProviderRegion[] = providers === undefined
+    ? []
+    : (["cn", "ai"] as const).filter((key) => providers[key] !== undefined);
+  const dualRegions = regionKeys.length === 2;
+  // 编辑目标缺省 CN（与 Host 的缺省 region 一致）：老 Host 下 payload 因此逐字不变。
+  const [pickedRegion, setPickedRegion] = useState<ProviderRegion>("cn");
+  // 生效源站：两站都在时跟按钮走；只有一份时可切的只有它自己——否则国际站那唯一
+  // 一份会被 CN 的兜底块顶掉，保存还会写错清单（写进 CN 的 enabledIds）。
+  const region: ProviderRegion = providers === undefined
+    ? "cn"
+    : providers[pickedRegion] !== undefined
+      ? pickedRegion
+      : regionKeys[0] ?? "cn";
   // providerOf 再归一一次是防御：路由 GET 的结果也走这条，两端形状一致。
-  const status = providerOf(provider);
+  const status = providerOf(providers?.[region] ?? provider);
   const enabled = status.enabled === true;
   const hostIds = status.enabledIds;
   const hostKey = useMemo(() => JSON.stringify(hostIds), [hostIds]);
@@ -524,7 +636,11 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
     // → draft 重置、未保存的编辑丢失。不防护的原因：脏 draft 压过外部值需要
     // 「最后写者胜」+「陈旧 id 残留」两个新语义决策，属 owner 裁量；代价上界
     // 只是重勾几格。自己保存引发的 hostKey 变化无害（draft 收敛到刚保存的值）。
-  }, [hostKey]);
+    //
+    // `region` 必须在依赖里：切换源站 = 换一份清单，必须从新源站的 Host 值重取。
+    // 未保存的编辑在这里**故意丢弃**——把上一站的勾选带过去，会让「已启用 N / M」
+    // 与保存按钮说的清单变成另一站的（UI 与落盘撒谎）。代价上界仍是重勾几格。
+  }, [hostKey, region]);
 
   const roster = status.roster;
   const rosterIds = roster.map((row) => row.id);
@@ -560,6 +676,35 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
   const tokenHint = enabled && tokenPresent === false
     ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("provider.notConfigured"))
     : null;
+
+  // quota 抑制横幅：该源站今日被 quota 类 429 整体摘出 DSH 模型选择器。
+  // 单独一行（role=alert，与 error 行同级）：这是「模型为什么从 picker 里消失了」
+  // 的唯一解释——开关看着开着、registered 却是 false，没有这条用户无从诊断。
+  // 恢复按钮按当前源站发请求（抑制按源站独立判定）；busy 期间置灰与其它写路径
+  // 同款。旧 Host 不带 suppressedToday 字段（读侧 false 兜底）→ 横幅不渲染。
+  const suppressed = status.suppressedToday === true;
+  const suppressedNode = !suppressed
+    ? null
+    : h(
+        "div",
+        {
+          style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" },
+          role: "alert"
+        },
+        tt("provider.suppressedToday"),
+        onResumeQuota === undefined
+          ? null
+          : h(
+              "button",
+              {
+                type: "button",
+                style: S.button,
+                disabled: busy,
+                onClick: () => onResumeQuota(region)
+              },
+              tt("provider.quotaResume")
+            )
+      );
 
   // 源标注：面板保存的值 / patch 的默认。
   const sourceKey = status.source === "panel" ? "provider.source.panel" : "provider.source.config";
@@ -721,6 +866,48 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
   const visibleRows = query === "" ? roster : roster.filter((row) => `${row.id} ${String(row.name ?? "")}`.toLowerCase().includes(query));
   const ownerGroups = groupByOwner(visibleRows);
 
+  // 源站切换器（M6）：两站状态都在场时才渲染，摆在小标题「启用哪些模型」下方。
+  // 复用 token 表单那套按钮样式（`trendMetricBtn`）与账户文案，两处对「CN / 国际站」
+  // 的叫法因此不会漂成两套；`role="group"` + `aria-pressed` 与趋势指标切换同语义
+  // （刻意不用 tablist——这不是面板分区，是同一份表单里的二选一）。
+  //
+  // 切换只影响「看/存哪一份清单」：开关行、上下文窗口覆盖与 reset 仍在它外面只画
+  // 一次，因为它们读的是两站共用的一份 store 字段。
+  const regionSwitcher = dualRegions
+    ? h(
+      "div",
+      { style: { marginBottom: 10 } },
+      h(
+        "div",
+        { style: S.trendMetricBar, role: "group", "aria-label": tt("provider.regionModels") },
+        ...regionKeys.map((key) =>
+          h(
+            "button",
+            {
+              key,
+              type: "button",
+              "aria-pressed": region === key,
+              style: region === key ? { ...S.trendMetricBtn, ...S.trendMetricBtnActive } : S.trendMetricBtn,
+              // 切换源站**当场**把草稿重置到新源站的 Host 落盘值：不等下一帧的
+              // useEffect（某些渲染环境下 effect 里的 setState 在 commit 内被丢弃，
+              // 会先以旧草稿渲染一帧、甚至把草稿卡在旧值）。未保存的编辑因此被丢弃——
+              // 与下面的 effect 同一份契约（切走 = 不把上一站的勾选带过去）。
+              onClick: () => {
+                setPickedRegion(key);
+                const nextStatus = providerOf(providers?.[key] ?? provider);
+                setDraft(normalizeRosterSave(nextStatus.enabledIds));
+              }
+            },
+            tt(key === "ai" ? "account.international" : "account.cn")
+          )
+        )
+      ),
+      // 两站清单各自落盘这件事必须说出口：用户以为在改「一份共享清单」时，切走源站
+      // 再保存就会把另一站的模型裁掉，而界面上没有任何地方解释过为什么。
+      h("div", { style: S.advancedHint }, tt("provider.regionHint"))
+    )
+    : null;
+
   const rosterBlock = roster.length === 0
     ? h("div", { style: { ...S.muted, fontSize: 12, marginTop: 6 } }, tt("provider.rosterHint"))
     : h(
@@ -748,15 +935,17 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
           }, format(tt("provider.enabledCount"), { count: ticked, total: roster.length })),
           h("button", {
             type: "button", style: S.rosterBulk, disabled: busy,
-            onClick: () => { setDraft(rosterIds.slice()); onSaveList(rosterIds.slice()); }
+            // 「全部」= 当前源站目录里的全部：两站目录不同，拿另一站的 id 去落盘
+            // 会写出该站目录里根本不存在的条目（计数与提供数因此对不上）。
+            onClick: () => { setDraft(rosterIds.slice()); onSaveList(rosterIds.slice(), region); }
           }, tt("provider.allowAll")),
           h("button", {
             type: "button", style: S.rosterBulk, disabled: busy,
-            onClick: () => { const none = hideAllRoster(); setDraft(none); onSaveList(none); }
+            onClick: () => { const none = hideAllRoster(); setDraft(none); onSaveList(none, region); }
           }, tt("provider.hideAll")),
           h("button", {
             type: "button", style: S.primary, disabled: busy,
-            onClick: () => onSaveList(draft.slice())
+            onClick: () => onSaveList(draft.slice(), region)
           }, tt("provider.saveList"))
         ),
         // 输出上限的**缺省说明**，常驻一行。它存在的理由是这个面板最反直觉的一件
@@ -828,8 +1017,10 @@ export function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSa
     null,
     switchRow,
     alertNode,
+    suppressedNode,
     tokenHint,
     h("div", { style: { ...S.sectionTitle, margin: "18px 0 8px" } }, tt("provider.models")),
+    regionSwitcher,
     rosterBlock,
     contextNode,
     resetRow,

@@ -47,7 +47,7 @@ import {
 } from "./state-store.ts";
 import { pluginError, errMsg, redactSecrets } from "./util.ts";
 import { CODE } from "./codes.ts";
-import type { QuotaEvent, TrendBucket } from "../shared/wire.ts";
+import type { ProviderRegion, QuotaEvent, TrendBucket } from "../shared/wire.ts";
 
 /** 本地日期键（ quota 按天重置，以 Host 本地时区为准）。 */
 export function localDateKey(now: Date): string {
@@ -87,6 +87,25 @@ interface UsagePayload {
   days: Record<string, DayBucket>;
   models: Record<string, ModelCounter>;
   events: QuotaEvent[];
+  /**
+   * quota 抑制标记（按源站分段）：值 = 触发当日的**本地日期键**。
+   *
+   * 为什么独立持久化而不是每次从 `events` 现推：事件流是环形缓冲（截断到
+   * maxEvents），当天的第一条 quota 事件会被后续事件挤出——抑制状态不能跟着
+   * 一条会被淘汰的记录走。v1 **加性**字段：旧载荷缺失按「无抑制」读
+   * （parsePayload 容忍缺席，不升版本）；跨日本地翻页后日期键不等 → 自动解除。
+   */
+  quotaSuppress: { cn?: string; ai?: string };
+}
+
+/**
+ * 「该源站此刻是否被 quota 抑制」的**纯判定**（快照聚合与收敛器共用同一份解释）：
+ * 标记存在，且等于此刻的本地日期键。只认今天——昨天的标记是过期残留，读作未抑制
+ * （自动解除），不需要任何清理步骤就能让 provider 重新出现。
+ */
+export function quotaSuppressedOf(payload: UsagePayload, region: ProviderRegion, now: Date): boolean {
+  const marked = payload.quotaSuppress?.[region];
+  return typeof marked === "string" && marked !== "" && marked === localDateKey(now);
 }
 
 const STATE_VERSION = 1;
@@ -148,7 +167,18 @@ function parsePayload(raw: unknown): { payload: UsagePayload | null; anomaly: st
         typeof (entry as QuotaEvent).message === "string"
       )
     : [];
-  return { payload: { version: STATE_VERSION, days, models, events }, anomaly: null };
+  // v1 加性字段：旧载荷缺失 quotaSuppress 按「无抑制」读；形状不对（非对象/
+  // 数组/值不是日期键字符串）的条目丢弃——抑制是安全侧的「摘除」，但解析层
+  // 宁可少摘（丢脏条目）也不读进无法解释的值。region 键只认 cn/ai 两个。
+  const quotaSuppress: { cn?: string; ai?: string } = {};
+  const rawSuppress = source.quotaSuppress;
+  if (rawSuppress !== undefined && rawSuppress !== null && typeof rawSuppress === "object" && !Array.isArray(rawSuppress)) {
+    for (const region of ["cn", "ai"] as const) {
+      const value = (rawSuppress as Record<string, unknown>)[region];
+      if (typeof value === "string" && value !== "") quotaSuppress[region] = value;
+    }
+  }
+  return { payload: { version: STATE_VERSION, days, models, events, quotaSuppress }, anomaly: null };
 }
 
 /**
@@ -188,7 +218,7 @@ export function createFileUsageStore({ name, profile = null, retentionDays = 90,
   let readOnly = false;
 
   /** 最近一次确认过的内存态；读路径拿它，写路径以它为基线。 */
-  let current: UsagePayload = { version: STATE_VERSION, days: {}, models: {}, events: [] };
+  let current: UsagePayload = { version: STATE_VERSION, days: {}, models: {}, events: [], quotaSuppress: {} };
   let loaded = false;
   /** 写串行化：读-改-写必须排队，两个并发 recordCall 不能互相覆盖。
      队列实现在 state-store（{@link createStateWriteQueue}）——provider / draw
@@ -310,7 +340,7 @@ export function createFileUsageStore({ name, profile = null, retentionDays = 90,
       // provider-store 的 patchPayload 是同一条纪律：读-改-写必须在临界区里重新读。
       // 读盘失败/损坏时回退内存态：宁可退回旧行为，也不让一次坏读把计数清零。
       const fromDisk = (await readThrough()) ?? (loaded ? current : null);
-      const payload: UsagePayload = fromDisk ?? { version: STATE_VERSION, days: {}, models: {}, events: [] };
+      const payload: UsagePayload = fromDisk ?? { version: STATE_VERSION, days: {}, models: {}, events: [], quotaSuppress: {} };
       mutate(payload);
       current = payload;
       loaded = true;
@@ -361,13 +391,53 @@ export function createFileUsageStore({ name, profile = null, retentionDays = 90,
       });
     },
 
-    /** 记一条事件（429/错误），Newest-first，截断到 maxEvents。 */
-    async recordEvent({ modelId, kind, message, at = now() }: { modelId: string; kind: QuotaEvent["kind"]; message: string; at?: Date }) {
+    /**
+     * 记一条事件（429/错误），Newest-first，截断到 maxEvents。
+     *
+     * `kind === "quota"` 时**同时**盖今日抑制标记（按 `region`，缺省 cn）：这是
+     * 抑制状态唯一且持久的写入口——事件本身会被环形缓冲淘汰，标记不会。只认
+     * quota 不认 rate_limit：限频走退避重试（llm-error-fix 的纠正路径），把
+     * 限频误当耗尽会让 provider 在高峰时段整天消失。`region` 由 index.ts 的
+     * buildRegion 闭包绑定（两个源站共用本 store，事件自身不带源站）。
+     */
+    async recordEvent({ modelId, kind, message, region, at = now() }: { modelId: string; kind: QuotaEvent["kind"]; message: string; region?: ProviderRegion; at?: Date }) {
       await enqueue((payload) => {
         payload.events = [
-          { at: at.toISOString(), modelId: String(modelId), kind, message: String(message).slice(0, 500) },
+          {
+            at: at.toISOString(),
+            modelId: String(modelId),
+            kind,
+            message: String(message).slice(0, 500),
+            // region 只是装饰性附加字段（展示/排查用）；省略时不带键，与旧事件行同形
+            // （exactOptionalPropertyTypes 下条件展开，不能传显式 undefined）。
+            ...(region === undefined ? {} : { region })
+          },
           ...payload.events
         ].slice(0, maxEvents);
+        if (kind === "quota") {
+          const suppressRegion: ProviderRegion = region === "ai" ? "ai" : "cn";
+          payload.quotaSuppress[suppressRegion] = localDateKey(at);
+        }
+      });
+    },
+
+    /**
+     * 该源站此刻是否被 quota 抑制（只认今天：日期键不等即未抑制）。
+     *
+     * 载荷读不出来（损坏/版本不识/不可读）时按**未抑制**兜底：读失败不能把
+     * provider 摘掉——「不知道」永远不能表现为「销」（红线 3 的镜像：这里的
+     * 销毁方向反过来，读不到时宁可让模型继续可用）。
+     */
+    async isQuotaSuppressed(region: ProviderRegion): Promise<boolean> {
+      const payload = await cache.read();
+      if (payload === null) return false;
+      return quotaSuppressedOf(payload, region, now());
+    },
+
+    /** 手动解除该源站的今日抑制（面板「恢复」按钮）。幂等：没标记时是 no-op。 */
+    async clearQuotaSuppress(region: ProviderRegion): Promise<void> {
+      await enqueue((payload) => {
+        delete payload.quotaSuppress[region];
       });
     },
 

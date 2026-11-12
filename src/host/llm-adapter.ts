@@ -60,7 +60,7 @@ import { withUsageObserver, type UsageSinks } from "./usage-observer.ts";
  *   应该可见——否则用户发现计数不对时没有任何线索。
  * @returns {{adapter: object, providerIds: string[]}} 适配器与它拥有的 ids。
  */
-export function createModelScopeAdapter({ entries, enabledIds = [], baseUrl, resolveApiKey, get, unavailableModelIds = [], maxTokensOverrides = {}, usage, onError }: {
+export function createModelScopeAdapter({ entries, enabledIds = [], baseUrl, resolveApiKey, get, unavailableModelIds = [], maxTokensOverrides = {}, usage, onError, providerId = LLM_PROVIDER_ID, displayName = LLM_DISPLAY_NAME }: {
   entries: unknown;
   enabledIds?: string[];
   baseUrl: string;
@@ -70,12 +70,16 @@ export function createModelScopeAdapter({ entries, enabledIds = [], baseUrl, res
   maxTokensOverrides?: Record<string, number>;
   usage?: UsageSinks;
   onError?: (error: unknown) => void;
+  /** 注册到哪个 provider id（CN = `modelscope-token-plan`；国际 = `modelscope-token-plan-international`）。 */
+  providerId?: string;
+  /** picker 里显示的 provider 名（国际版传 `ModelScope International`）。 */
+  displayName?: string;
 }) {
-  const models = buildDescriptors(entries, { providerId: LLM_PROVIDER_ID, baseUrl, enabledIds, unavailableModelIds, maxTokensOverrides });
+  const models = buildDescriptors(entries, { providerId, baseUrl, enabledIds, unavailableModelIds, maxTokensOverrides });
 
   const built = assemblePiAiAdapter({
-    providerId: LLM_PROVIDER_ID,
-    displayName: LLM_DISPLAY_NAME,
+    providerId,
+    displayName,
     apiKeyName: LLM_API_KEY_NAME,
     models,
     // 存着的令牌引用是本路由呈现的唯一凭据；每次请求现读，所以轮换令牌不需要

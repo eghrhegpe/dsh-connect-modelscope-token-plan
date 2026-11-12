@@ -4,10 +4,18 @@
  * 四件事（§9）：
  *   - GET  `PROVIDER_PATH`           读当前开关 + 目录 + 允许清单 + 注册状态（无副作用）；
  *   - POST `PROVIDER_PATH`           body `{enabled?: boolean}` → 保存面板开关并重注册；
- *   - POST `PROVIDER_PATH/roster`    body `{enabledIds?: string[]}` → 保存允许清单并重注册；
+ *   - POST `PROVIDER_PATH/roster`    body `{enabledIds?: string[], region?: "cn"|"ai"}` →
+ *     保存**该源站**的允许清单并重注册；
  *   - POST `PROVIDER_PATH/context`   body `{contextWindow: number|null}` → 保存全局上下文
  *     窗口覆盖并重注册（null = 跟随目录）；
- *   - POST `PROVIDER_PATH/reset`     忘掉面板开关、允许清单与窗口覆盖，回到 patch 默认。
+ *   - POST `PROVIDER_PATH/reset`     忘掉面板开关、两份允许清单与窗口覆盖，回到 patch 默认；
+ *   - POST `PROVIDER_PATH/quota-resume` body `{region?: "cn"|"ai"}` → 解除该源站的今日
+ *     quota 抑制并重注册（quota 429 把 provider 摘出 picker 的手动撤销；无抑制时是幂等 no-op）。
+ *
+ * 清单按源站分段（M6）：请求体带可选 `region`，只有字面 `"ai"` 走国际站，缺省/其它
+ * 值一律 CN——判据与 `routes/token.ts` 的 `regionOf` 同款，老客户端（不带该字段）
+ * 的语义逐字不变。刻意**不新增** `/roster/international` 之类路由：路由字面量集合由
+ * `test/panel.test.mjs` §6/§6b 双向钉死，用请求体维度避免那一整套清单同步。
  *
  * `withOrigin` 围栏与 `refuseMethod` 照现有路由；写开关/清单失败**必须传播**
  * （`ok:false` + error），不静默吞——这是用户的显式操作，面板必须看见它没生效。
@@ -22,6 +30,15 @@ import { parseAllowedList, enabledCountOf } from "../../shared/allow-list.ts";
 import { resolveSwitchEnabled, switchSource } from "../switch-precedence.ts";
 import { optional } from "../util.ts";
 import { writeJson, refuseMethod, withOrigin, readJsonBodyOr400, readJsonBody, respondError, redactedError, MAX_JSON_BODY_BYTES } from "./http.ts";
+import type { ProviderRegion } from "../../shared/wire.ts";
+
+/**
+ * 请求体里的 region 只认字面 "ai" 走国际站，其余（含缺省、脏值）全归 CN——
+ * 与 `routes/token.ts` 的 `regionOf` 同一判据：脏值不能让面板改错清单。
+ */
+function regionOf(body: Record<string, unknown>): ProviderRegion {
+  return body.region === "ai" ? "ai" : "cn";
+}
 
 /**
  * 本路由读到的 wiring 子集。
@@ -43,8 +60,12 @@ interface ProviderRouteWiring {
     enabled: () => Promise<boolean | null>;
     save: (value: boolean) => Promise<void>;
     forget: () => Promise<void>;
-    enabledIds?: () => Promise<string[] | null>;
-    saveEnabledIds?: (ids: string[]) => Promise<void>;
+    /**
+     * 该源站的清单（M6）。`region` 缺省 CN —— 本路由的 GET 与 reset 兜底读的
+     * 都是 CN 那份，只有 roster 保存会按请求体的 region 选站。
+     */
+    enabledIds?: (region?: ProviderRegion) => Promise<string[] | null>;
+    saveEnabledIds?: (ids: string[], region?: ProviderRegion) => Promise<void>;
     contextWindow?: () => Promise<number | null>;
     saveContextWindow?: (value: number | null) => Promise<void>;
   };
@@ -73,6 +94,15 @@ interface ProviderRouteWiring {
    * 等于把「谁是新模型」变成「谁最近一次被面板读到」。
    */
   rosterSeenStore?: { fresh: (nowMs?: number) => Promise<string[]> };
+  /**
+   * quota 抑制的读写（usage-store，M6 装配下必在）。**可选**：老装配 / 测试桩
+   * 缺它时 resume 路由回 ok:false（说「本构建不支持」）——路由存在而机制缺席
+   * 是可接受的降级，反向（机制在路由不在）才会把用户困在摘除态。
+   */
+  usageStore?: {
+    isQuotaSuppressed?: (region: ProviderRegion) => Promise<boolean>;
+    clearQuotaSuppress?: (region: ProviderRegion) => Promise<void>;
+  };
   logger?: { warn?: (message: string) => void };
 }
 
@@ -97,7 +127,10 @@ async function readEntries(inference: ProviderRouteWiring["inference"], provider
 }
 
 /**
- * 读「当前」允许清单：优先持久化的，否则 publisher 最近 publish 的那份。
+ * 读「当前」**CN** 允许清单：优先持久化的，否则 publisher 最近 publish 的那份。
+ *
+ * 本路由的 GET 是 CN 的权威读路径（顶层 provider 块 = CN 别名），所以不传 region；
+ * 国际站那份由快照聚合的 `providers.ai` 块负责，两者读的是 store 里不同的键。
  *
  * 判据是**共用**的 resolveEnabledIds（provider-store）——本文件与面板聚合、
  * index.ts 的轮询必须对「空清单」给同一个答案，否则三个界面各说一套。
@@ -115,14 +148,14 @@ async function readEnabledIds(store: ProviderRouteWiring["providerStore"], publi
  */
 
 /**
- * 注册 provider 路由（三条路径）。wiring 子集：settings / providerStore /
+ * 注册 provider 路由（五条路径）。wiring 子集：settings / providerStore /
  * publisher / inference / logger。
  * @param ctx - host 根上下文（只用 `ctx.webServer`）。
  * @param {ProviderRouteWiring} wiring - 本路由读到的子集。
- * @returns {Function} 依次调用三个 `off()` 的注销回调。
+ * @returns {Function} 依次调用五个 `off()` 的注销回调。
  */
 export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
-  const { settings, providerStore, publisher, reconcile, inference, rosterSeenStore, logger } = wiring;
+  const { settings, providerStore, publisher, reconcile, inference, rosterSeenStore, usageStore, logger } = wiring;
 
   /**
    * 组装一份 §9 响应形状。GET 与成功后的 POST 共用，所以两个方向不可能对「当前
@@ -172,12 +205,18 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
     const newModelIds = rosterSeenStore === undefined
       ? []
       : await optional(rosterSeenStore.fresh(), [] as string[]);
+    // quota 抑制位（CN 权威读路径）：与快照聚合同一判据（usage-store 的日期键
+    // 纯函数）。store 缺方法或读失败按未抑制兜底——面板少画一个横幅好过画假的。
+    const suppressedToday = typeof usageStore?.isQuotaSuppressed === "function"
+      ? await usageStore.isQuotaSuppressed("cn").catch(() => false)
+      : false;
     return {
       ok: true,
       enabled: resolveSwitchEnabled(panelSwitch, settings.registerProvider),
       source: switchSource(panelSwitch),
       llmAvailable: publisher.state.llmAvailable === true,
       registered: publisher.state.registered === true,
+      suppressedToday,
       error: typeof publisher.state.error === "string" ? publisher.state.error : null,
       modelCount,
       enabledCount: enabledCountOf(allowedList, roster.map((row) => row.id)),
@@ -202,8 +241,12 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
       if (method === "GET") {
         // 目录读不到时**不许**回一个「0 个模型」的 ok:true（那让「拉不到」与
         // 「真的没有模型」长得一样）。GET 是权威读路径，失败就如实报。
+        //
+        // `region:"cn"` 是 M6 新增的**只读标注**：这条路由读的是 CN（顶层
+        // `provider` 块一直是 CN 别名），客户端据此把这个块摆到 CN 那个源站
+        // 位置上。只在 GET 上加，POST 的回读体形状与今天逐字一致。
         try {
-          writeJson(response, 200, await snapshot(), { "cache-control": "no-store" });
+          writeJson(response, 200, await snapshot({ region: "cn" }), { "cache-control": "no-store" });
         } catch (error) {
           respondError(response, error);
         }
@@ -252,11 +295,15 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
         return;
       }
       const ids = body.enabledIds.filter((id: unknown): id is string => typeof id === "string" && id !== "");
+      // 清单按源站分段（M6）：`region:"ai"` 只写国际站那份（`enabledIdsAi`），
+      // 缺省/脏值写 CN 那份——老客户端 `{enabledIds}` 的落点与磁盘键都不变。
+      const region = regionOf(body);
       try {
-        // 持久化允许清单（provider-store 具备时）；随后触发收敛——reconciler
+        // 持久化该源站的允许清单（provider-store 具备时）；随后触发收敛——reconciler
         // 用**落盘的**清单重注册（不是本环传进来的这份：落盘优先是
-        // resolveEnabledIds 的判据，见 provider-reconcile.ts）。
-        await providerStore.saveEnabledIds?.(ids);
+        // resolveEnabledIds 的判据，见 provider-reconcile.ts）。两个 region 的收敛链
+        // 都会被驱动一遍，各自读到自己那份键，所以保存任一站的清单都能当场生效。
+        await providerStore.saveEnabledIds?.(ids, region);
         await reconcile();
       } catch (error) {
         respondError(response, error);
@@ -313,10 +360,52 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
       await readJsonBody(request, MAX_JSON_BODY_BYTES).catch(() => ({ ok: false, error: "ignored" }));
       try {
         // 忘掉面板开关（回到 patch 默认，本插件默认 false = 不注册）并清空允许清单
-        // = 不过滤全部模型。随后触发收敛：reset 的语义是「回到插件出厂设置」，
-        // 注册态必须当场反映它。
+        // = 不过滤全部模型。`forget()` 现在清**两份**清单（CN + 国际站，M6）：reset
+        // 是一个按钮，只清其中一份会留下看不见的幽灵勾选。随后触发收敛：reset 的
+        // 语义是「回到插件出厂设置」，注册态必须当场反映它。
         await providerStore.forget();
-        await providerStore.saveEnabledIds?.([]);
+        // 仍显式把 CN 那份写成 `[]`（= 不过滤）：这是 reset 的历史形状，客户端据此
+        // 回显「全部提供」而不是「未设置」。国际站那份保持缺席即可，语义同样是不过滤。
+        await providerStore.saveEnabledIds?.([], "cn");
+        await reconcile();
+      } catch (error) {
+        respondError(response, error);
+        return;
+      }
+      writeJson(response, 200, await snapshot({}, { tolerateCatalogFailure: true }), { "cache-control": "no-store" });
+    }, settings.allowedHosts)
+  }));
+
+  // quota 抑制解除路由（POST，body {region?}）：面板「恢复」按钮的后端。
+  //
+  // 为什么是独立路由而不是并进 reset：reset 忘掉的是**配置**（开关/清单/窗口），
+  // resume 解除的是**当日运行时状态**（quota 429 的摘除标记）——语义无关，混在
+  // 一起会让「只想恢复模型」的用户把清单也清掉。无抑制时是幂等 no-op：清掉
+  // 一个不存在的标记不报错，照常触发收敛（多一轮 reconcile 是可接受的 churn，
+  // 换来「点了按钮一定回到期望态」的简单承诺）。
+  offs.push(ctx.webServer.register({
+    kind: "exact",
+    path: `${PROVIDER_PATH}/quota-resume`,
+    handler: withOrigin(async (request: any, response: any) => {
+      const method = request.method === undefined ? "POST" : request.method;
+      if (method !== "POST") {
+        refuseMethod(response);
+        return;
+      }
+      const body = await readJsonBodyOr400(request, response);
+      if (body === null) return;
+      // region 判据与 roster 同款：只有字面 "ai" 走国际站，缺省/脏值全 CN。
+      const region = regionOf(body);
+      if (typeof usageStore?.clearQuotaSuppress !== "function") {
+        // 机制缺席（老装配/测试桩）：说清楚而不是谎报成功——谎报会让面板把
+        // 「恢复」画成完成，而 provider 仍被摘着。
+        writeJson(response, 200, { ok: false, error: "quota suppression is not available in this build" }, { "cache-control": "no-store" });
+        return;
+      }
+      try {
+        await usageStore.clearQuotaSuppress(region);
+        // 解除后立刻收敛：provider 重挂不等下一次轮询。reconcile 内部读抑制位
+        // 时标记已清，gatherPublish 的开关判定恢复原值 → 走正常注册路径。
         await reconcile();
       } catch (error) {
         respondError(response, error);

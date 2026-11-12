@@ -193,9 +193,17 @@ writeFileSync(join(dir, "provider.json"), "{not json", "utf8");
   assert.equal(describeProviderPayload({ version: "1" }), null, "字符串版本 → 不认识");
   assert.deepEqual(
     describeProviderPayload({ version: 1, enabled: true, enabledIds: ["a", "a", "b"] }),
-    { versionKnown: true, enabled: true, enabledIds: 2 },
-    "清单去重后再计数"
+    { versionKnown: true, enabled: true, enabledIds: 2, enabledIdsAi: null },
+    "清单去重后再计数（国际站清单缺席 → null，不是 0：缺席 = 不过滤）"
   );
+  // 国际站清单独立计数、同样去重（M6 分段：CN 与 AI 各算各的条数）。
+  assert.deepEqual(
+    describeProviderPayload({ version: 1, enabled: true, enabledIds: ["a", "a"], enabledIdsAi: ["c", "c", "d"] }),
+    { versionKnown: true, enabled: true, enabledIds: 1, enabledIdsAi: 2 },
+    "国际站 allow-list 单独计数、去重"
+  );
+  // 老文件只有 CN 清单、没有 enabledIdsAi 键 → null（renderReport 据此不报 AI 那句）。
+  assert.equal(describeProviderPayload({ version: 1, enabled: true, enabledIds: ["a"] }).enabledIdsAi, null);
   assert.equal(describeProviderPayload({ version: 1, enabled: "yes" }).enabled, null, "非布尔 enabled 归一化为未设置");
   assert.equal(describeProviderPayload({ version: 2, enabled: true }).versionKnown, false, "能解析但版本未知");
 }
