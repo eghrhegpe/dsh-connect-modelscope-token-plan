@@ -46,8 +46,10 @@
    > 起因是一条 peer 约束——`llm-adapter-core.ts` 的 `resolveApiKey()` 不传模型 id、
    > 每个 provider 只绑一个令牌解析器，做不到「单 provider 按 region 挑两把令牌」，
    > 所以改为两个 provider 各绑各账户。两站共用一份 provider 开关与窗口覆盖；
-   > **模型允许清单按源站分段**（`enabledIds` = CN、`enabledIdsAi` = 国际站，
-   > 缺席 = 不过滤；面板「模型」tab 有 CN / 国际站切换器）；本地计数仍是
+   > **模型允许清单按源站分段**（`enabledIds` = CN、`enabledIdsAi` = 国际站；
+   > 国际站键缺席时**跟随 CN 清单**，让两站都被「模型」tab 的勾选约束——把缺席
+   > 读成「不过滤」会让国际站在 DSH 选择器里放开全部模型，绕开面板勾选，2026-11-12
+   > 用户实测已修；面板「模型」tab 有 CN / 国际站切换器）；本地计数仍是
    > **一份按 profile 分段的合并账**，不按账户切分。
    > 两把钥匙/两套 base 的协调层是 `src/host/account-pool.ts`，双账户快照形状见
    > `src/shared/wire.ts` 的 `AccountSnapshot`，面板双账户渲染见

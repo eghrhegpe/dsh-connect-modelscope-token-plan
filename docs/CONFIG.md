@@ -31,7 +31,7 @@
 | `siteBaseInternational` | `https://modelscope.ai` | 同上 | 国际站点源站，用于国际账户的魔粒余额端点与面板外链。**该余额端点路径尚未经真机核实**，不可用时该账户余额走 n/a 降级、面板照显不崩（软失败） |
 | `allowedHosts` | `[]` | 字符串数组，**只增不替** | 追加可信 `Host` 名。默认已含 `localhost` / `127.0.0.1` / `[::1]` / `::1`；写进来的是**补充**，不能删掉默认那四条 |
 
-两个源站各是一把账户的池子：CN 与国际的**令牌、模型目录、官方魔粒余额互相独立**，共用一个接入开关与窗口覆盖；**模型允许清单按源站各存一份**（`provider.json` 里 CN 是 `enabledIds`、国际站是 `enabledIdsAi`，缺席 = 不过滤 = 提供该站全部模型）。国际站四键由 `test/config.test.mjs` 与 `CONFIG_DEFAULTS`、`cordis.patch.yml` 双向钉死，改动要三处同步。
+两个源站各是一把账户的池子：CN 与国际的**令牌、模型目录、官方魔粒余额互相独立**，共用一个接入开关与窗口覆盖；**模型允许清单按源站各存一份**（`provider.json` 里 CN 是 `enabledIds`、国际站是 `enabledIdsAi`；国际站键缺席 = 跟随 CN 清单——两站都被「模型」tab 的勾选约束，CN 独有模型在国际站目录里不存在、天然被裁掉；保存过国际站自己的清单后那份接管）。国际站四键由 `test/config.test.mjs` 与 `CONFIG_DEFAULTS`、`cordis.patch.yml` 双向钉死，改动要三处同步。
 
 ## 2. 面板读数（趋势 / 事件 / 轮询）
 
