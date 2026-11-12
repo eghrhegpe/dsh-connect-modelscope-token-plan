@@ -188,6 +188,9 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   //    （见下面的 reconcileAll），所以对同一份首见表没有并发写。
   const buildRegion = (region: Region): RegionProvider => {
     const regionSettings = settingsFor(region);
+    // 观测热路径触达收敛链的桥（见 usage.recordEvent）：reconciler 在本闭包的
+    // 后半段才创建，先用可空引用占位。
+    let triggerReconcile: (() => void) | null = null;
     const inference = createInferenceClient({
       settings: regionSettings,
       tokenStore: accountPool.tokenStoreOf(region),
@@ -211,7 +214,17 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
       // 两条都吞错：观测失败不是对话失败（`usage-observer.safe` 也再兜一层）。
       usage: {
         recordCall: (input) => usageStore.recordCall({ modelId: input.modelId, tokens: input.tokens }).catch(() => {}),
-        recordEvent: (input) => usageStore.recordEvent(input).catch(() => {})
+        // region 在这一侧闭包绑定（两个源站共用同一个 usage-store，事件本身
+        // 不带源站）：quota 抑制按源站独立判定，没有它 CN 的 429 会把国际站
+        // 也摘掉。recordEvent 的新可选形参在 observer sink 形状之外，直接透传。
+        //
+        // quota 事件当场触发一次本 region 的收敛：否则「当日第一次 429 → 从
+        // picker 摘除」要等下一轮 pollSeconds 才落地，窗口里的请求会继续打到
+        // 已经耗尽的上游。收敛链自带 dirty 标志与防毒化，连发多条也最多收敛
+        // 两遍；摘除方向的失败只 warn，不影响对话（观测失败不是对话失败）。
+        recordEvent: (input) => usageStore.recordEvent({ ...input, region }).catch(() => {}).then(() => {
+          if (input.kind === "quota") triggerReconcile?.();
+        })
       },
       emit: deps.emit ?? ((event: string) => ctx.emit?.(event)),
       // 离线测试的适配器模块缝（§ deps-wiring）：真模块 import 的 peer 只在 Host
@@ -244,12 +257,20 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
       // 与两个面板 roster 消费的都是它。推断规则是纯函数 exhaustedModelIds
       // （usage-store.ts），窗口在 settings.exhaustionWindowMinutes。
       usageEvents: () => usageStore.events(),
+      // quota 抑制的读入口（同一条收敛链）：kind==="quota" 的 429 当日把整个
+      // provider 从 picker 摘出。按 region 绑定，与 usageEvents 同源同 store。
+      ...(typeof usageStore.isQuotaSuppressed === "function"
+        ? { usageQuotaSuppressed: () => usageStore.isQuotaSuppressed(region) }
+        : {}),
       // 首见时间的**唯一写入口**：收敛器拿到完整目录那一刻记一笔（见
       // provider-reconcile.ts 的 runOnce）。读路径（快照聚合 / provider 路由）
       // 只 fresh()，绝不在这里顺手写——那会把「谁是新模型」变成「谁最近被读到」。
       rosterSeenStore,
       logger: ctx.logger
     });
+    // 桥接补全：观测热路径记录 quota 事件后从这里触发本 region 的收敛
+    //（fire-and-forget；reconciler 自身的纪律保证并发安全与失败留痕）。
+    triggerReconcile = () => void reconcile();
     return { inference, publisher, reconcile };
   };
 

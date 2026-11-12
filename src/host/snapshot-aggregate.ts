@@ -216,11 +216,20 @@ export async function buildSnapshotBody(wiring: SnapshotWiring): Promise<Snapsho
       ? pubState.error
       : catalogError;
     const newModelIds = await rosterSeenStore.fresh().catch(() => [] as string[]);
+    // quota 抑制位（本源站今日是否被整体摘出 picker）：按 region 各读一份。
+    // store 缺这个方法（旧装配 / 测试桩）或读失败时按**未抑制**兜底——面板少画
+    // 一个横幅永远好过画一个假的；判定真源是 usage-store 的纯函数
+    // quotaSuppressedOf（日期键 = 今天才算），与收敛器的摘除判据同一份。
+    const suppressedToday = typeof usageStore?.isQuotaSuppressed === "function"
+      ? await usageStore.isQuotaSuppressed(region).catch(() => false)
+      : false;
     return {
       enabled,
       source,
       llmAvailable: pubState?.llmAvailable === true,
       registered: pubState?.registered === true,
+      // 可选字段：false 是「今天没有」的真实答案，照常带键（读侧 === true 判定）。
+      suppressedToday,
       error,
       modelCount: roster.length,
       enabledCount,

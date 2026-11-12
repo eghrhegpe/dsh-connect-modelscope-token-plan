@@ -8,7 +8,9 @@
  *     保存**该源站**的允许清单并重注册；
  *   - POST `PROVIDER_PATH/context`   body `{contextWindow: number|null}` → 保存全局上下文
  *     窗口覆盖并重注册（null = 跟随目录）；
- *   - POST `PROVIDER_PATH/reset`     忘掉面板开关、两份允许清单与窗口覆盖，回到 patch 默认。
+ *   - POST `PROVIDER_PATH/reset`     忘掉面板开关、两份允许清单与窗口覆盖，回到 patch 默认；
+ *   - POST `PROVIDER_PATH/quota-resume` body `{region?: "cn"|"ai"}` → 解除该源站的今日
+ *     quota 抑制并重注册（quota 429 把 provider 摘出 picker 的手动撤销；无抑制时是幂等 no-op）。
  *
  * 清单按源站分段（M6）：请求体带可选 `region`，只有字面 `"ai"` 走国际站，缺省/其它
  * 值一律 CN——判据与 `routes/token.ts` 的 `regionOf` 同款，老客户端（不带该字段）
@@ -92,6 +94,15 @@ interface ProviderRouteWiring {
    * 等于把「谁是新模型」变成「谁最近一次被面板读到」。
    */
   rosterSeenStore?: { fresh: (nowMs?: number) => Promise<string[]> };
+  /**
+   * quota 抑制的读写（usage-store，M6 装配下必在）。**可选**：老装配 / 测试桩
+   * 缺它时 resume 路由回 ok:false（说「本构建不支持」）——路由存在而机制缺席
+   * 是可接受的降级，反向（机制在路由不在）才会把用户困在摘除态。
+   */
+  usageStore?: {
+    isQuotaSuppressed?: (region: ProviderRegion) => Promise<boolean>;
+    clearQuotaSuppress?: (region: ProviderRegion) => Promise<void>;
+  };
   logger?: { warn?: (message: string) => void };
 }
 
@@ -137,14 +148,14 @@ async function readEnabledIds(store: ProviderRouteWiring["providerStore"], publi
  */
 
 /**
- * 注册 provider 路由（三条路径）。wiring 子集：settings / providerStore /
+ * 注册 provider 路由（五条路径）。wiring 子集：settings / providerStore /
  * publisher / inference / logger。
  * @param ctx - host 根上下文（只用 `ctx.webServer`）。
  * @param {ProviderRouteWiring} wiring - 本路由读到的子集。
- * @returns {Function} 依次调用三个 `off()` 的注销回调。
+ * @returns {Function} 依次调用五个 `off()` 的注销回调。
  */
 export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
-  const { settings, providerStore, publisher, reconcile, inference, rosterSeenStore, logger } = wiring;
+  const { settings, providerStore, publisher, reconcile, inference, rosterSeenStore, usageStore, logger } = wiring;
 
   /**
    * 组装一份 §9 响应形状。GET 与成功后的 POST 共用，所以两个方向不可能对「当前
@@ -194,12 +205,18 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
     const newModelIds = rosterSeenStore === undefined
       ? []
       : await optional(rosterSeenStore.fresh(), [] as string[]);
+    // quota 抑制位（CN 权威读路径）：与快照聚合同一判据（usage-store 的日期键
+    // 纯函数）。store 缺方法或读失败按未抑制兜底——面板少画一个横幅好过画假的。
+    const suppressedToday = typeof usageStore?.isQuotaSuppressed === "function"
+      ? await usageStore.isQuotaSuppressed("cn").catch(() => false)
+      : false;
     return {
       ok: true,
       enabled: resolveSwitchEnabled(panelSwitch, settings.registerProvider),
       source: switchSource(panelSwitch),
       llmAvailable: publisher.state.llmAvailable === true,
       registered: publisher.state.registered === true,
+      suppressedToday,
       error: typeof publisher.state.error === "string" ? publisher.state.error : null,
       modelCount,
       enabledCount: enabledCountOf(allowedList, roster.map((row) => row.id)),
@@ -350,6 +367,45 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
         // 仍显式把 CN 那份写成 `[]`（= 不过滤）：这是 reset 的历史形状，客户端据此
         // 回显「全部提供」而不是「未设置」。国际站那份保持缺席即可，语义同样是不过滤。
         await providerStore.saveEnabledIds?.([], "cn");
+        await reconcile();
+      } catch (error) {
+        respondError(response, error);
+        return;
+      }
+      writeJson(response, 200, await snapshot({}, { tolerateCatalogFailure: true }), { "cache-control": "no-store" });
+    }, settings.allowedHosts)
+  }));
+
+  // quota 抑制解除路由（POST，body {region?}）：面板「恢复」按钮的后端。
+  //
+  // 为什么是独立路由而不是并进 reset：reset 忘掉的是**配置**（开关/清单/窗口），
+  // resume 解除的是**当日运行时状态**（quota 429 的摘除标记）——语义无关，混在
+  // 一起会让「只想恢复模型」的用户把清单也清掉。无抑制时是幂等 no-op：清掉
+  // 一个不存在的标记不报错，照常触发收敛（多一轮 reconcile 是可接受的 churn，
+  // 换来「点了按钮一定回到期望态」的简单承诺）。
+  offs.push(ctx.webServer.register({
+    kind: "exact",
+    path: `${PROVIDER_PATH}/quota-resume`,
+    handler: withOrigin(async (request: any, response: any) => {
+      const method = request.method === undefined ? "POST" : request.method;
+      if (method !== "POST") {
+        refuseMethod(response);
+        return;
+      }
+      const body = await readJsonBodyOr400(request, response);
+      if (body === null) return;
+      // region 判据与 roster 同款：只有字面 "ai" 走国际站，缺省/脏值全 CN。
+      const region = regionOf(body);
+      if (typeof usageStore?.clearQuotaSuppress !== "function") {
+        // 机制缺席（老装配/测试桩）：说清楚而不是谎报成功——谎报会让面板把
+        // 「恢复」画成完成，而 provider 仍被摘着。
+        writeJson(response, 200, { ok: false, error: "quota suppression is not available in this build" }, { "cache-control": "no-store" });
+        return;
+      }
+      try {
+        await usageStore.clearQuotaSuppress(region);
+        // 解除后立刻收敛：provider 重挂不等下一次轮询。reconcile 内部读抑制位
+        // 时标记已清，gatherPublish 的开关判定恢复原值 → 走正常注册路径。
         await reconcile();
       } catch (error) {
         respondError(response, error);

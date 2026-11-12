@@ -175,7 +175,7 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 | `routes/models.ts` | 模型目录路由 | `registerModelsRoute()` |
 | `routes/token.ts` | 令牌保存/忘掉/验证路由 | `registerTokenRoute()` |
 | `routes/probe.ts` | 零额度鉴权探针路由 | `registerProbeRoute()` |
-| `routes/provider.ts` | provider 开关/清单/窗口/重置路由 | `registerProviderRoute()` |
+| `routes/provider.ts` | provider 开关/清单/窗口/重置/quota 恢复路由 | `registerProviderRoute()` |
 | `routes/draw.ts` | 出图开关/模型/重置路由 | `registerDrawRoute()` |
 | `routes/usage-prefs.ts` | 趋势显示窗口路由 | `registerUsagePrefsRoute()` |
 | `routes/paths.ts` | 路由路径常量 | `SNAPSHOT_PATH`, `PROVIDER_PATH`, ... |

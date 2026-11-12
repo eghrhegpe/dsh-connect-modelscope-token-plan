@@ -45,6 +45,12 @@ export interface QuotaEvent {
   modelId: string;
   kind: "quota" | "rate_limit" | "error";
   message: string;
+  /**
+   * 事件发生在哪个源站。**可选**：旧事件行没有它（读侧按 cn 兜底即可——事件流
+   * 是展示用的）；两个源站共用一个 usageStore，没有它就无法区分「CN 打到 429」
+   * 与「国际站打到 429」，而 quota 抑制是按源站独立判定的。
+   */
+  region?: ProviderRegion;
 }
 
 /** 本地趋势天桶（dateKey = 本地日期 YYYY-MM-DD）。 */
@@ -114,6 +120,15 @@ export interface ProviderStatus {
   llmAvailable: boolean;
   /** 本插件的 provider 是否已注册且无错。 */
   registered: boolean;
+  /**
+   * 该源站今日是否因 `quota` 类 429 被**整体**摘出 DSH 模型选择器。
+   *
+   * **可选**：旧 Host 不带它（读侧 false 兜底 = 不抑制）。只由 `quota` 触发
+   * （`rate_limit` 走重试，不摘）；按源站独立判定；日期作用域——本地日期翻页
+   * 自动解除，面板也可手动恢复。摘的是整个 provider 行（`unregister()` 连
+   * `releaseDirectory` 一起摘），比逐模型灰显（`quotaExhausted`）激进一档。
+   */
+  suppressedToday?: boolean;
   /** 最近一次注册/读取的失败原因（已脱敏），null = 无错。 */
   error: string | null;
   /** roster 长度（面板清单里的模型数）。 */
