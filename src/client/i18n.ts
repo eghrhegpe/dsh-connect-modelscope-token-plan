@@ -36,6 +36,15 @@ export const zh = {
   "panel.payloadError": "Host 返回了无法读取的响应（可能页面被登录墙或代理截获）。",
   "shape.missingKeys": "Host 快照缺少必需的顶层键：{keys}",
 
+  // 双账户（模型选择器里的「ModelScope 家族」：CN / 国际两把令牌、两份官方余额）。
+  // 本地用量刻意不按账户切分——份额是同一本按 profile 分段的合并账（见 README 三条
+  // 事实 #1），所以只有账户名与「各自余额」的文案，没有「各自今日本地次数」。
+  "account.cn": "魔搭社区 · CN",
+  "account.international": "国际版 · modelscope.ai",
+  "account.balanceSection": "魔粒余额（官方数据 · 两个账户）",
+  "account.balanceEmpty": "该账户还没有余额读数（未配置令牌或本次读不到）。",
+  "account.tokenRegion": "选择要管理的账户",
+
   "common.httpError": "无法读取 Host 响应（非预期响应，可能页面被登录墙截获）。",
   "common.timeout": "请求超时，请重试。",
 
@@ -199,6 +208,9 @@ export const zh = {
   "token.ephemeral": "此 Host 没有凭据服务：面板保存的令牌重启即丢，请改用凭据服务或环境变量。",
   "token.readError": "读不到凭据存储，无法确认令牌状态（不代表没配令牌）：{error}",
   "token.link": "打开魔搭访问令牌页 →",
+  // 国际账户的令牌：引用名是 MODELSCOPE_INTERNATIONAL_API_KEY，不是 CN 那把。
+  "token.hintInternational": "在 ModelScope International「访问令牌」页生成。保存即生效（写入 DSH 凭据服务的 MODELSCOPE_INTERNATIONAL_API_KEY 引用，不依赖重启）。环境变量同名者只在 DSH 启动时读一次，优先级高于此处保存的值。",
+  "token.linkInternational": "打开国际版站点 →",
   "source.credentials": "凭据服务",
   "source.env": "环境变量",
   "source.memory": "内存",
@@ -234,6 +246,11 @@ export const zh = {
   "composer.newModelsTitle": "本机首次见到的模型：",
   "composer.newModelsSep": "、",
   "composer.newModelsNote": "「新」指本机首次记到它，与上游何时上架无关。只列最近 7 天内首见的。",
+  // 胶囊展开面板里的两站余额（各自官方读数，null 画「—」）。本地次数仍是合并账，
+  // 只在上面那一行出现一次，不按账户重复。
+  "composer.accountsBalance": "两个账户的官方魔粒余额",
+  "composer.accountCnBalance": "魔搭社区 · CN",
+  "composer.accountIntlBalance": "国际版 · modelscope.ai",
 };
 
 /** English dictionary, key-parity pinned by the type. */
@@ -253,6 +270,16 @@ export const en: typeof zh = {
   "panel.shapeDrift": "Upstream shape may have changed: {detail}",
   "panel.payloadError": "Host returned an unreadable response (a login wall or proxy may have intercepted it).",
   "shape.missingKeys": "Host snapshot omitted required top-level key(s): {keys}",
+
+  // Dual accounts (the "ModelScope family" in the model picker: CN / International,
+  // two tokens, two official balances). Local usage is deliberately NOT split by
+  // account — it is one merged ledger segmented by profile (README, three facts #1),
+  // so there is no "today's local calls per account" wording here.
+  "account.cn": "ModelScope · CN",
+  "account.international": "International · modelscope.ai",
+  "account.balanceSection": "Magicube balance (official · two accounts)",
+  "account.balanceEmpty": "No balance reading for this account yet (no token configured, or unreadable this time).",
+  "account.tokenRegion": "Choose the account to manage",
 
   "common.httpError": "Unexpected Host response (a login wall or proxy may have intercepted it).",
   "common.timeout": "Request timed out; please retry.",
@@ -402,6 +429,9 @@ export const en: typeof zh = {
   "token.ephemeral": "This Host has no credentials service: a token saved in the panel is lost on restart. Use the credentials service or an environment variable.",
   "token.readError": "Could not read the credential store, so the token state is unknown (this does NOT mean no token is configured): {error}",
   "token.link": "Open the ModelScope access-token page →",
+  // International token: the reference is MODELSCOPE_INTERNATIONAL_API_KEY, not the CN one.
+  "token.hintInternational": "Generate one on the ModelScope International access-token page. Saving takes effect immediately (written to the MODELSCOPE_INTERNATIONAL_API_KEY reference in the DSH credentials service, no restart needed). A same-named environment variable is read once at DSH launch and ranks ABOVE a value saved here.",
+  "token.linkInternational": "Open the International site →",
   "source.credentials": "credentials",
   "source.env": "environment",
   "source.memory": "memory",
@@ -430,6 +460,11 @@ export const en: typeof zh = {
   "composer.newModelsTitle": "First seen on this device: ",
   "composer.newModelsSep": ", ",
   "composer.newModelsNote": "\"New\" means first recorded on this device, not newly listed by the gateway. Only models first seen within the last 7 days are listed.",
+  // Two official balances in the pill popover (each own reading, null drawn as "—").
+  // Local calls are the merged ledger and appear once in the row above, not per account.
+  "composer.accountsBalance": "Official Magicube balance by account",
+  "composer.accountCnBalance": "ModelScope · CN",
+  "composer.accountIntlBalance": "International · modelscope.ai",
 };
 
 export type DictionaryKey = keyof typeof zh;

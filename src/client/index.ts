@@ -24,7 +24,7 @@ import { clockLong, count, errorText, format, isoTime, statedCadenceMs } from ".
 import { provideClientReact } from "./runtime.ts";
 import { en, zh } from "./i18n.ts";
 import { S } from "./styles.ts";
-import { BalanceCard, EventsList, LocalDailyCard, ModelUsageTable, ProviderCard, SectionCard, TokenForm, TrendBars } from "./cards.ts";
+import { BalanceCard, AccountsBalanceCard, EventsList, LocalDailyCard, ModelUsageTable, ProviderCard, SectionCard, TokenForm, TrendBars } from "./cards.ts";
 import { PanelPage } from "./panel-page.ts";
 import {
   ComposerUsagePill,
@@ -38,7 +38,8 @@ import {
   callsText,
   readingText,
   staleOf,
-  newModelsOf
+  newModelsOf,
+  accountsOf
 } from "./composer-usage-pill.ts";
 import { usePollingInterval } from "./use-polling-interval.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
@@ -87,9 +88,12 @@ function clientFactory(loaderRequire: (specifier: string) => unknown): {
       // 「本机首次见到的模型」清单的净味版：三道过滤（非数组 / 非字符串 / 重复）
       // 是纯规则，同上面几条一样放 helpers。
       newModelsOf,
+      // 双账户余额行：从可选块 accounts[] 取每站官方读数（纯规则，只读）。
+      accountsOf,
     }),
     components: Object.freeze({
       BalanceCard,
+      AccountsBalanceCard,
       ComposerUsagePill,
       EventsList,
       LocalDailyCard,

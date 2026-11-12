@@ -59,6 +59,15 @@ export { HIDE_ALL_MODELS } from "../shared/wire.ts";
 export const MODELSCOPE_TOKEN_URL = "https://modelscope.cn/my/myaccesstoken";
 
 /**
+ * 国际版站点入口（用户在需求里给出的地址）。
+ *
+ * 刻意**不猜**「访问令牌页」的深链：国际站该页的确切路径未经真机核实，编一个
+ * `/my/myaccesstoken` 会把用户送去 404。这里只指到站点根，由站内导航找到令牌页；
+ * 文案也据此写成「打开国际版站点」，不谎称是令牌页。
+ */
+export const MODELSCOPE_INTERNATIONAL_SITE_URL = "https://www.modelscope.ai";
+
+/**
  * 官方「魔粒用量明细」网页（消费记录只在这，OpenAPI 没有记录端点——
  * 见 docs/REFERENCES.md 的 userscripts 上游）。纯公开 URL，仅外链。
  */

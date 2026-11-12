@@ -232,6 +232,86 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   assert.equal(forgotten.present, false);
 }
 
+// ── M4 region：两把令牌各存各的凭据引用，forget 只清指定账户 ──
+//
+// 账户池给 CN / 国际各建一把 tokenStore（ref 分别是 MODELSCOPE_API_KEY /
+// MODELSCOPE_INTERNATIONAL_API_KEY）。请求体带 region:"ai" 时，token/probe 路由
+// 必须选国际那把，绝不能把国际令牌写进 CN 的引用（M2 修过的 ref 串线 bug）。
+// 缺省 / 其它值一律按 CN——老客户端不带 region，行为逐字不变。
+{
+  credentialsService.store.clear();
+  const CN_REF = "MODELSCOPE_API_KEY";
+  const AI_REF = "MODELSCOPE_INTERNATIONAL_API_KEY";
+
+  // 缺省 region（不带字段）→ CN 引用，响应 region:"cn"。
+  const cnSave = await call(handlers, TOKEN_PATH, makeReq("POST", { body: { token: "ms-11111111111111111111111111111111" } }));
+  assert.equal(cnSave.ok, true);
+  assert.equal(cnSave.region, "cn", "缺省 region → 响应标 cn");
+  assert.equal(credentialsService.store.get(CN_REF), "ms-11111111111111111111111111111111", "CN 令牌落 CN 引用");
+  assert.equal(credentialsService.store.has(AI_REF), false, "CN 保存绝不碰国际引用");
+
+  // region:"ai" → 国际引用，CN 引用原样不动。
+  const aiSave = await call(handlers, TOKEN_PATH, makeReq("POST", { body: { token: "ms-22222222222222222222222222222222", region: "ai" } }));
+  assert.equal(aiSave.ok, true);
+  assert.equal(aiSave.region, "ai", "响应标 ai");
+  assert.equal(credentialsService.store.get(AI_REF), "ms-22222222222222222222222222222222", "国际令牌落国际引用");
+  assert.equal(credentialsService.store.get(CN_REF), "ms-11111111111111111111111111111111", "国际保存不动 CN 引用");
+
+  // 脏 region 值按 CN 处理（不让脏值选错账户）。
+  await call(handlers, TOKEN_PATH, makeReq("POST", { body: { token: "ms-33333333333333333333333333333333", region: "garbage" } }));
+  assert.equal(credentialsService.store.get(CN_REF), "ms-33333333333333333333333333333333", "非法 region 回落 CN");
+
+  // forget region:"ai" 只删国际引用，CN 保留。
+  const aiForget = await call(handlers, TOKEN_FORGET_PATH, makeReq("POST", { body: { region: "ai" } }));
+  assert.equal(aiForget.ok, true);
+  assert.equal(aiForget.region, "ai");
+  assert.equal(credentialsService.store.has(AI_REF), false, "国际引用已删");
+  assert.equal(credentialsService.store.has(CN_REF), true, "CN 引用仍在（forget 只清指定账户）");
+
+  // forget 缺省 region（CN）只删 CN 引用。
+  await call(handlers, TOKEN_FORGET_PATH, makeReq("POST", { body: {} }));
+  assert.equal(credentialsService.store.has(CN_REF), false, "缺省 forget 清 CN");
+  assert.equal(credentialsService.store.size, 0, "两把都清干净了");
+}
+
+// ── M4 probe region：验国际令牌走国际 inference + 国际 noteValidity ──
+{
+  const validityOf = { cn: [], ai: [] };
+  const seenProbes = [];
+  const directCtx = { webServer: { register: ({ path, handler }) => { if (path === PROBE_PATH) seenProbes.push({ path, handler }); return () => {}; } } };
+  const cnStore = { state: async () => ({ present: true }), noteValidity: (v) => validityOf.cn.push(v) };
+  const aiStore = { state: async () => ({ present: true }), noteValidity: (v) => validityOf.ai.push(v) };
+  let usedInference = null;
+  const inference = { probe: async () => { usedInference = "cn"; return { ok: true, status: 200, modelId: "m", elapsedMs: 1 }; } };
+  const aiInference = { probe: async () => { usedInference = "ai"; return { ok: true, status: 200, modelId: "m", elapsedMs: 1 }; } };
+  registerProbeRoute(directCtx, {
+    settings: resolveSettings({}).settings,
+    tokenStore: cnStore,
+    usageStore: { recordEvent: async () => {} },
+    inference,
+    accountPool: { tokenStoreOf: (r) => r === "ai" ? aiStore : cnStore },
+    providers: { ai: { inference: aiInference }, cn: { inference } },
+    logger: { warn: () => {} }
+  });
+  const probeHandler = seenProbes.find((p) => p.path === PROBE_PATH).handler;
+
+  // 缺省 region → CN inference + CN noteValidity。
+  let res = makeRes();
+  await probeHandler(makeReq("POST", { body: { modelId: "m" } }), res);
+  assert.equal(res.body.ok, true);
+  assert.equal(usedInference, "cn", "缺省 probe 用 CN inference");
+  assert.deepEqual(validityOf.cn, [true], "缺省 probe 记 CN 令牌好");
+  assert.deepEqual(validityOf.ai, [], "缺省 probe 不动国际令牌");
+
+  // region:"ai" → 国际 inference + 国际 noteValidity。
+  res = makeRes();
+  await probeHandler(makeReq("POST", { body: { modelId: "m", region: "ai" } }), res);
+  assert.equal(res.body.ok, true);
+  assert.equal(usedInference, "ai", "region ai probe 用国际 inference（不同 apiBase/令牌）");
+  assert.deepEqual(validityOf.ai, [true], "region ai 记国际令牌好");
+  assert.deepEqual(validityOf.cn, [true], "region ai 不动 CN 令牌结论");
+}
+
 // ── 魔粒余额：官方端点走 Bearer 令牌；形状漂移降级 ──
 {
   await call(handlers, TOKEN_PATH, makeReq("POST", { body: { token: "ms-0123456789abcdef0123456789abcdef" } }));

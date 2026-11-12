@@ -193,7 +193,7 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 |---|---|---|
 | `index.ts` | Client 入口（IIFE 注册物：id + 工厂，三模块世界共用） | `—`（无 ESM 导出；注册物经 __ModuleLoader__ 与 module.exports 交出） |
 | `panel-page.ts` | **面板主页面**：三 tab 布局 + 全部状态管理 | `PanelPage` |
-| `cards.ts` | 展示组件（余额/计数/趋势/事件/令牌/Provider/出图） | `BalanceCard`, `ProviderCard`, ... |
+| `cards.ts` | 展示组件（余额/双账户并排余额/计数/趋势/事件/令牌/Provider/出图） | `BalanceCard`, `AccountsBalanceCard`, `ProviderCard`, ... |
 | `snapshot.ts` | 快照解读（降级形状 + 兜底路由） | `viewOf()`, `providerOf()` |
 | `http.ts` | HTTP 客户端（GET/POST + 超时 + 错误） | `getJson()`, `postJson()` |
 | `format.ts` | 格式化辅助（数字/时间/错误） | `format()`, `isoTime()` |
@@ -201,7 +201,7 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 | `styles.ts` | 样式 token | `S` |
 | `runtime.ts` | React 运行时桥接（h/useState/useEffect） | `h`, `useState`, `useEffect` |
 | `i18n.ts` | 国际化字典 | — |
-| `composer-usage-pill.ts` | 对话框胶囊（魔粒余额 + 本地计数） | `ComposerUsagePill()`, `ModelscopePill()` |
+| `composer-usage-pill.ts` | 对话框胶囊（魔粒余额 + 本地计数 + 双账户余额行） | `ComposerUsagePill()`, `ModelscopePill()`, `accountsOf()` |
 | `toggle-switch.ts` | 开关组件 | `ToggleSwitch` |
 | `use-snapshot-polling.ts` | 快照轮询 hook（退避/后台暂停/慢响应保护） | `useSnapshotPolling()` |
 | `use-polling-interval.ts` | 轮询间隔计算 hook | `usePollingInterval()` |

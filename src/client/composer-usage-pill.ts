@@ -54,7 +54,7 @@ import { S } from "./styles.ts";
 import { count, format, isoTime, statedCadenceMs } from "./format.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
 import type { Tt } from "./runtime.ts";
-import type { BalanceData, Snapshot } from "../shared/wire.ts";
+import type { AccountSnapshot, BalanceData, Snapshot } from "../shared/wire.ts";
 
 /**
  * 本胶囊认领的 provider id，与 Host 侧 `src/host/llm-models.ts` 的
@@ -252,6 +252,31 @@ export function newModelsOf(snapshot: Snapshot | null | undefined): string[] {
 }
 
 /**
+ * 双账户余额行（M4）：从可选块 `accounts[]` 取每站官方魔粒余额的**可用读数**。
+ *
+ * **只读、纯函数**：老 Host / Host 软失败省略该块时返回空数组——胶囊正文仍用
+ * 兼容聚合的 `snapshot.balance`，不谎称第二个账户。每站各自 `null ≠ 0` 由
+ * {@link availableOf} 守：读不到就是 null，绝不推成 0。两站是两份独立的官方读数，
+ * 不合并成一个总数（把两把账户的钱说成一笔比不显示更糟）。
+ * @param {Snapshot|null|undefined} snapshot
+ * @returns {{ region: "cn"|"ai", available: number|null }[]}
+ */
+export function accountsOf(snapshot: Snapshot | null | undefined): { region: "cn" | "ai"; available: number | null }[] {
+  const raw = snapshot?.accounts;
+  if (!Array.isArray(raw)) return [];
+  const out: { region: "cn" | "ai"; available: number | null }[] = [];
+  const seen = new Set<string>();
+  for (const account of raw as AccountSnapshot[]) {
+    if (account === null || typeof account !== "object") continue;
+    if (account.region !== "cn" && account.region !== "ai") continue;
+    if (seen.has(account.region)) continue;   // 脏快照里重复行只认第一份
+    seen.add(account.region);
+    out.push({ region: account.region, available: availableOf(account.balance) });
+  }
+  return out;
+}
+
+/**
  * 点面板外面或按 Escape 关面板。
  *
  * 三处细节各有理由：
@@ -308,8 +333,10 @@ function QuotaPopover(props: {
   usedToday: number | null;
   balance: BalanceData | null;
   newModels: string[];
+  /** 双账户余额行（M4）：空数组 = 老 Host / 软失败省略，块整体不渲染。 */
+  accounts: { region: "cn" | "ai"; available: number | null }[];
 }): unknown {
-  const { tt, title, stale, available, usedToday, balance, newModels } = props;
+  const { tt, title, stale, available, usedToday, balance, newModels, accounts } = props;
   const fetchedAt = balance?.fetchedAt;
   const failure = balance?.error;
   return h(
@@ -349,6 +376,28 @@ function QuotaPopover(props: {
         h("span", { style: S.pillPopoverFigure }, usedToday === null ? "—" : format(tt("composer.localCalls"), { calls: count(usedToday) }))
       )
     ),
+    // 双账户各自官方余额（M4）：本地次数仍是上面那一行的合并账，这里只把「两把
+    // 账户各自的官方读数」摊开，各标各的来源、各读不到各画「—」。accounts 为空
+    // （老 Host / 省略该块）时整段不渲染——胶囊正文继续用兼容聚合的那一笔。
+    accounts.length === 0
+      ? null
+      : h(
+          "div",
+          { style: S.pillPopoverRow },
+          h(
+            "div",
+            { style: S.pillPopoverRowLine },
+            h("span", { style: S.pillPopoverLabel }, tt("composer.accountsBalance"))
+          ),
+          ...accounts.map((account) =>
+            h(
+              "div",
+              { key: account.region, style: S.pillPopoverRowLine },
+              h("span", { style: S.pillPopoverLabel }, tt(account.region === "ai" ? "composer.accountIntlBalance" : "composer.accountCnBalance")),
+              h("span", { style: S.pillPopoverFigure }, balanceText(account.available, tt))
+            )
+          )
+        ),
     // 新模型行只在真的有时才出现：一个恒亮的「0 新模型」会变成背景噪声，
     // 而它的价值全在「有」的那几轮。
     newModels.length === 0
@@ -399,6 +448,7 @@ export function ModelscopePill(props: { tt: Tt }): unknown {
   const available = availableOf(balance);
   const usedToday = usedTodayOf(data);
   const newModels = newModelsOf(data);
+  const accounts = accountsOf(data);
 
   // cadence 跟 Host 声明走（`pollSeconds`），不跟常量走：Host 改声明周期，
   // 「多久算陈旧」必须跟着改，否则退避期里每一帧都误报陈旧。
@@ -477,7 +527,7 @@ export function ModelscopePill(props: { tt: Tt }): unknown {
     },
     trigger,
     open
-      ? h(QuotaPopover, { tt, title, stale, available, usedToday, balance, newModels })
+      ? h(QuotaPopover, { tt, title, stale, available, usedToday, balance, newModels, accounts })
       : null
   );
 }

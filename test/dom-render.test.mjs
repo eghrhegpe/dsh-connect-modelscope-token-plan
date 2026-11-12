@@ -1219,6 +1219,109 @@ await settle();
   failNonSnapshotGets = false;
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// §18 M4 双账户：accounts[] 在场才渲染并排余额卡 + 接入 tab 的账户切换器；
+//     写操作按账户带 region，CN（缺省）逐字保持单账户 payload。
+//
+// 这一节是「绿灯不撒谎」的那一半：前面所有用例的 fixture 都**没有** accounts，
+// 走的是兼容路径（单 BalanceCard、单个 TokenForm）。这里给它塞上两站装配，
+// 真正把 M4 新增的渲染分支与 region 写路径跑一遍。
+// ══════════════════════════════════════════════════════════════════════════
+{
+  const twoAccounts = [
+    {
+      region: "cn", providerId: "modelscope-token-plan",
+      token: { present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false, readError: null },
+      balance: { available: 143, total: 200, frozen: 7, fetchedAt: null, error: null },
+      registered: true, llmAvailable: true
+    },
+    {
+      region: "ai", providerId: "modelscope-token-plan-international",
+      token: { present: false, source: "none", valid: null, checkedAt: null, ephemeral: true, readError: null },
+      balance: { available: null, total: null, frozen: null, fetchedAt: null, error: null },
+      registered: false, llmAvailable: true
+    }
+  ];
+  const dualSnapshot = snapshotWith({ accounts: twoAccounts });
+
+  // 先证明「不带 accounts」时绝不误画第二张卡（兼容分支逐字不变）。
+  snapshotResponses = [{ body: SNAPSHOT }];
+  renderer.mount(PanelPage, { tt, localeSubscribe: null });
+  await settle();
+  assert.ok(!bodyText().includes(tt("account.cn")), "无 accounts：不画账户标签（单账户时代原样）");
+  assert.ok(byText("button", tt("section.balance")), "无 accounts：仍是单账户的 section.balance 标题");
+  assert.ok(!bodyText().includes(tt("account.tokenRegion")), "无 accounts：接入 tab 不画账户切换器");
+  renderer.unmount();
+  await settle();
+
+  // 带 accounts：额度 tab 换成两站并排卡，标题改「两个账户」。
+  // defaultSnapshot 也要换成 dual：写操作成功后会 load() 再拉一次快照，若回落到
+  // 不带 accounts 的 SNAPSHOT，双账户 UI 会在保存后当场消失（不是产品行为，是测试
+  // 桩的供数问题）。
+  defaultSnapshot = { body: dualSnapshot };
+  snapshotResponses = [{ body: dualSnapshot }];
+  renderer.mount(PanelPage, { tt, localeSubscribe: null });
+  await settle();
+  assert.ok(byText("button", tt("account.balanceSection")), "双账户：section 标题改为「两个账户」");
+  assert.ok(bodyText().includes(tt("account.cn")), "双账户：CN 标签");
+  assert.ok(bodyText().includes(tt("account.international")), "双账户：国际标签");
+  const dualBalance = sectionBody("account.balanceSection")?.textContent ?? "";
+  assert.ok(dualBalance.includes("143"), "CN 这份官方余额 143 上屏");
+  assert.ok(dualBalance.includes("—"), "国际这份读不到 → 「—」（null ≠ 0）");
+  assert.ok(!dualBalance.includes("NaN") && !dualBalance.includes("undefined"), "双账户卡不画脏值");
+
+  // 接入 tab：切换器两枚按钮；默认 CN，save/forget/probe 都不带 region。
+  tabButton("tab.access").click();
+  await settle();
+  const regionGroup = qa('[role="group"][aria-label]').find((el) => el.getAttribute("aria-label") === tt("account.tokenRegion"));
+  assert.ok(regionGroup, "接入 tab 渲染账户切换器（role=group）");
+  const cnSwitch = byText("button", tt("account.cn"));
+  const intlSwitch = byText("button", tt("account.international"));
+  assert.ok(cnSwitch && intlSwitch, "切换器有 CN / 国际两枚按钮");
+  assert.equal(cnSwitch.getAttribute("aria-pressed"), "true", "默认选中 CN");
+  assert.equal(intlSwitch.getAttribute("aria-pressed"), "false", "国际默认未选");
+
+  // 国际表单的提示/外链换文案（不谎称 CN 的环境变量）。
+  assert.ok(bodyText().includes(tt("token.hint")) && !bodyText().includes(tt("token.hintInternational")), "选 CN 时用 CN 提示");
+
+  // CN 保存 → payload 精确 {token}（与 §4 一致，不带 region）。
+  q('input[type="password"]').value = "ms-cn-token-abc";
+  q('input[type="password"]').dispatchEvent(new window.Event("input", { bubbles: true }));
+  await settle();   // 受控输入回流 state → 重渲染，保存按钮的闭包才拿到新值
+  byText("button", tt("token.save")).click();
+  await settle();
+  assert.deepEqual(jsonOf(lastPost(HOST.TOKEN_PATH)), { token: "ms-cn-token-abc" }, "CN 保存不带 region（逐字兼容）");
+
+  // 切到国际账户：提示换文案，保存/忘掉/验令牌都带 region:"ai"。
+  // 重新按文本取活节点：保存触发的 load() 会重渲染，上面那批 node 引用已失效。
+  byText("button", tt("account.international")).click();
+  await settle();
+  assert.equal(byText("button", tt("account.international")).getAttribute("aria-pressed"), "true", "点击后选中切到国际");
+  assert.ok(bodyText().includes(tt("token.hintInternational")), "国际表单用国际站提示（MODELSCOPE_INTERNATIONAL_API_KEY）");
+  q('input[type="password"]').value = "ms-ai-token-xyz";
+  q('input[type="password"]').dispatchEvent(new window.Event("input", { bubbles: true }));
+  await settle();   // 同上：重渲染后保存闭包才带新值
+  byText("button", tt("token.save")).click();
+  await settle();
+  assert.deepEqual(jsonOf(lastPost(HOST.TOKEN_PATH)), { token: "ms-ai-token-xyz", region: "ai" }, "国际保存带 region:\"ai\"");
+
+  // 国际账户令牌未配 → 不渲染「忘掉已保存」（诚实降级，不谎称可忘掉）。
+  assert.equal(byText("button", tt("token.forget")), undefined, "国际账户没令牌：不画「忘掉已保存」");
+
+  // 验令牌也按 region 走（probe 用国际站的 inference + 国际令牌）。
+  const probeBefore = postCalls(HOST.PROBE_PATH).length;
+  const verifyBtn = byText("button", tt("probe.validity"));
+  if (verifyBtn !== undefined) {
+    verifyBtn.click();
+    await settle();
+    assert.deepEqual(jsonOf(lastPost(HOST.PROBE_PATH)), { modelId: DEEPSEEK, region: "ai" }, "国际验令牌带 region:\"ai\"");
+    assert.equal(postCalls(HOST.PROBE_PATH).length, probeBefore + 1, "验令牌确实发了一发 probe");
+  }
+  renderer.unmount();
+  await settle();
+  defaultSnapshot = { body: SNAPSHOT };   // 还原共享桩，别把后续用例喂成双账户
+}
+
 globalThis.setInterval = realSetInterval;
 globalThis.clearInterval = realClearInterval;
 console.log(`dom-render.test.mjs: all checks passed（${calls.length} 次真实请求，${renderer.renders()} 次重渲染）`);

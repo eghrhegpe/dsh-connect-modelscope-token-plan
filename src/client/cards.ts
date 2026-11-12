@@ -8,11 +8,11 @@ import { compactCount, count, format, isoTime } from "./format.ts";
 import { h, useEffect, useMemo, useState } from "./runtime.ts";
 import type { DictionaryKey, Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
-import { MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, modelscopeModelUrl, FEATURED_OWNERS, catalogOwner, trimOwnerPrefix, formatWindow } from "./const.ts";
+import { MODELSCOPE_TOKEN_URL, MODELSCOPE_INTERNATIONAL_SITE_URL, MODELSCOPE_USAGE_URL, modelscopeModelUrl, FEATURED_OWNERS, catalogOwner, trimOwnerPrefix, formatWindow } from "./const.ts";
 import { providerOf, drawOf } from "./snapshot.ts";
 import { ToggleSwitch } from "./toggle-switch.ts";
 import { parseAllowedList, normalizeRosterSave, hideAllRoster } from "../shared/allow-list.ts";
-import type { BalanceData, ProviderStatus, DrawStatus, QuotaEvent, Snapshot, TrendBucket, TokenStatus } from "../shared/wire.ts";
+import type { AccountSnapshot, BalanceData, ProviderStatus, DrawStatus, QuotaEvent, Snapshot, TrendBucket, TokenStatus } from "../shared/wire.ts";
 
 /** 可折叠 section 卡：全宽头部按钮 + 旋转 chevron；open/onToggle 由 props 进。 */
 export function SectionCard({ title, open, onToggle, children, tt }: {
@@ -80,6 +80,64 @@ export function BalanceCard({ balance, tt }: { balance: BalanceData | null; tt: 
       " ",
       h("a", { style: S.formNote, href: MODELSCOPE_USAGE_URL, target: "_blank", rel: "noreferrer" }, tt("balance.usagePage"))
     )
+  );
+}
+
+/**
+ * 双账户并排余额卡（M4）：CN / 国际各一张有标签的小卡，各显官方魔粒余额。
+ *
+ * **只在 `accounts[]` 在场时由 panel-page 渲染**（旧 Host 或过渡期省略 accounts，
+ * 面板继续用上面那张单账户 BalanceCard，DOM 逐字不变）。两站是各自独立的一份官方
+ * 读数，绝不合并成一个总数——那会把两把不同账户的钱说成一笔。
+ *
+ * 三格读数各自遵守「读不到 ≠ 0」：null 画「—」，与 BalanceCard 同口径。令牌未配
+ * 时 Host 会把该账户余额整块软失败成 null（不是报错），这里补一行 `account.balanceEmpty`
+ * 把「还没接」说出口，而不是让一张空卡看起来像「0 魔粒」。
+ *
+ * 本地用量**不在这里**：它是按 profile 分段的一本合并账（事实 1），由下面的
+ * LocalDailyCard 画一张，不按账户切两份。
+ */
+export function AccountsBalanceCard({ accounts, tt }: { accounts: readonly AccountSnapshot[]; tt: Tt }): unknown {
+  if (!Array.isArray(accounts) || accounts.length === 0) return null;
+  const stat = (label: string, value: unknown) =>
+    h(
+      "div",
+      { style: S.statCard },
+      h("div", { style: S.statValue }, typeof value === "number" && Number.isFinite(value) ? count(value) : "—"),
+      h("div", { style: S.quotaLabel }, label)
+    );
+  const tile = (account: AccountSnapshot) => {
+    const b = account.balance;
+    const label = account.region === "ai" ? tt("account.international") : tt("account.cn");
+    const error = b !== null && typeof b === "object" && typeof b.error === "string" && b.error !== ""
+      ? b.error
+      : null;
+    return h(
+      "div",
+      { key: account.region, style: { ...S.card, flex: "1 1 220px", minWidth: 0, margin: 0 } },
+      h("div", { style: S.poolName }, label),
+      error !== null
+        ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-error-primary)", margin: 0 } }, format(tt("balance.unavailable"), { error }))
+        : h(
+            "div",
+            { style: S.statGrid },
+            stat(tt("balance.available"), b?.available),
+            stat(tt("balance.total"), b?.total),
+            stat(tt("balance.frozen"), b?.frozen)
+          ),
+      // 该账户令牌缺席 → 明确说「还没接」，别让全「—」的卡被读成「余额 0」。
+      account.token?.present === false
+        ? h("div", { style: S.formNote }, tt("account.balanceEmpty"))
+        : null,
+      // 两个 provider 各注册各的：把该账户对应的注册态点出来（与模型 tab 分开，因为
+      // 那边展示的是 CN 单源站的 roster）。
+      h("div", { style: S.trendLegend }, account.registered ? tt("provider.registered") : tt("provider.notRegistered"))
+    );
+  };
+  return h(
+    "div",
+    { style: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "stretch" } },
+    accounts.map(tile)
   );
 }
 
@@ -375,8 +433,15 @@ export function EventsList({ events, tt }: { events: QuotaEvent[] | null; tt: Tt
   );
 }
 
-/** 令牌表单：保存 / 忘掉 / 验令牌 + 状态行 + 外链。唯一持 state 的展示组件。 */
-export function TokenForm({ token, busy, error, onSave, onForget, onVerify, verifyTitle, tt }: {
+/**
+ * 令牌表单：保存 / 忘掉 / 验令牌 + 状态行 + 外链。唯一持 state 的展示组件。
+ *
+ * M4 双账户：`region` 缺省（或 "cn"）时行为与单账户时代逐字一致；传 "ai" 时改用
+ * 国际站的提示/外链（引用名是 MODELSCOPE_INTERNATIONAL_API_KEY，不是 CN 那把），
+ * 并在表单上方显示所属账户的标签。写哪个账户由调用方的 onSave/onForget/onVerify
+ * 决定——组件自己只认一个 `region` 用于文案，不碰路由。
+ */
+export function TokenForm({ token, busy, error, onSave, onForget, onVerify, verifyTitle, region = "cn", label = null, tt }: {
   token: TokenStatus | null;
   busy: boolean;
   error: string | null;
@@ -386,9 +451,17 @@ export function TokenForm({ token, busy, error, onSave, onForget, onVerify, veri
   onVerify?: (() => void) | undefined;
   /** 提示实际探的是哪个模型（validity 只关心鉴权，任意模型皆可）。 */
   verifyTitle?: string | undefined;
+  /** 该表单管理哪个账户："cn"（缺省）| "ai"。只影响文案与外链。 */
+  region?: "cn" | "ai";
+  /** 账户标签（双账户并排时显示，单账户时代不传 = 不渲染）。 */
+  label?: string | null;
   tt: Tt;
 }): unknown {
   const [value, setValue] = useState("");
+  const international = region === "ai";
+  const hint = tt(international ? "token.hintInternational" : "token.hint");
+  const linkText = tt(international ? "token.linkInternational" : "token.link");
+  const linkHref = international ? MODELSCOPE_INTERNATIONAL_SITE_URL : MODELSCOPE_TOKEN_URL;
   // 守卫必须用 `== null` 而不是 `=== null`：调用点是 `data?.token ?? null`，
   // 而 `??` 只在null/undefined 之间桥接——`data` 存在但 `token` 键缺失时
   // `data?.token` 是 undefined，喂进来就把这里带进崩路径（读 undefined.source）。
@@ -404,6 +477,7 @@ export function TokenForm({ token, busy, error, onSave, onForget, onVerify, veri
   return h(
     "div",
     null,
+    label !== null ? h("div", { style: S.poolName }, label) : null,
     // 读不到凭据存储时**不**渲染「状态：无（来源 无）」——那是对「没配令牌」的断言，
     // 而我们并不知道（见 wire.ts TokenStatus.readError）。这一行代替它，并说清它不
     // 代表没配令牌。
@@ -424,8 +498,8 @@ export function TokenForm({ token, busy, error, onSave, onForget, onVerify, veri
       onVerify !== undefined ? h("button", { type: "button", style: S.button, disabled: busy, onClick: onVerify, title: verifyTitle }, tt("probe.validity")) : null
     ),
     error !== null ? h("div", { style: S.formError, role: "alert" }, error) : null,
-    h("div", { style: S.formNote }, tt("token.hint")),
-    h("a", { style: S.formNote, href: MODELSCOPE_TOKEN_URL, target: "_blank", rel: "noreferrer" }, tt("token.link"))
+    h("div", { style: S.formNote }, hint),
+    h("a", { style: S.formNote, href: linkHref, target: "_blank", rel: "noreferrer" }, linkText)
   );
 }
 

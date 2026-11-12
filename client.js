@@ -103,7 +103,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const m = tokens / 1e6;
 		return `${m >= 10 || Number.isInteger(m) ? Math.round(m) : Math.round(m * 10) / 10}M`;
 	}
-	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH, MODELSCOPE_TOKEN_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
+	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH, MODELSCOPE_TOKEN_URL, MODELSCOPE_INTERNATIONAL_SITE_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
 	var init_const = __esmMin((() => {
 		init_wire();
 		NS = "dsh-connect-modelscope-token-plan";
@@ -121,6 +121,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		DRAW_RESET_PATH = `/api/${NS}/draw/reset`;
 		TREND_WINDOW_PATH = `/api/${NS}/trend/window`;
 		MODELSCOPE_TOKEN_URL = "https://modelscope.cn/my/myaccesstoken";
+		MODELSCOPE_INTERNATIONAL_SITE_URL = "https://www.modelscope.ai";
 		MODELSCOPE_USAGE_URL = "https://modelscope.cn/magicube/usage?tab=consume";
 		MODELSCOPE_MODEL_URL_BASE = "https://www.modelscope.cn/models";
 		FEATURED_OWNERS = Object.freeze([
@@ -150,6 +151,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"panel.shapeDrift": "上游返回的结构可能有变：{detail}",
 			"panel.payloadError": "Host 返回了无法读取的响应（可能页面被登录墙或代理截获）。",
 			"shape.missingKeys": "Host 快照缺少必需的顶层键：{keys}",
+			"account.cn": "魔搭社区 · CN",
+			"account.international": "国际版 · modelscope.ai",
+			"account.balanceSection": "魔粒余额（官方数据 · 两个账户）",
+			"account.balanceEmpty": "该账户还没有余额读数（未配置令牌或本次读不到）。",
+			"account.tokenRegion": "选择要管理的账户",
 			"common.httpError": "无法读取 Host 响应（非预期响应，可能页面被登录墙截获）。",
 			"common.timeout": "请求超时，请重试。",
 			"tab.quota": "额度",
@@ -274,6 +280,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"token.ephemeral": "此 Host 没有凭据服务：面板保存的令牌重启即丢，请改用凭据服务或环境变量。",
 			"token.readError": "读不到凭据存储，无法确认令牌状态（不代表没配令牌）：{error}",
 			"token.link": "打开魔搭访问令牌页 →",
+			"token.hintInternational": "在 ModelScope International「访问令牌」页生成。保存即生效（写入 DSH 凭据服务的 MODELSCOPE_INTERNATIONAL_API_KEY 引用，不依赖重启）。环境变量同名者只在 DSH 启动时读一次，优先级高于此处保存的值。",
+			"token.linkInternational": "打开国际版站点 →",
 			"source.credentials": "凭据服务",
 			"source.env": "环境变量",
 			"source.memory": "内存",
@@ -296,7 +304,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"composer.newModelsRow": "本机首次见到的模型",
 			"composer.newModelsTitle": "本机首次见到的模型：",
 			"composer.newModelsSep": "、",
-			"composer.newModelsNote": "「新」指本机首次记到它，与上游何时上架无关。只列最近 7 天内首见的。"
+			"composer.newModelsNote": "「新」指本机首次记到它，与上游何时上架无关。只列最近 7 天内首见的。",
+			"composer.accountsBalance": "两个账户的官方魔粒余额",
+			"composer.accountCnBalance": "魔搭社区 · CN",
+			"composer.accountIntlBalance": "国际版 · modelscope.ai"
 		};
 		en = {
 			"panel.refresh": "Refresh",
@@ -314,6 +325,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"panel.shapeDrift": "Upstream shape may have changed: {detail}",
 			"panel.payloadError": "Host returned an unreadable response (a login wall or proxy may have intercepted it).",
 			"shape.missingKeys": "Host snapshot omitted required top-level key(s): {keys}",
+			"account.cn": "ModelScope · CN",
+			"account.international": "International · modelscope.ai",
+			"account.balanceSection": "Magicube balance (official · two accounts)",
+			"account.balanceEmpty": "No balance reading for this account yet (no token configured, or unreadable this time).",
+			"account.tokenRegion": "Choose the account to manage",
 			"common.httpError": "Unexpected Host response (a login wall or proxy may have intercepted it).",
 			"common.timeout": "Request timed out; please retry.",
 			"tab.quota": "Quota",
@@ -438,6 +454,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"token.ephemeral": "This Host has no credentials service: a token saved in the panel is lost on restart. Use the credentials service or an environment variable.",
 			"token.readError": "Could not read the credential store, so the token state is unknown (this does NOT mean no token is configured): {error}",
 			"token.link": "Open the ModelScope access-token page →",
+			"token.hintInternational": "Generate one on the ModelScope International access-token page. Saving takes effect immediately (written to the MODELSCOPE_INTERNATIONAL_API_KEY reference in the DSH credentials service, no restart needed). A same-named environment variable is read once at DSH launch and ranks ABOVE a value saved here.",
+			"token.linkInternational": "Open the International site →",
 			"source.credentials": "credentials",
 			"source.env": "environment",
 			"source.memory": "memory",
@@ -460,7 +478,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"composer.newModelsRow": "First seen on this device",
 			"composer.newModelsTitle": "First seen on this device: ",
 			"composer.newModelsSep": ", ",
-			"composer.newModelsNote": "\"New\" means first recorded on this device, not newly listed by the gateway. Only models first seen within the last 7 days are listed."
+			"composer.newModelsNote": "\"New\" means first recorded on this device, not newly listed by the gateway. Only models first seen within the last 7 days are listed.",
+			"composer.accountsBalance": "Official Magicube balance by account",
+			"composer.accountCnBalance": "ModelScope · CN",
+			"composer.accountIntlBalance": "International · modelscope.ai"
 		};
 	}));
 
@@ -1602,6 +1623,48 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, tt("balance.usagePage"))));
 	}
 	/**
+	* 双账户并排余额卡（M4）：CN / 国际各一张有标签的小卡，各显官方魔粒余额。
+	*
+	* **只在 `accounts[]` 在场时由 panel-page 渲染**（旧 Host 或过渡期省略 accounts，
+	* 面板继续用上面那张单账户 BalanceCard，DOM 逐字不变）。两站是各自独立的一份官方
+	* 读数，绝不合并成一个总数——那会把两把不同账户的钱说成一笔。
+	*
+	* 三格读数各自遵守「读不到 ≠ 0」：null 画「—」，与 BalanceCard 同口径。令牌未配
+	* 时 Host 会把该账户余额整块软失败成 null（不是报错），这里补一行 `account.balanceEmpty`
+	* 把「还没接」说出口，而不是让一张空卡看起来像「0 魔粒」。
+	*
+	* 本地用量**不在这里**：它是按 profile 分段的一本合并账（事实 1），由下面的
+	* LocalDailyCard 画一张，不按账户切两份。
+	*/
+	function AccountsBalanceCard({ accounts, tt }) {
+		if (!Array.isArray(accounts) || accounts.length === 0) return null;
+		const stat = (label, value) => h("div", { style: S.statCard }, h("div", { style: S.statValue }, typeof value === "number" && Number.isFinite(value) ? count(value) : "—"), h("div", { style: S.quotaLabel }, label));
+		const tile = (account) => {
+			const b = account.balance;
+			const label = account.region === "ai" ? tt("account.international") : tt("account.cn");
+			const error = b !== null && typeof b === "object" && typeof b.error === "string" && b.error !== "" ? b.error : null;
+			return h("div", {
+				key: account.region,
+				style: {
+					...S.card,
+					flex: "1 1 220px",
+					minWidth: 0,
+					margin: 0
+				}
+			}, h("div", { style: S.poolName }, label), error !== null ? h("div", { style: {
+				...S.formNote,
+				color: "var(--dsw-alias-state-error-primary)",
+				margin: 0
+			} }, format(tt("balance.unavailable"), { error })) : h("div", { style: S.statGrid }, stat(tt("balance.available"), b?.available), stat(tt("balance.total"), b?.total), stat(tt("balance.frozen"), b?.frozen)), account.token?.present === false ? h("div", { style: S.formNote }, tt("account.balanceEmpty")) : null, h("div", { style: S.trendLegend }, account.registered ? tt("provider.registered") : tt("provider.notRegistered")));
+		};
+		return h("div", { style: {
+			display: "flex",
+			gap: 12,
+			flexWrap: "wrap",
+			alignItems: "stretch"
+		} }, accounts.map(tile));
+	}
+	/**
 	* 本地调用卡：纯统计口径——今日次数 + 按模型分布 + 一句口径说明。
 	* 刻意**不画**「推算剩余/参考上限」进度条：官方已改为魔粒计费，「2000 次」
 	* 是次数口径的社区快照，与魔粒余额并排展示是误导（README「三条事实」#2）。
@@ -1833,13 +1896,24 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			title: event.message
 		}, event.message))));
 	}
-	/** 令牌表单：保存 / 忘掉 / 验令牌 + 状态行 + 外链。唯一持 state 的展示组件。 */
-	function TokenForm({ token, busy, error, onSave, onForget, onVerify, verifyTitle, tt }) {
+	/**
+	* 令牌表单：保存 / 忘掉 / 验令牌 + 状态行 + 外链。唯一持 state 的展示组件。
+	*
+	* M4 双账户：`region` 缺省（或 "cn"）时行为与单账户时代逐字一致；传 "ai" 时改用
+	* 国际站的提示/外链（引用名是 MODELSCOPE_INTERNATIONAL_API_KEY，不是 CN 那把），
+	* 并在表单上方显示所属账户的标签。写哪个账户由调用方的 onSave/onForget/onVerify
+	* 决定——组件自己只认一个 `region` 用于文案，不碰路由。
+	*/
+	function TokenForm({ token, busy, error, onSave, onForget, onVerify, verifyTitle, region = "cn", label = null, tt }) {
 		const [value, setValue] = useState("");
+		const international = region === "ai";
+		const hint = tt(international ? "token.hintInternational" : "token.hint");
+		const linkText = tt(international ? "token.linkInternational" : "token.link");
+		const linkHref = international ? MODELSCOPE_INTERNATIONAL_SITE_URL : MODELSCOPE_TOKEN_URL;
 		const source = token?.source ?? "none";
 		const sourceKey = source === "credentials" ? "source.credentials" : source === "env" ? "source.env" : source === "memory" ? "source.memory" : "source.none";
 		const validKey = token?.valid === true ? "validity.yes" : token?.valid === false ? "validity.bad" : "validity.no";
-		return h("div", null, token?.readError ? h("div", { style: {
+		return h("div", null, label !== null ? h("div", { style: S.poolName }, label) : null, token?.readError ? h("div", { style: {
 			...S.formNote,
 			color: "var(--dsw-alias-state-warn-primary)"
 		} }, format(tt("token.readError"), { error: token.readError })) : h("div", { style: S.quotaUsed }, format(tt("token.status"), {
@@ -1875,12 +1949,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, tt("probe.validity")) : null), error !== null ? h("div", {
 			style: S.formError,
 			role: "alert"
-		}, error) : null, h("div", { style: S.formNote }, tt("token.hint")), h("a", {
+		}, error) : null, h("div", { style: S.formNote }, hint), h("a", {
 			style: S.formNote,
-			href: MODELSCOPE_TOKEN_URL,
+			href: linkHref,
 			target: "_blank",
 			rel: "noreferrer"
-		}, tt("token.link")));
+		}, linkText));
 	}
 	/**
 	* 按 owner 把清单分组，**推荐的三家置顶**（组内保持目录首见序）。
@@ -2669,6 +2743,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			token: true
 		});
 		const [activeTab, setActiveTab] = useState("quota");
+		const [tokenRegion, setTokenRegion] = useState("cn");
+		const accounts = Array.isArray(data?.accounts) ? data.accounts : null;
+		const hasAccounts = accounts !== null && accounts.length > 0;
 		useEffect(() => {
 			if (typeof localeSubscribe !== "function") return void 0;
 			return localeSubscribe(() => setLocaleRevision((revision) => revision + 1));
@@ -2786,11 +2863,14 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		]);
 		const [tokenBusy, setTokenBusy] = useState(false);
 		const [tokenError, setTokenError] = useState(null);
-		const saveToken = useCallback(async (value) => {
+		const saveToken = useCallback(async (value, region) => {
 			setTokenBusy(true);
 			setTokenError(null);
 			try {
-				await postWrite(TOKEN_PATH, { token: value });
+				await postWrite(TOKEN_PATH, {
+					token: value,
+					...regionField(region)
+				});
 				load();
 			} catch (reason) {
 				setTokenError(writeErrorText(reason, tt));
@@ -2802,11 +2882,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			postWrite,
 			tt
 		]);
-		const forgetToken = useCallback(async () => {
+		const forgetToken = useCallback(async (region) => {
 			setTokenBusy(true);
 			setTokenError(null);
 			try {
-				await postWrite(TOKEN_FORGET_PATH, {});
+				await postWrite(TOKEN_FORGET_PATH, regionField(region));
 				load();
 			} catch (reason) {
 				setTokenError(writeErrorText(reason, tt));
@@ -2818,17 +2898,20 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			postWrite,
 			tt
 		]);
-		const tokenState = data?.token ?? null;
+		const tokenState = hasAccounts ? accounts.find((a) => a.region === tokenRegion)?.token ?? null : data?.token ?? null;
 		const sampleModel = data?.models?.sample?.[0] ?? null;
 		const [verifyBusy, setVerifyBusy] = useState(false);
 		const [verifyNote, setVerifyNote] = useState(null);
 		const [verifyError, setVerifyError] = useState(null);
-		const runValidity = useCallback(async (modelId) => {
+		const runValidity = useCallback(async (modelId, region) => {
 			setVerifyBusy(true);
 			setVerifyNote(null);
 			setVerifyError(null);
 			try {
-				const body = await postJson(PROBE_PATH, { modelId });
+				const body = await postJson(PROBE_PATH, {
+					modelId,
+					...regionField(region)
+				});
 				if (body !== null) load();
 				if (body !== null && body.ok === true) setVerifyNote(format(tt("probe.validOk"), { status: Number(body.status ?? 0) }));
 				else setVerifyError(typeof body?.error === "string" ? body.error : tt("common.httpError"));
@@ -2845,11 +2928,14 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				style: S.formNote,
 				role: "status"
 			}, tt("panel.noToken")) : null, h(SectionCard, {
-				title: tt("section.balance"),
+				title: tt(hasAccounts ? "account.balanceSection" : "section.balance"),
 				open: openSections.balance,
 				onToggle: () => toggleSection("balance"),
 				tt
-			}, h(BalanceCard, {
+			}, hasAccounts ? h(AccountsBalanceCard, {
+				accounts,
+				tt
+			}) : h(BalanceCard, {
 				balance: snap.balance,
 				tt
 			})), h(SectionCard, {
@@ -2921,13 +3007,36 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			open: openSections.token,
 			onToggle: () => toggleSection("token"),
 			tt
-		}, h(TokenForm, {
+		}, hasAccounts ? h("div", {
+			style: {
+				display: "flex",
+				gap: 8,
+				alignItems: "center",
+				flexWrap: "wrap",
+				marginBottom: 12
+			},
+			role: "group",
+			"aria-label": tt("account.tokenRegion")
+		}, ...[["cn", () => tt("account.cn")], ["ai", () => tt("account.international")]].map(([region, label]) => h("button", {
+			key: region,
+			type: "button",
+			"aria-pressed": tokenRegion === region,
+			style: tokenRegion === region ? {
+				...S.trendMetricBtn,
+				...S.trendMetricBtnActive
+			} : S.trendMetricBtn,
+			onClick: () => setTokenRegion(region)
+		}, label()))) : null, h(TokenForm, {
 			token: tokenState,
 			busy: tokenBusy || verifyBusy,
 			error: tokenError,
-			onSave: (value) => void saveToken(value),
-			onForget: () => void forgetToken(),
-			onVerify: sampleModel === null ? void 0 : () => void runValidity(sampleModel),
+			...hasAccounts ? {
+				region: tokenRegion,
+				label: tokenRegion === "ai" ? tt("account.international") : tt("account.cn")
+			} : {},
+			onSave: (value) => void saveToken(value, tokenRegion),
+			onForget: () => void forgetToken(tokenRegion),
+			onVerify: sampleModel === null ? void 0 : () => void runValidity(sampleModel, tokenRegion),
 			verifyTitle: sampleModel ?? void 0,
 			tt
 		}), verifyNote !== null ? h("div", {
@@ -2983,6 +3092,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			role: "status"
 		}, format(tt("panel.shapeDrift"), { detail: shapeWarnings.join("; ") })) : null, activeTab === "quota" ? quotaBody() : activeTab === "models" ? modelsBody() : accessBody()))));
 	}
+	var regionField;
 	var init_panel_page = __esmMin((() => {
 		init_cards();
 		init_const();
@@ -2993,6 +3103,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		init_runtime();
 		init_styles();
 		init_allow_list();
+		regionField = (region) => region === "ai" ? { region: "ai" } : {};
 	}));
 
 //#endregion
@@ -3121,6 +3232,33 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		return ids;
 	}
 	/**
+	* 双账户余额行（M4）：从可选块 `accounts[]` 取每站官方魔粒余额的**可用读数**。
+	*
+	* **只读、纯函数**：老 Host / Host 软失败省略该块时返回空数组——胶囊正文仍用
+	* 兼容聚合的 `snapshot.balance`，不谎称第二个账户。每站各自 `null ≠ 0` 由
+	* {@link availableOf} 守：读不到就是 null，绝不推成 0。两站是两份独立的官方读数，
+	* 不合并成一个总数（把两把账户的钱说成一笔比不显示更糟）。
+	* @param {Snapshot|null|undefined} snapshot
+	* @returns {{ region: "cn"|"ai", available: number|null }[]}
+	*/
+	function accountsOf(snapshot) {
+		const raw = snapshot?.accounts;
+		if (!Array.isArray(raw)) return [];
+		const out = [];
+		const seen = /* @__PURE__ */ new Set();
+		for (const account of raw) {
+			if (account === null || typeof account !== "object") continue;
+			if (account.region !== "cn" && account.region !== "ai") continue;
+			if (seen.has(account.region)) continue;
+			seen.add(account.region);
+			out.push({
+				region: account.region,
+				available: availableOf(account.balance)
+			});
+		}
+		return out;
+	}
+	/**
 	* 点面板外面或按 Escape 关面板。
 	*
 	* 三处细节各有理由：
@@ -3169,7 +3307,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	* `<span>` 同理。
 	*/
 	function QuotaPopover(props) {
-		const { tt, title, stale, available, usedToday, balance, newModels } = props;
+		const { tt, title, stale, available, usedToday, balance, newModels, accounts } = props;
 		const fetchedAt = balance?.fetchedAt;
 		const failure = balance?.error;
 		return h("div", {
@@ -3178,7 +3316,10 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			role: "dialog",
 			"aria-label": title,
 			style: S.pillPopover
-		}, h("div", { style: S.pillPopoverHead }, h("span", { style: S.pillPopoverTitle }, tt("composer.panelTitle")), stale ? h("span", { style: S.pillPopoverStale }, tt("composer.stale")) : null), h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.panelBalance")), h("span", { style: S.pillPopoverFigure }, balanceText(available, tt)))), h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.panelCalls")), h("span", { style: S.pillPopoverFigure }, usedToday === null ? "—" : format(tt("composer.localCalls"), { calls: count(usedToday) })))), newModels.length === 0 ? null : h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.newModelsRow")), h("span", { style: S.pillPopoverFigure }, newModels.join(tt("composer.newModelsSep"))))), failure !== void 0 && typeof failure === "string" && failure !== "" ? h("div", { style: S.pillPopoverNote }, format(tt("balance.unavailable"), { error: failure })) : null, fetchedAt !== void 0 && typeof fetchedAt === "string" && fetchedAt !== "" ? h("div", { style: S.pillPopoverNote }, format(tt("balance.fetched"), { time: isoTime(fetchedAt) })) : null, h("div", { style: S.pillPopoverNote }, tt("composer.panelNote")), newModels.length === 0 ? null : h("div", { style: S.pillPopoverNote }, tt("composer.newModelsNote")));
+		}, h("div", { style: S.pillPopoverHead }, h("span", { style: S.pillPopoverTitle }, tt("composer.panelTitle")), stale ? h("span", { style: S.pillPopoverStale }, tt("composer.stale")) : null), h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.panelBalance")), h("span", { style: S.pillPopoverFigure }, balanceText(available, tt)))), h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.panelCalls")), h("span", { style: S.pillPopoverFigure }, usedToday === null ? "—" : format(tt("composer.localCalls"), { calls: count(usedToday) })))), accounts.length === 0 ? null : h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.accountsBalance"))), ...accounts.map((account) => h("div", {
+			key: account.region,
+			style: S.pillPopoverRowLine
+		}, h("span", { style: S.pillPopoverLabel }, tt(account.region === "ai" ? "composer.accountIntlBalance" : "composer.accountCnBalance")), h("span", { style: S.pillPopoverFigure }, balanceText(account.available, tt))))), newModels.length === 0 ? null : h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.newModelsRow")), h("span", { style: S.pillPopoverFigure }, newModels.join(tt("composer.newModelsSep"))))), failure !== void 0 && typeof failure === "string" && failure !== "" ? h("div", { style: S.pillPopoverNote }, format(tt("balance.unavailable"), { error: failure })) : null, fetchedAt !== void 0 && typeof fetchedAt === "string" && fetchedAt !== "" ? h("div", { style: S.pillPopoverNote }, format(tt("balance.fetched"), { time: isoTime(fetchedAt) })) : null, h("div", { style: S.pillPopoverNote }, tt("composer.panelNote")), newModels.length === 0 ? null : h("div", { style: S.pillPopoverNote }, tt("composer.newModelsNote")));
 	}
 	/**
 	* 内层：只在会话选中本插件的模型时挂载。轮询 hook 在这里，被挂/摘即起停——
@@ -3201,6 +3342,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const available = availableOf(balance);
 		const usedToday = usedTodayOf(data);
 		const newModels = newModelsOf(data);
+		const accounts = accountsOf(data);
 		const cadenceMs = statedCadenceMs(data?.pollSeconds, DEFAULT_CADENCE_MS);
 		const stale = staleOf({
 			error,
@@ -3259,7 +3401,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			available,
 			usedToday,
 			balance,
-			newModels
+			newModels,
+			accounts
 		}) : null);
 	}
 	/**
@@ -3410,10 +3553,12 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 					callsText,
 					readingText,
 					staleOf,
-					newModelsOf
+					newModelsOf,
+					accountsOf
 				}),
 				components: Object.freeze({
 					BalanceCard,
+					AccountsBalanceCard,
 					ComposerUsagePill,
 					EventsList,
 					LocalDailyCard,

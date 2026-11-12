@@ -3,7 +3,7 @@
  * 全部布局。渲染在 Plugins 页内、始终展开；轮询只在本卡挂载期间进行。
  * @module dsh-connect-modelscope-token-plan/client/panel-page
  */
-import { SectionCard, BalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm, ProviderCard, DrawCard, TrendWindowPicker } from "./cards.ts";
+import { SectionCard, BalanceCard, AccountsBalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm, ProviderCard, DrawCard, TrendWindowPicker } from "./cards.ts";
 import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH } from "./const.ts";
 import { format, errorText, isoTime } from "./format.ts";
 import { getJson, postJson, writeFailure } from "./http.ts";
@@ -12,11 +12,19 @@ import { useSnapshotPolling } from "./use-snapshot-polling.ts";
 import { h, useCallback, useEffect, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
-import type { ProviderStatus, DrawStatus, Snapshot } from "../shared/wire.ts";
+import type { AccountSnapshot, ProviderStatus, DrawStatus, Snapshot } from "../shared/wire.ts";
 import { normalizeRosterSave } from "../shared/allow-list.ts";
 
 /** 三个固定视角。 */
 export type TabId = "quota" | "models" | "access";
+
+/**
+ * 写路径的 region 维度：只有国际账户才在 payload 里带 `region:"ai"`。CN 缺省
+ * 保持 `{token}` / `{}` / `{modelId}` 的逐字形状——Host 的 token/probe 路由把缺省
+ * region 当 cn，老客户端与单账户装配无感。纯函数，放模块级避免被 useCallback 闭包捕获。
+ */
+const regionField = (region: "cn" | "ai"): { region: "ai" } | Record<string, never> =>
+  region === "ai" ? { region: "ai" } : {};
 
 export function PanelPage({ tt, localeSubscribe }: {
   tt: Tt;
@@ -26,6 +34,15 @@ export function PanelPage({ tt, localeSubscribe }: {
   const [, setLocaleRevision] = useState(0);
   const [openSections, setOpenSections] = useState({ balance: true, local: true, trend: true, events: false, provider: true, draw: true, token: true });
   const [activeTab, setActiveTab] = useState<TabId>("quota");
+  // M4 双账户：接入 tab 里的令牌表单管理哪个账户。缺省 "cn"——老 Host / 过渡期
+  // 省略 accounts 时，整个切换器不渲染，save/forget/probe 的 payload 与单账户时代
+  // 逐字一致（不带 region），由 test/dom-render.test.mjs §4 钉住。
+  const [tokenRegion, setTokenRegion] = useState<"cn" | "ai">("cn");
+
+  // accounts 是可选块：旧 Host / Host 软失败省略时一律退回单账户视图（BalanceCard +
+  // 单个 TokenForm），面板不白屏也不谎报第二个账户。全新的两站装配才带它。
+  const accounts: readonly AccountSnapshot[] | null = Array.isArray(data?.accounts) ? data.accounts : null;
+  const hasAccounts = accounts !== null && accounts.length > 0;
 
   useEffect(() => {
     if (typeof localeSubscribe !== "function") return undefined;
@@ -186,14 +203,16 @@ export function PanelPage({ tt, localeSubscribe }: {
     }
   }, [load, postWrite, tt]);
 
-  // 令牌保存 / 忘掉。
+  // 令牌保存 / 忘掉。`region` 只在国际账户时进 payload：CN（缺省）保持
+  // `{ token }` / `{}` 的逐字形状，Host 的 token 路由把缺省 region 当 cn，老客户端
+  // 与单账户装配完全无感。
   const [tokenBusy, setTokenBusy] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
-  const saveToken = useCallback(async (value: string) => {
+  const saveToken = useCallback(async (value: string, region: "cn" | "ai") => {
     setTokenBusy(true);
     setTokenError(null);
     try {
-      await postWrite(TOKEN_PATH, { token: value });
+      await postWrite(TOKEN_PATH, { token: value, ...regionField(region) });
       void load();
     } catch (reason) {
       setTokenError(writeErrorText(reason, tt));
@@ -201,14 +220,14 @@ export function PanelPage({ tt, localeSubscribe }: {
       setTokenBusy(false);
     }
   }, [load, postWrite, tt]);
-  const forgetToken = useCallback(async () => {
+  const forgetToken = useCallback(async (region: "cn" | "ai") => {
     setTokenBusy(true);
     setTokenError(null);
     try {
       // 与保存同一判据：Host 侧的 forget 失败是**刻意传播**的（凭据文件只读时
       // ms-auth 会抛，见其文件头「谎报成功比失败更糟，用户以为凭据已删干净」），
       // 这里丢掉 body 就等于把那条刻意的失败变成界面上的一句「什么都没发生」。
-      await postWrite(TOKEN_FORGET_PATH, {});
+      await postWrite(TOKEN_FORGET_PATH, regionField(region));
       void load();
     } catch (reason) {
       setTokenError(writeErrorText(reason, tt));
@@ -217,7 +236,11 @@ export function PanelPage({ tt, localeSubscribe }: {
     }
   }, [load, postWrite, tt]);
 
-  const tokenState = data?.token ?? null;
+  // 令牌状态行：双账户装配下按当前选中的 region 取该账户的 token；单账户时代
+  // 仍是顶层 token（CN 别名）。**只读**，不猜「第二个账户的令牌没配」。
+  const tokenState = hasAccounts
+    ? accounts.find((a) => a.region === tokenRegion)?.token ?? null
+    : data?.token ?? null;
   // 验令牌（validity probe）需要一个 model id——鉴权与模型无关，取目录样本的
   // 第一个即可；目录不可读时没有 id，按钮不渲染（诚实降级，不猜模型名）。
   //
@@ -230,12 +253,12 @@ export function PanelPage({ tt, localeSubscribe }: {
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [verifyNote, setVerifyNote] = useState<string | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
-  const runValidity = useCallback(async (modelId: string) => {
+  const runValidity = useCallback(async (modelId: string, region: "cn" | "ai") => {
     setVerifyBusy(true);
     setVerifyNote(null);
     setVerifyError(null);
     try {
-      const body = await postJson(PROBE_PATH, { modelId });
+      const body = await postJson(PROBE_PATH, { modelId, ...regionField(region) });
       // 探针的结论写进了快照的 `token.valid`（401/403 也算——它是「令牌坏」的证据，
       // 不是「请求失败」）。刷一次，否则那行「状态：…（校验 …）」要等下一个 30s
       // 轮询才会从「未校验」变成答案，而按钮下方明明已经写着结论了。
@@ -267,7 +290,16 @@ export function PanelPage({ tt, localeSubscribe }: {
       snap.token?.present === false
         ? h("div", { style: S.formNote, role: "status" }, tt("panel.noToken"))
         : null,
-      h(SectionCard, { title: tt("section.balance"), open: openSections.balance, onToggle: () => toggleSection("balance"), tt }, h(BalanceCard, { balance: snap.balance, tt })),
+      h(
+        SectionCard,
+        {
+          title: tt(hasAccounts ? "account.balanceSection" : "section.balance"),
+          open: openSections.balance, onToggle: () => toggleSection("balance"), tt
+        },
+        // 双账户装配：两站各一张有标签的余额卡并排。旧 Host / 软失败省略 accounts
+        // 时仍是原来那张单账户 BalanceCard（含 snap.balance 的数字），DOM 不变。
+        hasAccounts ? h(AccountsBalanceCard, { accounts, tt }) : h(BalanceCard, { balance: snap.balance, tt })
+      ),
       h(
         SectionCard,
         { title: tt("section.local"), open: openSections.local, onToggle: () => toggleSection("local"), tt },
@@ -348,13 +380,37 @@ export function PanelPage({ tt, localeSubscribe }: {
     h(
       SectionCard,
       { title: tt("section.token"), open: openSections.token, onToggle: () => toggleSection("token"), tt },
+      // 双账户装配：两站共享这一个「接入」tab，用一组开关选当前管理哪个账户的令牌
+      // （不是两份并排表单——同一时刻只编辑一把，避免把 CN 令牌误贴给国际账户）。
+      // 省略 accounts 时整组不渲染，接入 tab 与单账户时代逐字一致。
+      hasAccounts
+        ? h(
+            "div",
+            { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }, role: "group", "aria-label": tt("account.tokenRegion") },
+            ...([
+              ["cn", () => tt("account.cn")],
+              ["ai", () => tt("account.international")]
+            ] as const).map(([region, label]) =>
+              h("button", {
+                key: region,
+                type: "button",
+                "aria-pressed": tokenRegion === region,
+                style: tokenRegion === region ? { ...S.trendMetricBtn, ...S.trendMetricBtnActive } : S.trendMetricBtn,
+                onClick: () => setTokenRegion(region)
+              }, label())
+            )
+          )
+        : null,
       h(TokenForm, {
         token: tokenState,
         busy: tokenBusy || verifyBusy,
         error: tokenError,
-        onSave: (value: string) => void saveToken(value),
-        onForget: () => void forgetToken(),
-        onVerify: sampleModel === null ? undefined : () => void runValidity(sampleModel),
+        // 单账户（cn 缺省）→ payload 精确为 {token}/{}/{modelId}；国际账户才带
+        // region:"ai"，由 Host 的 token/probe 路由选对应的账户。
+        ...(hasAccounts ? { region: tokenRegion, label: tokenRegion === "ai" ? tt("account.international") : tt("account.cn") } : {}),
+        onSave: (value: string) => void saveToken(value, tokenRegion),
+        onForget: () => void forgetToken(tokenRegion),
+        onVerify: sampleModel === null ? undefined : () => void runValidity(sampleModel, tokenRegion),
         verifyTitle: sampleModel ?? undefined,
         tt
       }),

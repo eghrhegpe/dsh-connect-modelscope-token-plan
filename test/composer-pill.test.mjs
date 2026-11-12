@@ -49,7 +49,8 @@ if (SRC_MODE) {
       callsText: pill.callsText,
       readingText: pill.readingText,
       staleOf: pill.staleOf,
-      newModelsOf: pill.newModelsOf
+      newModelsOf: pill.newModelsOf,
+      accountsOf: pill.accountsOf
     },
     components: { ComposerUsagePill: pill.ComposerUsagePill, ModelscopePill: pill.ModelscopePill }
   };
@@ -202,7 +203,9 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
 
 // ── §4 字典与样式族 ────────────────────────────────────────────────────────
 {
-  const keys = ["composer.prefix", "composer.pillTitle", "composer.balanceUnit", "composer.localCalls", "composer.stale"];
+  const keys = ["composer.prefix", "composer.pillTitle", "composer.balanceUnit", "composer.localCalls", "composer.stale",
+    // M4 双账户余额行的字典键（胶囊展开面板里并排列两站）。
+    "composer.accountsBalance", "composer.accountCnBalance", "composer.accountIntlBalance"];
   for (const key of keys) {
     assert.equal(typeof zh[key], "string", `${key} 必须在 zh 里（键集的真源）`);
     assert.equal(typeof en[key], "string", `${key} 必须在 en 里（en 是 typeof zh，缺键即编译错）`);
@@ -316,6 +319,59 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
     assert.ok(zh[key] !== "", `${key} 的 zh 不许是空串`);
     assert.ok(en[key] !== "", `${key} 的 en 不许是空串`);
   }
+}
+
+// ── §5 M4 accountsOf：双账户余额行的纯规则 ────────────────────────────────
+//
+// 只测规则本身（不挂 React）：accounts 是**可选块**，省略 / 形状脏 / 每站 null
+// 都要诚实降级。两站是两份独立官方读数，绝不合并成一个总数。
+{
+  const { accountsOf } = helpers;
+  assert.equal(typeof accountsOf, "function", "accountsOf 必须从测试面拿得到");
+
+  // 老 Host / 软失败省略 accounts → 空数组（胶囊正文继续用兼容聚合那一笔）。
+  assert.deepEqual(accountsOf(null), [], "null snapshot → 空");
+  assert.deepEqual(accountsOf(undefined), [], "undefined snapshot → 空");
+  assert.deepEqual(accountsOf({ ok: true }), [], "无 accounts 键 → 空");
+  assert.deepEqual(accountsOf({ accounts: null }), [], "accounts 不是数组 → 空");
+  assert.deepEqual(accountsOf({ accounts: "junk" }), [], "accounts 是字符串 → 空");
+
+  const account = (region, available, extra = {}) => ({
+    region, providerId: region === "ai" ? "modelscope-token-plan-international" : "modelscope-token-plan",
+    token: { present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false },
+    balance: { available, total: available, frozen: 0, fetchedAt: null, error: null },
+    registered: true, llmAvailable: true,
+    ...extra
+  });
+
+  // 两站各自的读数逐字保留（143 / 7），不合并。
+  assert.deepEqual(
+    accountsOf({ accounts: [account("cn", 143), account("ai", 7)] }),
+    [{ region: "cn", available: 143 }, { region: "ai", available: 7 }],
+    "CN / 国际各一笔，互不混合"
+  );
+
+  // null ≠ 0：读不到就是 null，不许推成 0。
+  assert.deepEqual(
+    accountsOf({ accounts: [account("cn", null), account("ai", "143")] }),
+    [{ region: "cn", available: null }, { region: "ai", available: null }],
+    "available 缺失/字符串 → null（读不到 ≠ 0）"
+  );
+  assert.deepEqual(accountsOf({ accounts: [account("ai", 0)] }), [{ region: "ai", available: 0 }], "0 是读数，要保留");
+
+  // 脏行过滤：region 越界、null 行、重复 region 只认第一份。
+  assert.deepEqual(
+    accountsOf({ accounts: [account("cn", 10), null, { region: "xx", balance: { available: 1 } }, account("cn", 999), account("ai", 5)] }),
+    [{ region: "cn", available: 10 }, { region: "ai", available: 5 }],
+    "越界 region / null 行 / 重复 region 都挡掉"
+  );
+
+  // 余额整块缺席（Host 软失败给的空形状）也不炸。
+  assert.deepEqual(
+    accountsOf({ accounts: [{ region: "cn" }, { region: "ai", balance: null }] }),
+    [{ region: "cn", available: null }, { region: "ai", available: null }],
+    "balance 缺席 → null，不抛"
+  );
 }
 
 console.log("composer-pill.test.mjs: all checks passed");
