@@ -41,6 +41,8 @@ if (SRC_MODE) {
     styles: S,
     helpers: {
       MODELSCOPE_PROVIDER: pill.MODELSCOPE_PROVIDER,
+      MODELSCOPE_PROVIDER_INTERNATIONAL: pill.MODELSCOPE_PROVIDER_INTERNATIONAL,
+      isModelscopeProvider: pill.isModelscopeProvider,
       selectedProviderOf: pill.selectedProviderOf,
       availableOf: pill.availableOf,
       usedTodayOf: pill.usedTodayOf,
@@ -89,6 +91,11 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
   const hostId = hostSrc.match(/export const LLM_PROVIDER_ID = "([^"]+)"/)?.[1];
   assert.ok(hostId, "必须能从 src/host/llm-models.ts 读到 LLM_PROVIDER_ID");
   assert.equal(helpers.MODELSCOPE_PROVIDER, hostId, "胶囊认领的 provider 必须与 Host 注册的 provider id 逐字一致");
+  // M4 拓扑修订：还有第二个 provider。国际 id 同样要与 Host 常量逐字对齐——
+  // 拼错一处就是「接入了国际模型但胶囊永不出现」。
+  const hostIntlId = hostSrc.match(/export const LLM_PROVIDER_ID_INTERNATIONAL = "([^"]+)"/)?.[1];
+  assert.ok(hostIntlId, "必须能从 src/host/llm-models.ts 读到 LLM_PROVIDER_ID_INTERNATIONAL");
+  assert.equal(helpers.MODELSCOPE_PROVIDER_INTERNATIONAL, hostIntlId, "国际 provider id 与 Host 常量逐字一致");
   assert.ok(pillSrc.includes("modelscope-token-plan"), "胶囊源码里的值要可读（别只靠 import）");
 }
 
@@ -107,6 +114,16 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
   assert.equal(providers({ next: { provider: "" } }), undefined, "空串不是 provider");
   assert.equal(providers(undefined), undefined);
   assert.equal(providers({ next: null, lastUsed: null }), undefined);
+
+  // M4 两站门控：CN 与国际站任一 provider 都算归属，别家仍整块缺席。
+  const owns = helpers.isModelscopeProvider;
+  assert.equal(owns(helpers.MODELSCOPE_PROVIDER), true, "CN provider 属本插件");
+  assert.equal(owns(helpers.MODELSCOPE_PROVIDER_INTERNATIONAL), true, "国际 provider 属本插件（拓扑修订：两个 id）");
+  assert.equal(owns("sensenova-token-plan"), false, "别家 provider 不属本插件");
+  assert.equal(owns(""), false, "空串不属本插件");
+  assert.equal(owns(undefined), false, "判不出 provider 不属本插件");
+  const intlTree = components.ComposerUsagePill({ tt: ttZh, useProjection: () => ({ next: { provider: helpers.MODELSCOPE_PROVIDER_INTERNATIONAL } }) });
+  assert.ok(intlTree, "选中国际站模型时胶囊必须出现（否则一半模型把胶囊藏了）");
 
   // 非归属会话：外层完全不渲染（也就不会跑任何请求）。
   const foreign = components.ComposerUsagePill({ tt: ttZh, useProjection: () => ({ next: { provider: "other-provider" } }) });

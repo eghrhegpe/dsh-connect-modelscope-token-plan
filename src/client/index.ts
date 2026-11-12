@@ -30,6 +30,8 @@ import {
   ComposerUsagePill,
   ModelscopePill,
   MODELSCOPE_PROVIDER,
+  MODELSCOPE_PROVIDER_INTERNATIONAL,
+  isModelscopeProvider,
   selectedProviderOf,
   availableOf,
   usedTodayOf,
@@ -77,6 +79,8 @@ function clientFactory(loaderRequire: (specifier: string) => unknown): {
       // 放在 helpers 而不是 components 里，是因为它们不碰 React——测试可以直接
       // 断言规则本身，不必先挂一棵树。
       MODELSCOPE_PROVIDER,
+      MODELSCOPE_PROVIDER_INTERNATIONAL,
+      isModelscopeProvider,
       selectedProviderOf,
       availableOf,
       usedTodayOf,

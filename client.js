@@ -3108,7 +3108,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 
 //#endregion
 //#region src/client/composer-usage-pill.ts
-/**
+/** 归属判定：两站任一 provider 都算本插件；其它 provider / 判不出 → false。 */
+	function isModelscopeProvider(id) {
+		return id !== void 0 && MODELSCOPE_PROVIDERS.has(id);
+	}
+	/**
 	* 一个候选自带的 provider，空串算「没有」。
 	*
 	* `typeof provider === "string"` 是不够的判据：`""` 也是字符串。照类型判定会让
@@ -3411,16 +3415,18 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	*/
 	function ComposerUsagePill(props) {
 		const selection = props.useProjection?.("modelSelection");
-		if (selectedProviderOf(selection) !== "modelscope-token-plan") return null;
+		if (!isModelscopeProvider(selectedProviderOf(selection))) return null;
 		return h(ModelscopePill, { tt: props.tt });
 	}
-	var MODELSCOPE_PROVIDER, DEFAULT_CADENCE_MS, STALE_CADENCES, TIER_INK, POPOVER_ID;
+	var MODELSCOPE_PROVIDER, MODELSCOPE_PROVIDER_INTERNATIONAL, MODELSCOPE_PROVIDERS, DEFAULT_CADENCE_MS, STALE_CADENCES, TIER_INK, POPOVER_ID;
 	var init_composer_usage_pill = __esmMin((() => {
 		init_runtime();
 		init_styles();
 		init_format();
 		init_use_snapshot_polling();
 		MODELSCOPE_PROVIDER = "modelscope-token-plan";
+		MODELSCOPE_PROVIDER_INTERNATIONAL = "modelscope-token-plan-international";
+		MODELSCOPE_PROVIDERS = /* @__PURE__ */ new Set([MODELSCOPE_PROVIDER, MODELSCOPE_PROVIDER_INTERNATIONAL]);
 		DEFAULT_CADENCE_MS = 3e4;
 		STALE_CADENCES = 3;
 		TIER_INK = {
@@ -3545,6 +3551,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 					postJson,
 					writeFailure,
 					MODELSCOPE_PROVIDER,
+					MODELSCOPE_PROVIDER_INTERNATIONAL,
+					isModelscopeProvider,
 					selectedProviderOf,
 					availableOf,
 					usedTodayOf,

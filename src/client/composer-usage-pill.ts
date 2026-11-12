@@ -64,6 +64,24 @@ import type { AccountSnapshot, BalanceData, Snapshot } from "../shared/wire.ts";
  */
 export const MODELSCOPE_PROVIDER = "modelscope-token-plan";
 
+/**
+ * 国际版 provider id（拓扑修订：两个 provider，各绑各账户的令牌）。客户端不能
+ * import host 模块，所以这个字面量由测试静态读取 Host 的 `LLM_PROVIDER_ID_INTERNATIONAL`
+ * 核对（与 CN 那条同族）。
+ */
+export const MODELSCOPE_PROVIDER_INTERNATIONAL = "modelscope-token-plan-international";
+
+/** 「本插件家族」= CN + 国际两个 provider id。选中任一站的模型，胶囊都该出现。 */
+const MODELSCOPE_PROVIDERS: ReadonlySet<string> = new Set([
+  MODELSCOPE_PROVIDER,
+  MODELSCOPE_PROVIDER_INTERNATIONAL
+]);
+
+/** 归属判定：两站任一 provider 都算本插件；其它 provider / 判不出 → false。 */
+export function isModelscopeProvider(id: string | undefined): boolean {
+  return id !== undefined && MODELSCOPE_PROVIDERS.has(id);
+}
+
 /** 面板默认轮询周期（Host 未声明 `pollSeconds` 时的回退，与 useSnapshotPolling 同值）。 */
 const DEFAULT_CADENCE_MS = 30_000;
 
@@ -538,6 +556,8 @@ export function ModelscopePill(props: { tt: Tt }): unknown {
  */
 export function ComposerUsagePill(props: ComposerPillProps): unknown {
   const selection = props.useProjection?.("modelSelection");
-  if (selectedProviderOf(selection) !== MODELSCOPE_PROVIDER) return null;
+  // 两个 provider 都算归属：选中 CN 或国际站的模型，胶囊都应出现（拓扑修订后
+  // 家族有两个 provider id，只认 CN 会让国际模型那一半会话整块缺席）。
+  if (!isModelscopeProvider(selectedProviderOf(selection))) return null;
   return h(ModelscopePill, { tt: props.tt });
 }

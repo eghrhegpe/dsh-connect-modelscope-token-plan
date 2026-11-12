@@ -25,9 +25,13 @@
 
 | 字段 | 默认 | 生效前提 | 说明 |
 |---|---|---|---|
-| `apiBase` | `https://api-inference.modelscope.cn/v1` | 合法的 http(s) 绝对地址 | OpenAI 兼容推理源站：模型目录（`/v1/models`）+ 探测/计数 + provider 直连。**不是合法绝对地址会在挂载时抛 `config_error`**（而不是等第一次轮询变成莫名其妙的网络错误）。平台搬端点时才需要动 |
-| `siteBase` | `https://modelscope.cn` | 同上 | 站点源站，**只**用于面板里的外链（访问令牌页 / 文档页）；不参与任何 API 调用 |
+| `apiBase` | `https://api-inference.modelscope.cn/v1` | 合法的 http(s) 绝对地址 | **CN 站** OpenAI 兼容推理源站：模型目录（`/v1/models`）+ 探测/计数 + CN provider 直连。**不是合法绝对地址会在挂载时抛 `config_error`**（而不是等第一次轮询变成莫名其妙的网络错误）。平台搬端点时才需要动 |
+| `siteBase` | `https://modelscope.cn` | 同上 | CN 站点源站，**只**用于面板里的外链 / CN 魔粒余额端点；不参与推理调用 |
+| `apiBaseInternational` | `https://api-inference.modelscope.ai/v1` | 合法的 http(s) 绝对地址 | **国际站**（modelscope.ai）推理源站：国际 provider 的目录 / probe / 直连、以及国际账户余额都走它。与 `apiBase` 是两套独立端点（见 `src/host/account-pool.ts`） |
+| `siteBaseInternational` | `https://modelscope.ai` | 同上 | 国际站点源站，用于国际账户的魔粒余额端点与面板外链。**该余额端点路径尚未经真机核实**，不可用时该账户余额走 n/a 降级、面板照显不崩（软失败） |
 | `allowedHosts` | `[]` | 字符串数组，**只增不替** | 追加可信 `Host` 名。默认已含 `localhost` / `127.0.0.1` / `[::1]` / `::1`；写进来的是**补充**，不能删掉默认那四条 |
+
+两个源站各是一把账户的池子：CN 与国际的**令牌、模型目录、官方魔粒余额互相独立**，共用一个接入开关 / 允许清单 / 窗口覆盖。国际站四键由 `test/config.test.mjs` 与 `CONFIG_DEFAULTS`、`cordis.patch.yml` 双向钉死，改动要三处同步。
 
 ## 2. 面板读数（趋势 / 事件 / 轮询）
 
@@ -47,7 +51,7 @@
 
 | 字段 | 默认 | 面板可覆盖 | 说明 |
 |---|---|---|---|
-| `registerProvider` | `false` | ✓ 立即生效 | 把魔搭注册成 DSH 的 LLM provider（id `modelscope-token-plan`，直连 `apiBase`）。开启后魔搭模型进 DSH 模型选择器。**默认关**：注册模型源是 Host 级变更。任意失败必须降级为「面板照常用、该模块缺席」 |
+| `registerProvider` | `false` | ✓ 立即生效 | 把魔搭注册成 DSH 的 **两个** LLM provider（`modelscope-token-plan` 直连 `apiBase`、`modelscope-token-plan-international` 直连 `apiBaseInternational`），各绑各账户的令牌、各拉各站的目录；**一个开关同时控制两个** provider，允许清单/窗口也是共用一份。开启后两站模型进 DSH 模型选择器。**默认关**：注册模型源是 Host 级变更。任意失败必须降级为「面板照常用、该模块缺席」 |
 | `maxTokensOverrides` | `{}` | ✗ | 逐模型的**单次输出上限**覆盖（精确模型 id → tokens）。优先级 `覆盖 > 目录声明 > 不声明`。键是**精确 id**，不做子串匹配（上限是请求参数，键写 `flash` 会顺手改掉七八条）；值必须是正整数，非法值（非整数 / `0` / 负数 / 字符串数字）**丢弃**而不是夹取。为什么要它：魔搭 `/v1/models` 从不返回输出上限，于是每个模型的 descriptor 都不带 `maxTokens`，harness 用 `defaultMaxTokens ?? 32768` 兜底——32768 既不是魔搭声明的数、也不是实测过的数。空对象 = 完全维持旧行为。例：`maxTokensOverrides: { "deepseek-ai/DeepSeek-V4.1-Flash": 65536 }` |
 | `drawEnabled` | `false` | ✓ **开关值立即生效，工具当场挂/卸** | 给 agent 注册出图工具 `modelscope_draw_image`。**与 `registerProvider` 是两条独立开关**：那个管「魔搭作为 chat provider」，这个管「agent 能不能出图」。peer 的 `tools.register` 返回 disposer（注销句柄），所以关掉开关会当场把工具摘掉，不用重启；只有旧 Host 不返回句柄时才降级为 `not-removable`（能用但摘不掉，面板会说明）。机制见 [`src/host/draw-register.ts`](../src/host/draw-register.ts) 文件头注 |
 | `drawModelId` | `""` | ✓ 面板选择的模型优先于它 | 首选**出图**模型 id；留空 = 自动取目录里第一个出图模型。只有目录内**平台声明**出图能力的模型才进候选（实测目录 35 条里只有 2 条 image-to-image，没有 text-to-image；官方示例里的 `Qwen/Qwen-Image-2.1-Turbo`、`black-forest-labs/FLUX.1-Kontext-dev` 都不在目录内，后者实测 FAILED） |
@@ -62,7 +66,8 @@
 
 ## 5. 令牌不在配置里
 
-魔搭访问令牌（形如 `ms-…`）**不是** `config:` 字段：插件读 DSH 凭据服务里的
-`MODELSCOPE_API_KEY` 引用（面板保存即生效）。环境变量 `MODELSCOPE_API_KEY` 只在**启动时读一次**、
-且优先级高于引用值——设了它就别再用面板存（见 README 与 `src/host/ms-auth.ts` 文件头）。
-令牌永不入日志、永不进插件目录。
+魔搭访问令牌（形如 `ms-…`）**不是** `config:` 字段：插件读 DSH 凭据服务里的**两把**
+引用——CN 站 `MODELSCOPE_API_KEY`、国际站 `MODELSCOPE_INTERNATIONAL_API_KEY`
+（面板「接入」tab 切换账户分别保存，立即生效）。两个环境变量同名者只在**启动时读一次**、
+且优先级高于各自的引用值——设了它就别再用面板存（见 README 与 `src/host/ms-auth.ts`
+文件头）。两站各是一把账户（`src/host/account-pool.ts`），令牌永不入日志、永不进插件目录。

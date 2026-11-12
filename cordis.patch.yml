@@ -5,9 +5,11 @@
 # （或在 profile 的 cordis.patch.yml 里覆盖同 id 字段）后重装/重载生效。
 #
 # 魔搭访问令牌（个人中心「访问令牌」，形如 ms-…）不在这里配置：插件读 DSH
-# 凭据服务里的 MODELSCOPE_API_KEY 引用（面板保存即生效）。环境变量
-# MODELSCOPE_API_KEY 只在启动时读一次、且优先级高于引用值——设了它就别再用面板存
-# （见 README「凭据分层有个坑」与 ms-auth.ts 文件头）。见 docs/SPIKE.md 与 README.md。
+# 凭据服务里的两把引用——CN 站 MODELSCOPE_API_KEY、国际站
+# MODELSCOPE_INTERNATIONAL_API_KEY（面板「接入」tab 分别保存，各存各的账户，
+# 见 account-pool.ts）。环境变量同名者只在启动时读一次、且优先级高于引用值
+# ——设了它就别再用面板存（见 README「凭据分层有个坑」与 ms-auth.ts 文件头）。
+# 见 docs/SPIKE.md 与 README.md。
 - insert:
     - id: dsh-connect-modelscope-token-plan
       name: dsh-connect-modelscope-token-plan
@@ -16,10 +18,11 @@
         apiBase: https://api-inference.modelscope.cn/v1
         # 站点源站，只用于面板里的外链（访问令牌页 / 文档页）。
         siteBase: https://modelscope.cn
-        # 国际版源站（ModelScope International，modelscope.ai）：把国际账户也接入同一
-        # provider 时用的 apiBase / siteBase。令牌是另一个 DSH 凭据引用
-        # MODELSCOPE_INTERNATIONAL_API_KEY（面板「接入」tab 另存一把）。两站的模型
-        # 目录 / 令牌 / 魔粒余额互相独立，各是一把账户的池子（见 account-pool）。
+        # 国际版源站（ModelScope International，modelscope.ai）：第二个 provider
+        # （id modelscope-token-plan-international）用的 apiBase / siteBase。令牌是
+        # 另一把 DSH 凭据引用 MODELSCOPE_INTERNATIONAL_API_KEY（面板「接入」tab
+        # 另存一把）。两个 provider 各绑各账户的令牌、各拉各站的目录/魔粒余额，
+        # 共享同一份 provider 开关/允许清单/窗口（见 account-pool.ts）。
         apiBaseInternational: https://api-inference.modelscope.ai/v1
         siteBaseInternational: https://modelscope.ai
         # ------------------------------------------------------------------
@@ -59,10 +62,11 @@
         # 单次魔搭请求超时（毫秒）。上界 600000（10 分钟）——同样是硬夹。
         inferenceTimeoutMs: 30000
         # ------------------------------------------------------------------
-        # 把魔搭注册成 DSH 的 LLM provider（id `modelscope-token-plan`，直连
-        # apiBase，OpenAI 兼容）。默认关（opt-in，与姊妹插件一致）；面板「模型」
-        # tab 的「接入为 DSH 模型」开关可随时翻转，面板保存值优先于这里的默认。
-        # 注册后魔搭模型进入 DSH 模型选择器。
+        # 把魔搭注册成 DSH 的 LLM provider（两个 id：`modelscope-token-plan` 直连
+        # CN 的 apiBase、OpenAI 兼容；`modelscope-token-plan-international` 直连
+        # 国际的 apiBaseInternational）。默认关（opt-in，与姊妹插件一致）；面板
+        # 「模型」tab 的「接入为 DSH 模型」开关可随时翻转，面板保存值优先于这里的
+        # 默认。**一个开关同时约束两个 provider**，允许清单/窗口也是共用一份。
         #
         # 计数范围：注册开关打开后，本客户端（本 profile）的魔搭对话经本插件的
         # 适配器出去，每一次调用与每一条 429/错误事件都由 src/host/usage-observer.ts
