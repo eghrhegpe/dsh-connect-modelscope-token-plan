@@ -144,7 +144,7 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 | `ms-auth.ts` | 凭据存取（唯一出口，静态令牌） | `createTokenStore()` |
 | `inference-client.ts` | HTTP 出口：模型目录 + 魔粒余额 + 探针 | `createInferenceClient()` |
 | `usage-store.ts` | 本地计数持久化（天桶/单模型/事件流） | `createFileUsageStore()` |
-| `provider-store.ts` | 开关 + 允许清单 + 窗口覆盖的持久化 | `createFileProviderStore()` |
+| `provider-store.ts` | 开关 + 允许清单（按源站分段：CN `enabledIds` / 国际站 `enabledIdsAi`）+ 窗口覆盖的持久化 | `createFileProviderStore()` |
 | `state-store.ts` | 文件状态原语（原子写/版本守卫/读缓存/写队列） | 被上面四个 store 共用 |
 | `usage-prefs-store.ts` | 用量面板显示偏好（趋势显示窗口）的持久化 | `createFileUsagePrefsStore()`, `resolveWindowDays()` |
 | `roster-seen-store.ts` | 模型「本机首次见到」时间戳的持久化（胶囊「· N 新模型」的唯一写入口，写在收敛器里） | `createFileRosterSeenStore()`, `freshIdsOf()` |
@@ -313,6 +313,7 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 - **`usage.json` 版本守卫曾只置位不复位**：旧构建用空载荷把新构建的 usage.json 降级覆写（version 2 → 1，110 次历史归零），而日志还在说 "recording disabled"。写路径必须在 mutate 之前**自己**读盘。
 - **观察层与重分类层顺序不可反**：反了事件流会把纠正后的 RATE_LIMIT 又记成 QUOTA——面板说「额度耗尽」而退避策略按限频处理。
 - **允许清单的空 vs 缺失是两件事**：`[]` = 不过滤（全部提供），`null` = 没保存过。读侧必须能区分两者，否则「保存了空清单」会被读成「从未保存」。
+- **允许清单按源站分段**：`provider.json` 里 `enabledIds` 是 CN、`enabledIdsAi` 是国际站；`enabledIds()` / `saveEnabledIds()` 缺省 CN，只有字面 `region:"ai"` 走国际。任何读清单的路径（收敛器、快照聚合、provider 路由）都必须按 region 取——共用一份会让国际站没有模型选择界面（CN 独有的 `qwen-3.8-flash-next` 勾选会把国际站裁空或无处可选）。
 
 ---
 

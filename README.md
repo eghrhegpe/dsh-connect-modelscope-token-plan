@@ -18,7 +18,7 @@
   <a href="https://dshfind.com/plugins/eghrhegpe/dsh-connect-modelscope-token-plan"><img src="https://dshfind.com/api/badge/eghrhegpe/dsh-connect-modelscope-token-plan" alt="dshfind plugin"></a>
 </p>
 
-把**魔搭社区（modelscope.cn）与国际版 ModelScope International（modelscope.ai）**两个源站的 **API-Inference 免费额度**面板接进 DeepSeek Harness 的 **Plugins 页**（插件卡内联，三个 tab：额度 / 模型 / 接入）。面板把两个账户作为「ModelScope 家族」**并排**展示：各自一把令牌、各自一份官方魔粒余额。并可选把两站模型注册成 **DSH 的两个 LLM provider**（`modelscope-token-plan` / `modelscope-token-plan-international`，OpenAI 兼容，各绑各账户的令牌、各连各站的 apiBase，共享同一个接入开关）——注册后进 DSH 模型选择器，可直接对话调用；还能开**出图工具**做文生图 / 图生图。
+把**魔搭社区（modelscope.cn）与国际版 ModelScope International（modelscope.ai）**两个源站的 **API-Inference 免费额度**面板接进 DeepSeek Harness 的 **Plugins 页**（插件卡内联，三个 tab：额度 / 模型 / 接入）。面板把两个账户作为「ModelScope 家族」**并排**展示：各自一把令牌、各自一份官方魔粒余额。并可选把两站模型注册成 **DSH 的两个 LLM provider**（`modelscope-token-plan` / `modelscope-token-plan-international`，OpenAI 兼容，各绑各账户的令牌、各连各站的 apiBase，共享同一个接入开关，但**两站的模型清单各自独立**）——注册后进 DSH 模型选择器，可直接对话调用；还能开**出图工具**做文生图 / 图生图。
 
 姊妹插件：`dsh-connect-sensenova-token-plan`、`dsh-connect-agnes-token-plan`（同族结构）。
 
@@ -39,12 +39,12 @@
 - 本地计数只回答官方余额答不了的问题——按模型分布、本地趋势、429 事件流；它**只读不到时画「—」**，绝不会把「不知道」画成 0。
 - 本地计数**按 profile 分段**（本客户端口径）：桌面端与 Web 端是两个 profile，各有各的状态目录，互不可见；直连魔搭的其它客户端不计入。
 
-**「模型」tab**——模型按厂商分组、勾选即启用，顶部可搜索；开关「接入为 DSH 模型」即把魔搭注册为 DSH provider，模型进入 DSH 选择器：
+**「模型」tab**——模型按厂商分组、勾选即启用，顶部可搜索；卡内一个 **CN / 国际站切换器**：两站目录不同（例如 `qwen-3.8-flash-next` 只在 CN 上），勾选清单也各存一份，国际站有自己的模型选择界面。开关「接入为 DSH 模型」即把魔搭注册为 DSH provider（一个开关同时控制两站），模型进入 DSH 选择器：
 
 ![「模型」tab：接入为DSH 模型与模型清单](assets/tab-model-list.png)
 
 - 同一 tab 下方有**「出图工具」**卡：开启后支持文生图、图生图与多图编辑。它与「接入为 DSH 模型」是两条独立开关，开关保存后**当场**挂/卸工具（不用重启）。出图是异步的：一次没出好会返回 `status: pending` 与 `jobId`，带上它再调一次即可续查（不必重出）。协议细节见 [docs/SPIKE-image-gen.md](docs/SPIKE-image-gen.md)（2026-10-10 实测，v0.2 起已实现）。
-- 卡片底部有**「上下文窗口覆盖」**选择器（不覆盖 / 128K / 256K / 512K / 1M）：魔搭目录不返回窗口字段，插件按「目录声明 → 你选的档位 → 内置策展表（models.dev 交叉真值）→ 128K 兜底」四级兜底；覆盖压过策展表。档位来源与「为什么不给输出上限内置策展表」见 [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md)。
+- 卡片底部有**「上下文窗口覆盖」**选择器（不覆盖 / 128K / 256K / 512K / 1M）：魔搭目录不返回窗口字段，插件按「目录声明 → 你选的档位 → 内置策展表（models.dev 交叉真值）→ 128K 兜底」四级兜底；覆盖压过策展表。该覆盖是**两站共用的一份**（模型清单才是按站分开的）。档位来源与「为什么不给输出上限内置策展表」见 [docs/PROVIDER-M4.md](docs/PROVIDER-M4.md)。
 
 **「接入」tab**——一个 CN/国际切换器选当前管理哪个账户，粘贴该站的 `ms-…` 访问令牌即完成凭据配置（两把令牌各存各的凭据引用，永不入日志、永不进插件目录）。没有令牌时面板会提示你到这里来填；只接一个账户也能用。国际令牌的生成入口在 [www.modelscope.ai](https://www.modelscope.ai)（面板里外链指到站点根，不猜令牌页深链）。
 

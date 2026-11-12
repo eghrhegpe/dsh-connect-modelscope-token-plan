@@ -45,8 +45,10 @@
    > **两个** provider id（`modelscope-token-plan` / `modelscope-token-plan-international`）。
    > 起因是一条 peer 约束——`llm-adapter-core.ts` 的 `resolveApiKey()` 不传模型 id、
    > 每个 provider 只绑一个令牌解析器，做不到「单 provider 按 region 挑两把令牌」，
-   > 所以改为两个 provider 各绑各账户。两站共用一份 provider 开关 / 允许清单 /
-   > 窗口覆盖；本地计数仍是**一份按 profile 分段的合并账**，不按账户切分。
+   > 所以改为两个 provider 各绑各账户。两站共用一份 provider 开关与窗口覆盖；
+   > **模型允许清单按源站分段**（`enabledIds` = CN、`enabledIdsAi` = 国际站，
+   > 缺席 = 不过滤；面板「模型」tab 有 CN / 国际站切换器）；本地计数仍是
+   > **一份按 profile 分段的合并账**，不按账户切分。
    > 两把钥匙/两套 base 的协调层是 `src/host/account-pool.ts`，双账户快照形状见
    > `src/shared/wire.ts` 的 `AccountSnapshot`，面板双账户渲染见
    > `src/client/panel-page.ts`。本文件其余各节描述的是 M4
@@ -313,7 +315,7 @@ export function summarizeCatalog(entries: unknown): { modelCount: number; vision
   |---|---|---|
   | GET | `PROVIDER_PATH` | 读当前开关 + 目录 + 允许清单 + 注册状态（无副作用） |
   | POST | `PROVIDER_PATH` | body `{enabled?: boolean}` → 保存面板开关并触发重注册 |
-  | POST | `PROVIDER_PATH/roster` | body `{enabledIds?: string[]}` → 保存允许清单并触发重注册 |
+  | POST | `PROVIDER_PATH/roster` | body `{enabledIds?: string[], region?: "ai"}` → 保存**该源站**的允许清单并触发重注册（缺省/其它 region 值一律 CN） |
   | POST | `PROVIDER_PATH/reset` | 忘掉面板开关与允许清单，回到 patch 默认 |
 
   统一把 `HIDE_ALL_MODELS` 当作「什么都不提供」的哨兵（不是 `[]`——空清单的
