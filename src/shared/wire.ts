@@ -270,6 +270,36 @@ export interface BalanceData {
   error: string | null;
 }
 
+/**
+ * 单个源站账户的快照（M3 双账户池）。
+ *
+ * 面板把 CN 与国际作为「ModelScope 家族」并排展示：每个账户各带**自己那把令牌**
+ * 的状态、**自己源站的官方魔粒余额**，以及它对应 provider 的注册态。两个 provider
+ * 各注册各的（plan「拓扑修订」），所以 `registered` / `llmAvailable` 逐账户，不是
+ * 「两站的与」。
+ *
+ * **本地用量不在这里**：`quota` / `events` / `trend` / `daily` 仍是顶层一份、按
+ * profile 分段的聚合账（事实 1：本地计数只统计经本插件的调用、按客户端分段，
+ * 桌面端与 Web 端各记各的；它不是按账户切的官方额度）。面板共享同一个「额度」
+ * tab——两站余额并排、本地计数共用一份，「并排展示」与「共享 tab」不矛盾。
+ *
+ * **可选块**：旧 Host / 过渡期没有账户池时省略整个 `accounts`（与 `provider` /
+ * `draw` 同一条纪律——省略是合法形状，客户端退回单源站视图，不补看起来像答案
+ * 的假块）。故它进 `OPTIONAL_BLOCK_KEYS`、**不进** `SNAPSHOT_REQUIRED_KEYS`。
+ */
+export interface AccountSnapshot {
+  /** 源站：cn = 魔搭社区；ai = ModelScope International。 */
+  region: "cn" | "ai";
+  /** 该账户绑定的 provider id（picker 里区分两站）。 */
+  providerId: string;
+  token: TokenStatus;
+  balance: BalanceData;
+  /** 这个账户对应的 provider 是否已注册且无错。 */
+  registered: boolean;
+  /** Host 上是否存在可应答 registerAdapter 的 llm 服务（两站共用同一服务）。 */
+  llmAvailable: boolean;
+}
+
 /** 成功快照。字段增删必须同步 test/wire.test.mjs 的钉死清单与面板 wire。 */
 export interface Snapshot {
   ok: true;
@@ -338,6 +368,12 @@ export interface Snapshot {
    * `drawOf` 的降级形状（与 `provider` 同一套「resolver-not-snapshot」纪律）。
    */
   draw?: DrawStatus;
+  /**
+   * 双源站账户快照（M3）。**可选**，与 `provider` / `draw` 同一条纪律：旧 Host /
+   * 过渡期没有账户池时省略整块，面板据缺席退回单源站视图（读顶层 `token` /
+   * `balance` / `quota`），不补假块、不挂假的契约漂移警告。
+   */
+  accounts?: AccountSnapshot[];
   shapeWarnings: string[];
   quotaError: { code: string } | null;
 }

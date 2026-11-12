@@ -954,4 +954,81 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   assert.equal(cleared.body.days, defaults.trendDays, "清除后回到配置默认");
 }
 
+// ── M3 双账户快照：accounts 可选块，逐源站 token/balance/注册态 ──
+//
+// 装配有账户池时，聚合器按 REGIONS 逐站取**各自**的令牌状态与官方余额；两站各有
+// 一把令牌、一个 provider（plan「拓扑修订」）。装配缺账户池（旧 Host / 直接驱动的
+// 单测）时整块省略——accounts 是可选块，省略是合法形状，客户端退回单源站视图。
+{
+  const cnBalance = { available: 100, total: 200, frozen: 0, fetchedAt: "2026-11-12T00:00:00.000Z" };
+  const aiBalance = { available: 7, total: 9, frozen: 1, fetchedAt: "2026-11-12T00:00:00.000Z" };
+  const base = {
+    settings: resolveSettings({}).settings,
+    tokenStore: { state: async () => ({ present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false }) },
+    usageStore: {
+      daily: async () => ({ calls: 3 }),
+      perModelToday: async () => [],
+      trend: async () => [],
+      events: async () => [],
+      anomaly: () => null
+    },
+    inference: { fetchModels: async () => ({ ids: [], entries: [] }), fetchBalance: async () => cnBalance },
+    providerStore: { enabled: async () => null, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
+    drawStore: { enabled: async () => null, modelId: async () => null, versionNote: async () => null },
+    usagePrefsStore: { windowDays: async () => null, versionNote: async () => null },
+    rosterSeenStore: { fresh: async () => [], versionNote: async () => null },
+    publisher: { state: { enabledIds: [], llmAvailable: false, registered: false, error: null, unavailableIds: [] } },
+    logger: { warn: () => {} }
+  };
+
+  const accountPool = {
+    REGIONS: ["cn", "ai"],
+    tokenState: async (region) => ({
+      present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false,
+      // 借一个字段把 region 带出来，验证聚合器确实读的是「该 region」的状态而不是同一把。
+      readError: region
+    })
+  };
+  const providers = {
+    cn: {
+      inference: { fetchBalance: async () => cnBalance },
+      publisher: { state: { registered: true, llmAvailable: true } }
+    },
+    ai: {
+      // 国际站余额端点可能不存在/抛错：软失败，balance.error 说明原因，available 为 null（红线 3）。
+      inference: { fetchBalance: async () => aiBalance },
+      publisher: { state: { registered: false, llmAvailable: true } }
+    }
+  };
+
+  const withPool = await buildSnapshotBody({ ...base, accountPool, providers });
+  assert.ok(Array.isArray(withPool.accounts), "有账户池装配时 accounts 必须存在（可选块，但此时该给）");
+  assert.equal(withPool.accounts.length, 2, "CN + 国际两站各一项");
+  assert.deepEqual(withPool.accounts.map((a) => a.region), ["cn", "ai"], "顺序按 REGIONS");
+  assert.equal(withPool.accounts[0].providerId, "modelscope-token-plan", "CN provider id");
+  assert.equal(withPool.accounts[1].providerId, "modelscope-token-plan-international", "国际 provider id");
+  assert.equal(withPool.accounts[0].balance.available, 100, "CN 用自己的余额");
+  assert.equal(withPool.accounts[1].balance.available, 7, "国际用自己的余额（不是把 CN 那份重复一遍）");
+  assert.equal(withPool.accounts[0].registered, true, "CN provider 注册态逐账户");
+  assert.equal(withPool.accounts[1].registered, false, "国际 provider 注册态逐账户");
+  // 兼容：顶层 token/balance 仍是 CN 单源站视图，不被 accounts 顶掉。
+  assert.equal(withPool.balance.available, 100, "顶层 balance 兼容聚合仍是 CN");
+  assert.equal(withPool.token.present, true, "顶层 token 兼容聚合仍在");
+
+  // 没配令牌的国际账户：fetchBalance 抛 AUTH_ERROR 也必须压成「静默缺席」，不报假故障。
+  const noAiToken = await buildSnapshotBody({
+    ...base,
+    accountPool: { ...accountPool, tokenState: async (region) => region === "ai"
+      ? { present: false, source: "none", valid: null, checkedAt: null, ephemeral: true, readError: null }
+      : { present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false, readError: null } },
+    providers: { ...providers, ai: { ...providers.ai, inference: { fetchBalance: async () => { throw new Error("no token"); } } } }
+  });
+  assert.equal(noAiToken.accounts[1].balance.available, null, "没令牌的国际站余额为 null（读不到 ≠ 0）");
+  assert.equal(noAiToken.accounts[1].balance.error, null, "没令牌是「还没接」，不是一条假故障");
+
+  // 装配缺账户池 → 整块省略（旧 Host / 直接驱动聚合器的单测走这条路）。
+  const withoutPool = await buildSnapshotBody({ ...base });
+  assert.equal(withoutPool.accounts, undefined, "无 accountPool/providers 时省略 accounts（可选块，省略是合法形状）");
+}
+
 console.log("routes.test.mjs: all checks passed");

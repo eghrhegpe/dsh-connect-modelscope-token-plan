@@ -15,13 +15,13 @@ import { PLUGIN_VERSION, name } from "./host-config.ts";
 import { CODE } from "./codes.ts";
 import { resolveEnabledIds } from "./provider-store.ts";
 import { resolveWindowDays } from "./usage-prefs-store.ts";
-import { rosterWithAvailability, drawCandidates, resolveDrawModelChoice } from "./llm-models.ts";
+import { rosterWithAvailability, drawCandidates, resolveDrawModelChoice, LLM_PROVIDER_ID, LLM_PROVIDER_ID_INTERNATIONAL } from "./llm-models.ts";
 import { parseAllowedList, enabledCountOf } from "../shared/allow-list.ts";
 import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "./switch-precedence.ts";
 import { drawToolMounted, drawToolNote } from "./draw-tool-state.ts";
 import { CURATED_AS_OF, curatedCatalogAgeDays, curatedCatalogStale } from "./context-catalog.ts";
 import { errMsg, redactSecrets } from "./util.ts";
-import type { Snapshot } from "../shared/wire.ts";
+import type { Snapshot, AccountSnapshot } from "../shared/wire.ts";
 import type { Wiring } from "./types.ts";
 
 /**
@@ -49,9 +49,19 @@ async function soft<T>(promise: Promise<T>): Promise<{ ok: true; value: T } | { 
   }
 }
 
-/** 聚合快照 body。wiring 子集见 routes/snapshot.ts 的 Pick。 */
-export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "tokenStore" | "usageStore" | "inference" | "providerStore" | "drawStore" | "usagePrefsStore" | "rosterSeenStore" | "publisher" | "logger">): Promise<Snapshot> {
-  const { settings, tokenStore, usageStore, inference, providerStore, drawStore, usagePrefsStore, rosterSeenStore, publisher } = wiring;
+/**
+ * 聚合快照 body 的 wiring 子集。
+ *
+ * `accountPool` / `providers` 是**可选**的两项：M3 之前（以及直接驱动本聚合器的
+ * 离线单测）没有账户池装配，此时 `accounts` 整块省略——它是可选块，省略是合法
+ * 形状。生产装配（index.ts / routes/snapshot.ts）两者齐备，才产出两站账户快照。
+ */
+type SnapshotWiring = Pick<Wiring, "settings" | "tokenStore" | "usageStore" | "inference" | "providerStore" | "drawStore" | "usagePrefsStore" | "rosterSeenStore" | "publisher" | "logger"> &
+  Partial<Pick<Wiring, "accountPool" | "providers">>;
+
+/** 聚合快照 body。wiring 子集见 {@link SnapshotWiring}。 */
+export async function buildSnapshotBody(wiring: SnapshotWiring): Promise<Snapshot> {
+  const { settings, tokenStore, usageStore, inference, providerStore, drawStore, usagePrefsStore, rosterSeenStore, publisher, accountPool, providers } = wiring;
 
   // 趋势的显示窗口**先**裁决出来：面板覆盖 > 配置默认，再夹进保留窗口
   // （resolveWindowDays 一处算完）。这一步必须排在拉 `trend` 之前——它是 trend()
@@ -262,6 +272,38 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
   // 今天没调用过，而真相是他不知道。面板对 null 渲染「—」（见 wire.ts DailyUsage）。
   const usedLocal = daily.ok ? daily.value.calls : null;
 
+  // ── 双源站账户块（M3）──
+  // 两个 provider 各带各账户的令牌/余额/注册态。软失败纪律与头条 `balance` 同款：
+  // 确定没配令牌时静默缺席（error:null，面板在「接入」tab 引导，而不是报假故障）；
+  // 读不到 = null 而不是 0（红线 3）。装配缺 accountPool/providers（旧 Host、直接
+  // 驱动本聚合器的单测）时整块省略——`accounts` 是可选块，省略是合法形状。
+  const accounts: AccountSnapshot[] | undefined = accountPool === undefined || providers === undefined
+    ? undefined
+    : await Promise.all(accountPool.REGIONS.map(async (region): Promise<AccountSnapshot> => {
+        const [tState, bState] = await Promise.all([
+          soft(accountPool.tokenState(region)),
+          soft(providers[region].inference.fetchBalance())
+        ]);
+        // `fetchBalance` 在没令牌时先抛 AUTH_ERROR、不发请求；那一声不是「余额读不到」
+        // 而是「账户还没接」，压成静默缺席（与头条 tokenKnownAbsent 同方向）。
+        const tokenKnownAbsent = tState.ok && tState.value.present === false;
+        const state = providers[region].publisher.state;
+        return {
+          region,
+          providerId: region === "ai" ? LLM_PROVIDER_ID_INTERNATIONAL : LLM_PROVIDER_ID,
+          token: tState.ok
+            ? { ...tState.value, readError: null }
+            : { present: false, source: "none", valid: null, checkedAt: null, ephemeral: true, readError: tState.error },
+          balance: tokenKnownAbsent
+            ? { available: null, total: null, frozen: null, fetchedAt: null, error: null }
+            : bState.ok
+              ? { available: bState.value.available, total: bState.value.total, frozen: bState.value.frozen, fetchedAt: bState.value.fetchedAt, error: null }
+              : { available: null, total: null, frozen: null, fetchedAt: null, error: bState.error },
+          registered: state.registered === true,
+          llmAvailable: state.llmAvailable === true
+        };
+      }));
+
   return {
     ok: true,
     name,
@@ -320,6 +362,8 @@ export async function buildSnapshotBody(wiring: Pick<Wiring, "settings" | "token
     // 出图块：同一条纪律。失败时省略，面板走 drawOf 的降级形状——比硬塞一个可能
     // 误导的「未开启」更诚实。
     ...(draw.ok ? { draw: draw.value } : {}),
+    // 双账户块（M3）：同样是可选块——装配缺账户池时省略，客户端退回单源站视图。
+    ...(accounts !== undefined ? { accounts } : {}),
     shapeWarnings,
     // quotaError 为 M4 预留（wire.ts 语义）；v0.1 的失败都走 shapeWarnings /
     // balance.error 呈现，此字段恒 null。
