@@ -38,6 +38,19 @@
  * filter", which is the only safe default for a fresh install. A foreign file
  * reads the same way, which is precisely why `versionNote()` exists.
  *
+ * 清单按源站分段（M6）：`enabledIds` 是 CN（modelscope.cn）的清单，`enabledIdsAi`
+ * 是国际站（modelscope.ai）的清单。两站目录不同（CN 有国际站没有的模型），共用
+ * 一份清单会把另一站的 offer 裁空——这正是国际站「没有选择模型的界面」的来源。
+ * 所以读/写都带 `region`，缺省 CN；缺席 = `null` = 不过滤 = 提供该站目录里的全部
+ * 模型。老文件升级后国际站因此默认放开全部，而**不是**继承 CN 清单：继承会让
+ * 「只勾了 CN 独有模型」的旧清单在国际站变成「一个模型都不提供」。这是与
+ * `contextWindow` 同类的 v1 兼容扩展（新增键、读侧缺省），不升版本号。
+ *
+ * 开关（enabled）与上下文窗口覆盖（contextWindow）仍**两站共用一份**——本次只把
+ * 允许清单分段。共用与分段不是随手选的：开关回答「这个 profile 要不要接魔搭」，
+ * 窗口回答「目录没声明窗口时用多少」，两者与源站无关；清单回答「这一站提供哪些
+ * 模型」，与目录一一对应。
+ *
  * Legacy adoption (ruling 2026-10-18): pre-§23 machines kept this state in
  * the SHARED directory; a profile-scoped store inherits it ONCE, when its own
  * file is missing. The seam lives in the read-through closure below, NOT in a
@@ -53,6 +66,7 @@
 import { obj } from "./util.ts";
 import { join } from "node:path";
 import { name } from "./host-config.ts";
+import type { ProviderRegion } from "../shared/wire.ts";
 import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, createStateReadCache, guardStateWrite, stateVersionNote, createStateWriteQueue, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
 
 /** The store's constructor options (declared here; `types.ts` carries none). */
@@ -72,6 +86,16 @@ interface StoreOptions {
 interface ProviderPayload {
   enabled: boolean | null;
   enabledIds: string[] | null;
+  /**
+   * 国际站的允许清单（M6）。与 {@link enabledIds}（CN）平级、语义相同：
+   * `null` = 面板从没保存过 = 不过滤 = 提供该站目录里的全部模型。
+   *
+   * 缺席的键（老文件）读出 `null`，因此旧构建写的 provider.json 被本构建读到时
+   * 国际站默认放开全部——**不**继承 CN 清单。理由：CN 独有模型的 id 在国际站
+   * 目录里根本不存在，继承会把「只勾了 CN 独有模型」的旧清单变成「国际站一个
+   * 模型都不提供」，而面板上看不出这是迁移造成的。
+   */
+  enabledIdsAi: string[] | null;
   /**
    * Panel-saved context-window override (tokens), or `null` = follow the
    * catalog. A NEW key on the SAME v1 shape: the reader treats an absent key as
@@ -93,7 +117,7 @@ interface ProviderPayload {
  * collapses here, so the three call sites that produce it stay in step instead
  * of each spelling out the same three `null`s.
  */
-const EMPTY_PAYLOAD: ProviderPayload = { enabled: null, enabledIds: null, contextWindow: null, version: null };
+const EMPTY_PAYLOAD: ProviderPayload = { enabled: null, enabledIds: null, enabledIdsAi: null, contextWindow: null, version: null };
 
 /** Shape version, bumped when the persisted form changes incompatibly. */
 export const PROVIDER_VERSION = 1;
@@ -221,6 +245,20 @@ export function resolveEnabledIds(stored: unknown, remembered: unknown): string[
 }
 
 /**
+ * 取载荷里某个源站的清单：`null` = 这一站从没保存过 = 不过滤。
+ *
+ * 单一出口而不是让每个调用点自己拼 `region === "ai" ? … : …`：这条三元链
+ * 若散在多处，加第三个源站（或改键名）时漏掉一处就是「面板按 A 清单画、Host
+ * 按 B 清单注册」——本仓库在 `allowed` 分类上正是这样漂过一次。
+ * @param {ProviderPayload} payload - 解析后的载荷。
+ * @param {ProviderRegion} region - 源站；缺省由调用方给 "cn"。
+ * @returns {string[]|null} 清单，或 `null` = 没保存过。
+ */
+function storedIdsFor(payload: ProviderPayload, region: ProviderRegion): string[] | null {
+  return region === "ai" ? payload.enabledIdsAi : payload.enabledIds;
+}
+
+/**
  * The file-backed provider switch + allow-list.
  * @param {object} [options]
  * @param {string} [options.dir] - override the state directory (tests).
@@ -292,10 +330,13 @@ export function createFileProviderStore(options: StoreOptions = {}) {
   const parseAt = async (file: string): Promise<ProviderPayload> => {
     const source = obj(await readStateJson(file));
     const version = typeof source.version === "number" ? source.version : null;
-    if (!isKnownProviderVersion(version)) return { enabled: null, enabledIds: null, contextWindow: null, version };
+    if (!isKnownProviderVersion(version)) return { enabled: null, enabledIds: null, enabledIdsAi: null, contextWindow: null, version };
     return {
       enabled: normalizeEnabled(source.enabled),
       enabledIds: normalizeEnabledIds(source.enabledIds),
+      // 缺席的 `enabledIdsAi`（老文件）读出 `null` = 不过滤，**不**回退到 CN 清单：
+      // 两站目录不同，继承会把国际站的 offer 裁成「CN 独有 id 的交集」。
+      enabledIdsAi: normalizeEnabledIds(source.enabledIdsAi),
       contextWindow: normalizeContextWindow(source.contextWindow),
       version
     };
@@ -323,7 +364,9 @@ export function createFileProviderStore(options: StoreOptions = {}) {
   // 一次，所以那次覆盖是永久的）。
   const cache = createStateReadCache<ProviderPayload>(async () => {
     const own = await parsePayload();
-    if (own.enabled !== null || own.enabledIds !== null || legacyFile === null) return own;
+    // `enabledIdsAi` 也进这个判据：pre-§23 的共享文件里根本不可能有它，所以它非空
+    // 本身就是「这份文件是本构建写的」的证据——那种情况下继承不该再插一手。
+    if (own.enabled !== null || own.enabledIds !== null || own.enabledIdsAi !== null || legacyFile === null) return own;
     // A file that CARRIES a version reads as EMPTY too, and that case covers
     // TWO different files — neither of which the adoption write would serve:
     //   - a version this build cannot read: the write is certain to be refused
@@ -362,7 +405,8 @@ export function createFileProviderStore(options: StoreOptions = {}) {
    * Read one payload, then hand it to {@link writePayload} — the read-modify-
    * write that keeps the switch and the list from clobbering each other.
    *
-   * Three-state keys, and they are SYMMETRIC between `enabled` and `enabledIds`:
+   * Three-state keys, and they are SYMMETRIC between `enabled`, `enabledIds` and
+   * `enabledIdsAi`:
    * a key the caller omits (`undefined`) keeps whatever is on disk, an explicit
    * `null` clears it back to "not set" (the ABSENCE of the key — that is how
    * {@link forget} expresses "fall back to the config default"), and any other
@@ -388,10 +432,10 @@ export function createFileProviderStore(options: StoreOptions = {}) {
    * 结果不会带进过期值。此前的写法是写完再 `readPayload()` 读回另一半——那条回读
    * 走的是 TTL 缓存，拿到的是**写入前**的值，并发时会把一个较新的缓存项顶成旧值。
    *
-   * @param {object} patch - `{ enabled?, enabledIds?, contextWindow? }` to persist.
+   * @param {object} patch - `{ enabled?, enabledIds?, enabledIdsAi?, contextWindow? }` to persist.
    * @returns {Promise<string|null>} the write refusal reason, or `null`.
    */
-  const patchPayload = (patch: { enabled?: boolean | null; enabledIds?: string[] | null; contextWindow?: number | null }): Promise<string | null> => {
+  const patchPayload = (patch: { enabled?: boolean | null; enabledIds?: string[] | null; enabledIdsAi?: string[] | null; contextWindow?: number | null }): Promise<string | null> => {
     return writeQueue.enqueue(async () => {
       const current = await parsePayload();
       /** `undefined` keeps the stored key; `null` clears it (key absent). */
@@ -400,11 +444,15 @@ export function createFileProviderStore(options: StoreOptions = {}) {
       if (enabled !== null) body.enabled = enabled;
       const enabledIds = patch.enabledIds === undefined ? current.enabledIds : patch.enabledIds;
       if (enabledIds !== null) body.enabledIds = enabledIds;
+      // 国际站清单与 CN 清单**各自独立的三态**：一次排序/保存只动其中一个键，
+      // 另一个键（以及开关、窗口覆盖）原样从磁盘合并进来——这与上面三个键同一纪律。
+      const enabledIdsAi = patch.enabledIdsAi === undefined ? current.enabledIdsAi : patch.enabledIdsAi;
+      if (enabledIdsAi !== null) body.enabledIdsAi = enabledIdsAi;
       const contextWindow = patch.contextWindow === undefined ? current.contextWindow : patch.contextWindow;
       if (contextWindow !== null) body.contextWindow = contextWindow;
       body.updatedAt = new Date().toISOString();
       const refusal = await writePayload(body);
-      if (refusal === null) cache.remember({ enabled, enabledIds, contextWindow, version: PROVIDER_VERSION });
+      if (refusal === null) cache.remember({ enabled, enabledIds, enabledIdsAi, contextWindow, version: PROVIDER_VERSION });
       return refusal;
     });
   };
@@ -418,12 +466,17 @@ export function createFileProviderStore(options: StoreOptions = {}) {
       return (await readPayload()).enabled;
     },
     /**
-     * The saved model allow-list.
+     * The saved model allow-list for ONE source site.
+     *
+     * `region` 缺省 `"cn"`：所有老调用点（收敛器、快照、provider GET 路由）都不
+     * 传它，读到的就是 CN 那份清单，与单源站时代逐字一致。只有字面 `"ai"` 才读
+     * 国际站那份（`enabledIdsAi`）——判据与路由的 `regionOf` 同向：不让脏值选错清单。
+     * @param {ProviderRegion} [region] - 源站；缺省 "cn"。
      * @returns {Promise<string[]>} the saved ids; an EMPTY list means "no
-     *   filter, offer every model" (also the answer for a never-saved list).
+     *   filter, offer every model" (also the answer for a never-saved list)。
      */
-    async enabledIds() {
-      return (await readPayload()).enabledIds ?? [];
+    async enabledIds(region: ProviderRegion = "cn") {
+      return storedIdsFor(await readPayload(), region) ?? [];
     },
     /**
      * The saved context-window override (tokens), or `null` = follow the
@@ -437,11 +490,14 @@ export function createFileProviderStore(options: StoreOptions = {}) {
     },
     /**
      * Whether the panel has ever saved a value here.
+     *
+     * 两份清单都算「保存过」：只给国际站勾了模型的 profile 也是「面板用过」，
+     * 漏掉它会让 doctor / 诊断把一份真实的面板状态读成「从未保存」。
      * @returns {Promise<boolean>}
      */
     async isSet() {
       const payload = await readPayload();
-      return payload.enabled !== null || payload.enabledIds !== null;
+      return payload.enabled !== null || payload.enabledIds !== null || payload.enabledIdsAi !== null;
     },
     /**
      * A human-readable note when the file holds a version this build cannot
@@ -498,14 +554,21 @@ export function createFileProviderStore(options: StoreOptions = {}) {
       if (refusal !== null) throw new Error(refusal);
     },
     /**
-     * Persist the model allow-list, preserving the saved switch.
+     * Persist the model allow-list of ONE source site, preserving the saved
+     * switch, the other site's list and the window override.
+     *
+     * `region` 缺省 `"cn"` —— 老调用点（面板 `{enabledIds}` 的 roster 保存、
+     * reset 的空清单回填）不传它，写的仍是 CN 那份键，磁盘形状与单源站时代一致。
      * @param {string[]} ids - the ids to offer (empty = offer all).
+     * @param {ProviderRegion} [region] - 源站；缺省 "cn"。
      * @returns {Promise<void>}
      */
-    async saveEnabledIds(ids: string[]) {
+    async saveEnabledIds(ids: string[], region: ProviderRegion = "cn") {
       const list = normalizeEnabledIds(ids);
       if (list === null) throw new TypeError("provider allow-list expects an array of strings");
-      const refusal = await patchPayload({ enabledIds: list });
+      // 只有国际站那一支换键；CN 走 `enabledIds`，所以 `enabledIdsAi` 传 undefined
+      // = 「保留磁盘上的国际站清单」，反之亦然（patchPayload 的三态语义）。
+      const refusal = await patchPayload(region === "ai" ? { enabledIdsAi: list } : { enabledIds: list });
       if (refusal !== null) throw new Error(refusal);
     },
     /**
@@ -528,11 +591,15 @@ export function createFileProviderStore(options: StoreOptions = {}) {
      * @returns {Promise<void>}
      */
     async forget() {
-      // No `enabled`/`enabledIds`/`contextWindow` keys: "not set" is the
-      // absence of an answer, not `false`/an empty list/`null`. A refused write
-      // (ADR-006) leaves the file exactly as it was, so the throw below is the
-      // only signal.
-      const refusal = await patchPayload({ enabled: null, enabledIds: null, contextWindow: null });
+      // No `enabled`/`enabledIds`/`enabledIdsAi`/`contextWindow` keys: "not set"
+      // is the absence of an answer, not `false`/an empty list/`null`. A refused
+      // write (ADR-006) leaves the file exactly as it was, so the throw below is
+      // the only signal.
+      //
+      // 两份清单一起清（M6）：「恢复默认」对用户是**一个**按钮，只清 CN 会把
+      // 国际站那份看不见的勾选留成幽灵状态——面板说「全部提供」、Host 仍按旧
+      // 清单裁剪国际站的 offer。
+      const refusal = await patchPayload({ enabled: null, enabledIds: null, enabledIdsAi: null, contextWindow: null });
       if (refusal !== null) throw new Error(refusal);
     }
   };
@@ -547,6 +614,8 @@ export function createFileProviderStore(options: StoreOptions = {}) {
  * 与 usage-store 的 {@link describeUsagePayload} 同形：清单只报条数，不把模型 id
  * 列表带进报告（它们已在目录里，报告里重复一遍只是噪声）。`enabledIds: null` 与
  * `0` 分开 —— 前者是「面板从没保存过」，后者是「保存了空清单 = 不过滤」。
+ * `enabledIdsAi` 同理**单独**报（M6）：它是国际站那份，与 CN 那份的条数无关，
+ * 合并成一个数就答不了「国际站到底勾了几个」。`null` = 老文件没有这个键。
  *
  * 版本判据与本 store 的 `parseAt` 是**同一套**（都问
  * `KNOWN_PROVIDER_VERSIONS`，都不问 `PROVIDER_VERSION`）。这条同源性是承重的：
@@ -556,15 +625,17 @@ export function createFileProviderStore(options: StoreOptions = {}) {
  */
 export function describeProviderPayload(
   raw: unknown
-): { versionKnown: boolean; enabled: boolean | null; enabledIds: number | null } | null {
+): { versionKnown: boolean; enabled: boolean | null; enabledIds: number | null; enabledIdsAi: number | null } | null {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
   const source = raw as Record<string, unknown>;
   const version = source.version;
   if (typeof version !== "number") return null;
   const ids = normalizeEnabledIds(source.enabledIds);
+  const idsAi = normalizeEnabledIds(source.enabledIdsAi);
   return {
     versionKnown: isKnownProviderVersion(version),
     enabled: normalizeEnabled(source.enabled),
-    enabledIds: ids === null ? null : ids.length
+    enabledIds: ids === null ? null : ids.length,
+    enabledIdsAi: idsAi === null ? null : idsAi.length
   };
 }

@@ -173,8 +173,13 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   const rosterSeenStore = createFileRosterSeenStore({ profile, logger: ctx.logger });
   // ── 两个 provider，共享一份 provider-store（拓扑修订）──
   // CN = `modelscope-token-plan`、国际 = `modelscope-token-plan-international`。
-  // 各自的目录 / 令牌 / baseUrl / displayName，但开关、允许清单、窗口覆盖只有一份
-  // （providerStore），所以面板一次开关 / 一次清单保存同时约束两个 provider 的注册。
+  // 各自的目录 / 令牌 / baseUrl / displayName；开关与窗口覆盖只有一份（providerStore），
+  // 所以面板一次开关 / 一次窗口保存同时约束两个 provider 的注册。
+  //
+  // **允许清单是唯一按源站分段的字段**（M6）：CN 读 `enabledIds`、国际站读
+  // `enabledIdsAi`。共用一个文件是为了「开关与清单作为一个载荷读写，不会互相
+  // 覆盖」（见 provider-store.ts 头注），但清单的内容必须各站各一份——两站目录
+  // 不同，共用一份会让另一站的 offer 被裁空，也就是国际站没有模型选择界面的由来。
   //
   // usage / rosterSeenStore 两个共享依赖：
   //  · usage 写进同一个 usage-store（按 profile 分段那份），两个 provider 的调用
@@ -222,7 +227,16 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     // 保存路由 await 返回时新值一定已落地，不再有丢一次更新等一轮的窗口。
     const { reconcile } = createProviderReconciler({
       settings: regionSettings,
-      providerStore,
+      // store 适配器按 region 读清单（M6）：不能直接把 store 传进去——那样两个
+      // 收敛器都念 CN 的 `enabledIds`，国际站会永远按 CN 清单裁剪（要么裁空、要么
+      // 用户在国际站勾的选择被 CN 那份覆盖）。reconciler 的形状不变：它本来只问
+      // `enabledIds()`，把 region 绑在这一侧是最小改动，也让「收敛链一个 region
+      // 一条」这个既有事实继续成立。开关与窗口覆盖两站共用一份，照旧直读。
+      providerStore: {
+        enabled: () => providerStore.enabled(),
+        enabledIds: () => providerStore.enabledIds(region),
+        contextWindow: () => providerStore.contextWindow()
+      },
       inference,
       publisher,
       // 额度耗尽集合的生产入口：每轮收敛从**同一个** usage-store 读事件流（按

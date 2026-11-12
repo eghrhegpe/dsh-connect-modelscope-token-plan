@@ -199,6 +199,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.llmMissing": "本机 Host 未提供 LLM 注册服务",
 			"provider.error": "接入失败：{error}",
 			"provider.models": "启用哪些模型",
+			"provider.regionModels": "按源站选择模型",
+			"provider.regionHint": "两个源站的允许清单各自保存；DSH 模型选择器里只会出现该源站目录里的模型。",
 			"provider.allowAll": "全部",
 			"provider.hideAll": "全部隐藏",
 			"provider.saveList": "保存清单",
@@ -373,6 +375,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.llmMissing": "This Host exposes no LLM service",
 			"provider.error": "Provider error: {error}",
 			"provider.models": "Which models to enable",
+			"provider.regionModels": "Model list by source site",
+			"provider.regionHint": "Each source site keeps its own allow-list; the DSH model picker only offers models from that site's catalogue.",
 			"provider.allowAll": "All",
 			"provider.hideAll": "Hide all",
 			"provider.saveList": "Save list",
@@ -1288,6 +1292,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		return {
 			enabled: p.enabled === true,
 			source: p.source === "panel" ? "panel" : "config",
+			region: p.region === "ai" ? "ai" : "cn",
 			llmAvailable: p.llmAvailable === true,
 			registered: p.registered === true,
 			error: typeof p.error === "string" ? p.error : null,
@@ -1299,6 +1304,35 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			newModelIds: Array.isArray(p.newModelIds) ? p.newModelIds.map((id) => String(id ?? "")).filter((id) => id !== "") : [],
 			roster
 		};
+	}
+	/**
+	* 把快照里**按源站分段**的 `providers` 块归一成 `ProviderStatus` 映射（M6）。
+	*
+	* 逐键走 `providerOf`（与单块 `provider` 同一条防御线：旧 Host 缺字段、脏值一律
+	* 归成可渲染的形状），只认 `cn` / `ai` 两个键——别的键没有渲染方，带进来只会
+	* 在面板上伪造一个不存在的源站。
+	*
+	* 返回 `null` 的两种情形是同一件事的两面：**没有可用的分段状态**。
+	*   - 整块不是对象（旧 Host 不给 / 形状漂移）：面板退回单 `provider` 路径；
+	*   - 没有任何有效键（`{}`、或 `{cn: null}` 这类值不是对象的形状）：同样退回。
+	* 第二种刻意不把 `null` 归一成 DEGRADED_PROVIDER：wire.ts 的语义是「缺这个键 =
+	* 那个源站这块读不到」，把「读不到」编成一份降级块会让面板显示一个其实不存在的
+	* 第二源站，切换器也就会对着两份编出来的状态说话。
+	* @param {unknown} raw - 快照的 `providers` 块。
+	* @returns {Partial<Record<ProviderRegion, ProviderStatus>> | null} 归一后的映射；无有效键为 null。
+	*/
+	function providersOf(raw) {
+		if (raw === null || typeof raw !== "object") return null;
+		const block = raw;
+		const out = {};
+		let valid = 0;
+		for (const region of ["cn", "ai"]) {
+			const value = block[region];
+			if (value === null || typeof value !== "object") continue;
+			out[region] = providerOf$1(value);
+			valid += 1;
+		}
+		return valid === 0 ? null : out;
 	}
 	/** 非 2xx 响应的降级读法（无 body，状态码是唯一线索）。 */
 	function errorOfStatus(status) {
@@ -2007,9 +2041,20 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	*
 	* 额度耗尽的模型保留在清单里（灰显、勾选框禁用），这是故意的：roster 是目录
 	* 事实，picker 那边由 Host 自己丢掉它们，面板不替它删。
+	*
+	* M6 按源站分段（`providers` prop，见 `shared/wire.ts`）：CN 与国际站（modelscope.ai）
+	* 的目录不同，**允许清单也各自落盘**（`enabledIds` / `enabledIdsAi`）。所以状态行、
+	* roster、勾选计数与三个清单按钮都作用于**当前选中的源站**；切换器只在两站的状态
+	* 都在场时渲染。开关、上下文窗口覆盖与 reset 仍是两站共用的一份 store 字段，因此
+	* 在卡片里**只渲染一次**，不跟着源站切换。`providers` 缺席（旧 Host / 单账户装配）
+	* 时整张卡退回单块 `provider` 的老路径，DOM 与从前逐字一致。
 	*/
-	function ProviderCard({ provider, busy, error, onToggle, onSaveList, onSaveContextWindow, onReset, tokenPresent, tt }) {
-		const status = providerOf$1(provider);
+	function ProviderCard({ provider, providers, busy, error, onToggle, onSaveList, onSaveContextWindow, onReset, tokenPresent, tt }) {
+		const regionKeys = providers === void 0 ? [] : ["cn", "ai"].filter((key) => providers[key] !== void 0);
+		const dualRegions = regionKeys.length === 2;
+		const [pickedRegion, setPickedRegion] = useState("cn");
+		const region = providers === void 0 ? "cn" : providers[pickedRegion] !== void 0 ? pickedRegion : regionKeys[0] ?? "cn";
+		const status = providerOf$1(providers?.[region] ?? provider);
 		const enabled = status.enabled === true;
 		const hostIds = status.enabledIds;
 		const hostKey = useMemo(() => JSON.stringify(hostIds), [hostIds]);
@@ -2019,7 +2064,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const hideAllMode = parseAllowedList(draft).mode === "none";
 		useEffect(() => {
 			setDraft(normalizeRosterSave(hostIds));
-		}, [hostKey]);
+		}, [hostKey, region]);
 		const roster = status.roster;
 		const rosterIds = roster.map((row) => row.id);
 		const toggleOne = (id) => setDraft((current) => {
@@ -2182,6 +2227,24 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const query = search.trim().toLowerCase();
 		const visibleRows = query === "" ? roster : roster.filter((row) => `${row.id} ${String(row.name ?? "")}`.toLowerCase().includes(query));
 		const ownerGroups = groupByOwner(visibleRows);
+		const regionSwitcher = dualRegions ? h("div", { style: { marginBottom: 10 } }, h("div", {
+			style: S.trendMetricBar,
+			role: "group",
+			"aria-label": tt("provider.regionModels")
+		}, ...regionKeys.map((key) => h("button", {
+			key,
+			type: "button",
+			"aria-pressed": region === key,
+			style: region === key ? {
+				...S.trendMetricBtn,
+				...S.trendMetricBtnActive
+			} : S.trendMetricBtn,
+			onClick: () => {
+				setPickedRegion(key);
+				const nextStatus = providerOf$1(providers?.[key] ?? provider);
+				setDraft(normalizeRosterSave(nextStatus.enabledIds));
+			}
+		}, tt(key === "ai" ? "account.international" : "account.cn")))), h("div", { style: S.advancedHint }, tt("provider.regionHint"))) : null;
 		const rosterBlock = roster.length === 0 ? h("div", { style: {
 			...S.muted,
 			fontSize: 12,
@@ -2215,7 +2278,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			disabled: busy,
 			onClick: () => {
 				setDraft(rosterIds.slice());
-				onSaveList(rosterIds.slice());
+				onSaveList(rosterIds.slice(), region);
 			}
 		}, tt("provider.allowAll")), h("button", {
 			type: "button",
@@ -2224,13 +2287,13 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			onClick: () => {
 				const none = hideAllRoster();
 				setDraft(none);
-				onSaveList(none);
+				onSaveList(none, region);
 			}
 		}, tt("provider.hideAll")), h("button", {
 			type: "button",
 			style: S.primary,
 			disabled: busy,
-			onClick: () => onSaveList(draft.slice())
+			onClick: () => onSaveList(draft.slice(), region)
 		}, tt("provider.saveList"))), h("div", { style: S.advancedHint }, tt("provider.maxOutputHint")), visibleRows.length === 0 ? h("div", { style: {
 			...S.muted,
 			fontSize: 12,
@@ -2278,7 +2341,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		return h("div", null, switchRow, alertNode, tokenHint, h("div", { style: {
 			...S.sectionTitle,
 			margin: "18px 0 8px"
-		} }, tt("provider.models")), rosterBlock, contextNode, resetRow, error !== null ? h("div", {
+		} }, tt("provider.models")), regionSwitcher, rosterBlock, contextNode, resetRow, error !== null ? h("div", {
 			style: S.formError,
 			role: "alert"
 		}, error) : null);
@@ -2761,6 +2824,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const hasProviderBlock = rawProvider !== void 0 && rawProvider !== null;
 		const [fetchedProvider, setFetchedProvider] = useState(null);
 		const provider = hasProviderBlock ? providerOf$1(rawProvider) : fetchedProvider ?? DEGRADED_PROVIDER;
+		const providers = providersOf(data?.providers);
 		useEffect(() => {
 			if (hasProviderBlock) return void 0;
 			let cancelled = false;
@@ -2815,8 +2879,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			tt
 		]);
 		const toggleProvider = useCallback((enabled) => void runProviderWrite(PROVIDER_PATH, { enabled }), [runProviderWrite]);
-		const saveRoster = useCallback((enabledIds) => {
-			runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds: normalizeRosterSave(enabledIds) });
+		const saveRoster = useCallback((enabledIds, region) => {
+			runProviderWrite(PROVIDER_ROSTER_PATH, {
+				enabledIds: normalizeRosterSave(enabledIds),
+				...regionField(region)
+			});
 		}, [runProviderWrite]);
 		const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
 		const saveContextWindow = useCallback((contextWindow) => {
@@ -2978,6 +3045,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			tt
 		}, h(ProviderCard, {
 			provider,
+			providers: providers ?? void 0,
 			busy: providerBusy,
 			error: providerError,
 			onToggle: toggleProvider,

@@ -10,7 +10,7 @@
 import { format } from "./format.ts";
 import type { zh } from "./i18n.ts";
 import type { Tt } from "./runtime.ts";
-import type { Snapshot, SnapshotResponse, ProviderStatus, DrawStatus } from "../shared/wire.ts";
+import type { Snapshot, SnapshotResponse, ProviderStatus, ProviderRegion, DrawStatus } from "../shared/wire.ts";
 import { SNAPSHOT_REQUIRED_KEYS } from "../shared/wire.ts";
 import { CODE } from "../shared/codes.ts";
 import type { CodeValue } from "../shared/codes.ts";
@@ -225,6 +225,9 @@ export function providerOf(raw: unknown): ProviderStatus {
   return {
     enabled: p.enabled === true,
     source: p.source === "panel" ? "panel" : "config",
+    // 源站维度（M6）：块来自哪个源站；缺省按 cn（单账户时代只有 CN）。只认
+    // 已知两值，其余（脏值）当 cn——不让脏值伪造一个不存在的源站。
+    region: p.region === "ai" ? "ai" : "cn",
     llmAvailable: p.llmAvailable === true,
     registered: p.registered === true,
     error: typeof p.error === "string" ? p.error : null,
@@ -246,6 +249,36 @@ export function providerOf(raw: unknown): ProviderStatus {
       : [],
     roster
   };
+}
+
+/**
+ * 把快照里**按源站分段**的 `providers` 块归一成 `ProviderStatus` 映射（M6）。
+ *
+ * 逐键走 `providerOf`（与单块 `provider` 同一条防御线：旧 Host 缺字段、脏值一律
+ * 归成可渲染的形状），只认 `cn` / `ai` 两个键——别的键没有渲染方，带进来只会
+ * 在面板上伪造一个不存在的源站。
+ *
+ * 返回 `null` 的两种情形是同一件事的两面：**没有可用的分段状态**。
+ *   - 整块不是对象（旧 Host 不给 / 形状漂移）：面板退回单 `provider` 路径；
+ *   - 没有任何有效键（`{}`、或 `{cn: null}` 这类值不是对象的形状）：同样退回。
+ * 第二种刻意不把 `null` 归一成 DEGRADED_PROVIDER：wire.ts 的语义是「缺这个键 =
+ * 那个源站这块读不到」，把「读不到」编成一份降级块会让面板显示一个其实不存在的
+ * 第二源站，切换器也就会对着两份编出来的状态说话。
+ * @param {unknown} raw - 快照的 `providers` 块。
+ * @returns {Partial<Record<ProviderRegion, ProviderStatus>> | null} 归一后的映射；无有效键为 null。
+ */
+export function providersOf(raw: unknown): Partial<Record<ProviderRegion, ProviderStatus>> | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const block = raw as Record<string, unknown>;
+  const out: Partial<Record<ProviderRegion, ProviderStatus>> = {};
+  let valid = 0;
+  for (const region of ["cn", "ai"] as const) {
+    const value = block[region];
+    if (value === null || typeof value !== "object") continue;
+    out[region] = providerOf(value);
+    valid += 1;
+  }
+  return valid === 0 ? null : out;
 }
 
 /** 非 2xx 响应的降级读法（无 body，状态码是唯一线索）。 */

@@ -21,7 +21,7 @@ import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "./switch
 import { drawToolMounted, drawToolNote } from "./draw-tool-state.ts";
 import { CURATED_AS_OF, curatedCatalogAgeDays, curatedCatalogStale } from "./context-catalog.ts";
 import { errMsg, redactSecrets } from "./util.ts";
-import type { Snapshot, AccountSnapshot } from "../shared/wire.ts";
+import type { Snapshot, AccountSnapshot, ProviderStatus, ProviderRegion } from "../shared/wire.ts";
 import type { Wiring } from "./types.ts";
 
 /**
@@ -161,59 +161,67 @@ export async function buildSnapshotBody(wiring: SnapshotWiring): Promise<Snapsho
     );
   }
 
-  // ── provider 块（M4 §11）──  // 开关（面板值优先，patch 默认兜底）+ 注册状态 + 目录 roster，整块软失败：
-  // 任何一路读不到都走降级形状，绝不 ok:false。roster 用 llm-models 的
-  // rosterWithAvailability——面板保留额度耗尽的模型（灰显），picker 才丢弃它们，
-  // 两处口径不同是故意的。**耗尽集合的唯一生产者是 provider-reconciler**
-  // （每轮从 429 事件流按纯函数 exhaustedModelIds 推断），这里读的是
-  // publisher 最近一次发布的那份（state.unavailableIds）——面板灰显的与
-  // picker 实际丢掉的因此永远同一批；没有 reconcile 跑过时它是 []（尚无证据）。
-  const provider = await soft((async () => {
+  // ── provider 块（M4 §11）→ providers.cn 的别名 ──
+  // 抽成按源站的函数：国际站（providers.ai）要各算一份——两个源站目录不同、允许
+  // 清单各自落盘（CN=`enabledIds`、国际=`enabledIdsAi`），共用一份会把国际站的
+  // offer 裁空，正是「国际站没有选择模型的界面」这个历史坑的由来。两站的开关与
+  // 上下文窗口覆盖是共用的一份 store 字段，照旧直读，不在本函数里分段。
+  //
+  // 三处都软失败：目录拉不到 → roster 空 + 说原因（红线 3：读不到 ≠ 0）；publisher
+  // 状态读不到 → 用空默认（不影响其它源站）；清单/开关读不到 → 回退默认值。整块
+  // 永不 ok:false。
+  //
+  // `pubState` 显式传入（CN 走顶层 `publisher` 别名、国际走 `providers.ai.publisher`
+  // 的那份），不在这里从 `providers?.[region]` 反查——CN 在旧 Host / 单账户装配下
+  // 没有 providers 接线，却仍要读得到自己那份注册态。
+  //
+  // `pre` 让 CN 块复用顶层已经拉过的目录（避免再走一次 coalesced 缓存、也保证
+  // providers.cn 与顶层 provider 块逐字节一致）；国际站没有 pre，函数现拉它自己的目录。
+  const buildRegionProviderStatus = async (
+    region: ProviderRegion,
+    pubState: { enabledIds: string[]; llmAvailable: boolean; registered: boolean; error: string | null; unavailableIds: string[] } | undefined,
+    pre?: { entries?: unknown[]; catalogError?: string | null }
+  ): Promise<ProviderStatus> => {
     const panel = await providerStore.enabled().catch(() => null);
     const enabled = resolveSwitchEnabled(panel, settings.registerProvider);
     const source = switchSource(panel);
-    // 第三个参数是输出上限覆盖：面板 roster 与 picker 必须用**同一个**解析器
-    // （llm-models.maxTokensFor），否则面板显示的 `maxOutputLength` 与线上真正发
-    // 的 `max_tokens` 会各说一套——那正是这次要修的毛病（面板此前连这个字段都
-    // 没投影给客户端）。
-    const roster = rosterWithAvailability(modelEntries, publisher.state.unavailableIds ?? [], settings.maxTokensOverrides);
-    // 允许清单是落盘的（provider-store，按 profile 分段）；判据走**共用**的
+    let entries: unknown[];
+    let catalogError: string | null;
+    if (pre?.entries !== undefined) {
+      entries = pre.entries;
+      catalogError = pre.catalogError ?? null;
+    } else {
+      // 这一站目录读不到 → roster 空 + 说原因（红线 3：读不到 ≠ 0），不让
+      // 「目录宕机」与「这个源站真的没有模型」长得一样。soft() 已把抛错转成失败分支。
+      const regionWiring = providers?.[region];
+      const regionFetch = regionWiring === undefined
+        ? null
+        : await soft(regionWiring.inference.fetchModels(contextOverride));
+      entries = regionFetch !== null && regionFetch.ok ? regionFetch.value.entries : [];
+      catalogError = regionFetch !== null && !regionFetch.ok ? `模型目录读不到：${regionFetch.error}` : null;
+    }
+    const roster = rosterWithAvailability(entries, pubState?.unavailableIds ?? [], settings.maxTokensOverrides);
+    // 允许清单是落盘的（provider-store，按 profile 分段、按源站取键）；判据走**共用**的
     // resolveEnabledIds：可读的清单（含空清单 = 不过滤）优先，只有读抛错才回退到
-    // 内存里 publisher.state 最近一次 publish 的那份。三处消费者曾各写一套，其中
-    // 轮询侧那套把「空清单」读成「没有答案」，于是面板与 Host 会各说一套。
-    const stored = await providerStore.enabledIds().catch(() => null);
-    const enabledIds = resolveEnabledIds(stored, publisher.state.enabledIds);
-    // 允许清单的三态与启用数都从 shared/allow-list.ts 的联合上取——快照与
-    // provider 路由共用同一份解释（各自写一套三元链的时代结束了）。
+    // 内存里 publisher.state 最近一次 publish 的那份。
+    const stored = await providerStore.enabledIds(region).catch(() => null);
+    const enabledIds = resolveEnabledIds(stored, pubState?.enabledIds ?? []);
     const allowedList = parseAllowedList(enabledIds);
     const enabledCount = enabledCountOf(allowedList, roster.map((row) => row.id));
-    // 窗口覆盖同样落盘（同一份 provider.json）；读抛错按「未设置」降级，与开关
-    // 同一纪律——读不到不能把整块 provider 状态打掉。roster 行的 contextWindow
-    // 已由 fetchModels 在归一前打上覆盖/策展标记（contextSource 随行透传），
-    // 这里不再二次加工。
     const contextWindow = await providerStore.contextWindow().catch(() => null);
-    // 目录读不到时**必须替操作者说出原因**：wire.ts 的 ProviderStatus 承诺「目录
-    // 读不到时 modelCount 为 0、roster 为空、error 说明原因」，而 provider-reconcile
-    // 在目录 fetch 失败时只 `logger.warn`、不写 `publisher.state.error`（那份 error
-    // 只记 publish 失败）。2026-10-19 锐评实测：目录宕机那一刻面板呈现「已注册 +
-    // 0 个模型 + 没有任何原因」，而旧 roster 其实还在服务——这正是红线 3
-    // （读不到 ≠ 0）在 provider 块上的漏点。publish 自己的 error 优先（它更具体），
-    // 没有再退回目录原因。**不复用 models 的 shapeWarnings 抑制规则**：那条抑制是
-    // 为了不往形状漂移横幅里塞网络抖动，而这里正是用户在看的那个块。
-    const catalogNote = models.ok ? null : `模型目录读不到：${models.error}`;
-    // 「本机第一次见到」还算新的模型。**只读**：写发生在收敛器（provider-reconcile）
-    // 拿到目录那一刻——这条读路径每个面板轮询都会跑，顺手写会把「谁是新模型」
-    // 变成「谁最近一次被轮询到」。
-    //
-    // 读失败降级为空数组：胶囊少画一段，比整块 provider 状态消失轻得多；原因
-    // 已由上面的 rosterNote 与收敛器的 warn 各自记档。
+    // publish 自己的 error（更具体）优先；没有再退回目录原因。**不复用 models 的
+    // shapeWarnings 抑制规则**：那条抑制是为了不往形状漂移横幅里塞网络抖动，而这里
+    // 正是用户在看的那个块。
+    const error = typeof pubState?.error === "string" && pubState.error !== ""
+      ? pubState.error
+      : catalogError;
     const newModelIds = await rosterSeenStore.fresh().catch(() => [] as string[]);
     return {
       enabled,
       source,
-      llmAvailable: publisher.state.llmAvailable === true,
-      registered: publisher.state.registered === true,
-      error: typeof publisher.state.error === "string" ? publisher.state.error : catalogNote,
+      llmAvailable: pubState?.llmAvailable === true,
+      registered: pubState?.registered === true,
+      error,
       modelCount: roster.length,
       enabledCount,
       allowed: allowedList.mode,
@@ -222,7 +230,16 @@ export async function buildSnapshotBody(wiring: SnapshotWiring): Promise<Snapsho
       newModelIds,
       roster
     } satisfies Snapshot["provider"];
-  })());
+  };
+
+  // CN 块是顶层 `provider` 别名，也等于 providers.cn：复用顶层已拉过的 CN 目录
+  // （modelEntries 来自上面的 `inference.fetchModels`），保证两份逐字节一致。
+  const provider = await soft((async () =>
+    buildRegionProviderStatus("cn", publisher.state, {
+      entries: modelEntries,
+      catalogError: models.ok ? null : `模型目录读不到：${models.error}`
+    })
+  )());
 
   // ── 出图块 ──
   // 与 provider 块同一套纪律：整块软失败，任何一路读不到都走降级形状，绝不 ok:false。
@@ -304,6 +321,32 @@ export async function buildSnapshotBody(wiring: SnapshotWiring): Promise<Snapsho
         };
       }));
 
+  // ── 按源站分段的 provider 状态块（M6）──
+  // 两个源站目录不同、允许清单各自独立（`provider.json` 里 CN=`enabledIds` /
+  // 国际=`enabledIdsAi`）。面板必须有「国际站自己那份 roster 与勾选」才能为 AI
+  // 站点账号提供模型选择界面——否则国际站根本没有选择模型的入口（wire.ts
+  // Snapshot.providers 的语义）。`provider` 块是 CN 别名（== providers.cn），直接
+  // 复用，避免两份不一致的 CN 状态。
+  //
+  // 与 accounts 同一条纪律：装配缺 providers（旧 Host / 单账户）时整块省略，面板
+  // 退回单 provider 路径（ProviderCard 据 providers 缺席不渲染源站切换器）。
+  const segmentedProviders: Partial<Record<ProviderRegion, ProviderStatus>> | undefined =
+    providers === undefined
+      ? undefined
+      : await (async () => {
+          const out: Partial<Record<ProviderRegion, ProviderStatus>> = {};
+          // CN 别名 = 上面的 provider 块（已软失败保护；ok 时才进）。
+          if (provider.ok) out.cn = provider.value;
+          // 国际站：独立的目录（providers.ai.inference）与独立的注册态
+          // （providers.ai.publisher.state），清单走 enabledIds("ai")——三处
+          // 都已按源站分段，互不裁掉对方的模型。
+          if (providers.ai !== undefined) {
+            const ai = await soft(buildRegionProviderStatus("ai", providers.ai.publisher.state));
+            if (ai.ok) out.ai = ai.value;
+          }
+          return out;
+        })();
+
   return {
     ok: true,
     name,
@@ -364,6 +407,10 @@ export async function buildSnapshotBody(wiring: SnapshotWiring): Promise<Snapsho
     ...(draw.ok ? { draw: draw.value } : {}),
     // 双账户块（M3）：同样是可选块——装配缺账户池时省略，客户端退回单源站视图。
     ...(accounts !== undefined ? { accounts } : {}),
+    // 按源站分段的 provider 状态（M6）：可选块——缺 providers 接线时省略，面板
+    // 据 providers 缺席退回单 provider 路径。在场时带 cn/ai 两份各自的 roster 与
+    // 勾选，ProviderCard 据此渲染源站切换器（否则国际站没有选择模型的界面）。
+    ...(segmentedProviders !== undefined ? { providers: segmentedProviders } : {}),
     shapeWarnings,
     // quotaError 为 M4 预留（wire.ts 语义）；v0.1 的失败都走 shapeWarnings /
     // balance.error 呈现，此字段恒 null。

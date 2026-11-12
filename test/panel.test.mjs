@@ -172,6 +172,35 @@ assert.match(cfgView.guidance ?? "", /插件配置有误/);
   assert.equal(panel.providerOf(infProvider).enabledCount, 0, "-Infinity enabledCount 回退");
 }
 
+// §3d 按源站分段的 provider 状态（M6）：`providersOf` 是 `providers` 块的唯一读法。
+//
+// 它决定面板会不会出现「CN / 国际站」切换器：只有真的读到两站状态才出现，所以
+// 「无有效键 → null」是承重的兼容承诺——providers 缺席或形状不对时，DOM 必须与
+// 旧版逐字一致（端到端那一半在 `test/dom-render.test.mjs` §19）。键在而值不是
+// 对象 = 那个源站这块读不到（wire.ts 的「省略而非假块」纪律），不许归一成一份
+// 降级块再让面板对着编出来的第二源站说话。
+{
+  const { providersOf } = await import("../src/client/snapshot.ts");
+  assert.equal(providersOf(undefined), null, "providers 缺席 → null（退回单块 provider 路径）");
+  assert.equal(providersOf(null), null, "null 块 → null");
+  assert.equal(providersOf("cn"), null, "非对象块 → null");
+  assert.equal(providersOf({}), null, "空块没有有效键 → null");
+  assert.equal(providersOf({ cn: null }), null, "键在但值不是对象 = 读不到，不编降级块");
+  assert.equal(providersOf({ other: okBody.provider }), null, "只认 cn / ai，未知键不算有效");
+
+  const both = providersOf({
+    cn: { ...okBody.provider, region: "cn", enabledIds: ["deepseek-ai/DeepSeek-V3"] },
+    ai: { ...okBody.provider, region: "ai", enabledIds: [""] }
+  });
+  assert.deepEqual(Object.keys(both ?? {}).sort(), ["ai", "cn"], "两个源站都归一");
+  assert.equal(both.cn.region, "cn", "region 字段随块保留（旧 Host 缺省时由读侧按 cn 处理）");
+  assert.deepEqual(both.cn.enabledIds, ["deepseek-ai/DeepSeek-V3"], "每个键都走 providerOf 同一套归一");
+  assert.deepEqual(both.ai.enabledIds, [], "空串被滤掉（与单块 provider 同一判据）");
+
+  const aiOnly = providersOf({ ai: { ...okBody.provider, region: "ai" } });
+  assert.deepEqual(Object.keys(aiOnly ?? {}), ["ai"], "单源站原样返回——缺的键就是不编一份出来");
+}
+
 // §3c internal_error 必须有引导文案，且**不能**被导去「配令牌」。
 //
 // 回归用例：soft() 与 failureCode() 在错误无 code 时统一产出 internal_error，而

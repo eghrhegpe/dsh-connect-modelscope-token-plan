@@ -107,6 +107,11 @@ export const zh = {
   "provider.llmMissing": "本机 Host 未提供 LLM 注册服务",
   "provider.error": "接入失败：{error}",
   "provider.models": "启用哪些模型",
+  // 允许清单按源站分段（M6）：CN 与国际站的目录不同，清单也各自保存。两句话分工：
+  // regionModels 是切换按钮组的名（读屏念的），regionHint 说明「各自保存 + 选择器
+  // 只出现该站目录里的模型」——否则用户会以为在改一份共享清单。
+  "provider.regionModels": "按源站选择模型",
+  "provider.regionHint": "两个源站的允许清单各自保存；DSH 模型选择器里只会出现该源站目录里的模型。",
   "provider.allowAll": "全部",
   "provider.hideAll": "全部隐藏",
   "provider.saveList": "保存清单",
@@ -339,6 +344,12 @@ export const en: typeof zh = {
   "provider.llmMissing": "This Host exposes no LLM service",
   "provider.error": "Provider error: {error}",
   "provider.models": "Which models to enable",
+  // Allow-lists are split by source site (M6): CN and International have different
+  // catalogues and keep their own lists. regionModels names the switch group for
+  // screen readers; regionHint states "saved separately + picker only shows this
+  // site's catalogue" so nobody thinks they are editing one shared list.
+  "provider.regionModels": "Model list by source site",
+  "provider.regionHint": "Each source site keeps its own allow-list; the DSH model picker only offers models from that site's catalogue.",
   "provider.allowAll": "All",
   "provider.hideAll": "Hide all",
   "provider.saveList": "Save list",

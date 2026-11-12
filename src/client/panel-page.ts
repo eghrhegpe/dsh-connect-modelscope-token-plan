@@ -7,12 +7,12 @@ import { SectionCard, BalanceCard, AccountsBalanceCard, LocalDailyCard, TrendBar
 import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH } from "./const.ts";
 import { format, errorText, isoTime } from "./format.ts";
 import { getJson, postJson, writeFailure } from "./http.ts";
-import { viewOf, providerOf, drawOf, DEGRADED_PROVIDER, DEGRADED_DRAW } from "./snapshot.ts";
+import { viewOf, providerOf, providersOf, drawOf, DEGRADED_PROVIDER, DEGRADED_DRAW } from "./snapshot.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
 import { h, useCallback, useEffect, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
-import type { AccountSnapshot, ProviderStatus, DrawStatus, Snapshot } from "../shared/wire.ts";
+import type { AccountSnapshot, ProviderStatus, ProviderRegion, DrawStatus, Snapshot } from "../shared/wire.ts";
 import { normalizeRosterSave } from "../shared/allow-list.ts";
 
 /** 三个固定视角。 */
@@ -23,7 +23,7 @@ export type TabId = "quota" | "models" | "access";
  * 保持 `{token}` / `{}` / `{modelId}` 的逐字形状——Host 的 token/probe 路由把缺省
  * region 当 cn，老客户端与单账户装配无感。纯函数，放模块级避免被 useCallback 闭包捕获。
  */
-const regionField = (region: "cn" | "ai"): { region: "ai" } | Record<string, never> =>
+const regionField = (region: ProviderRegion): { region: "ai" } | Record<string, never> =>
   region === "ai" ? { region: "ai" } : {};
 
 export function PanelPage({ tt, localeSubscribe }: {
@@ -66,6 +66,11 @@ export function PanelPage({ tt, localeSubscribe }: {
   const hasProviderBlock = rawProvider !== undefined && rawProvider !== null;
   const [fetchedProvider, setFetchedProvider] = useState<ProviderStatus | null>(null);
   const provider: ProviderStatus = hasProviderBlock ? providerOf(rawProvider) : (fetchedProvider ?? DEGRADED_PROVIDER);
+  // 按源站分段的 provider 状态（M6）：可选块，**缺省就退回上面这条单块路径**。
+  // providersOf 对「非对象 / 无有效键」一律给 null，于是 `providers` 缺席的旧
+  // Host 与今天逐字一样——切换器、源站提示等新节点一个都不会出现（dom-render
+  // 用不带 providers 的 fixture 钉住这一点）。
+  const providers = providersOf(data?.providers);
   useEffect(() => {
     if (hasProviderBlock) return undefined;
     let cancelled = false;
@@ -150,11 +155,16 @@ export function PanelPage({ tt, localeSubscribe }: {
     }
   }, [load, postWrite, tt]);
   const toggleProvider = useCallback((enabled: boolean) => void runProviderWrite(PROVIDER_PATH, { enabled }), [runProviderWrite]);
-  const saveRoster = useCallback((enabledIds: string[]) => {
+  const saveRoster = useCallback((enabledIds: string[], region: ProviderRegion) => {
     // 哨兵独占态归一：与 ProviderCard、Host 的 parseAllowedList 同一份
     // （shared/allow-list.ts）——含哨兵 → 只留哨兵（全隐藏）；否则剔除可能
     // 混进的哨兵与空串（空 = 全部提供）。
-    void runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds: normalizeRosterSave(enabledIds) });
+    //
+    // region 走与 token 路由同一套 `regionField`：只有国际站才带 `region:"ai"`，
+    // CN 的请求体逐字仍是 `{enabledIds}`——Host 把缺省 region 当 cn，老客户端与
+    // 单账户装配无感。两站的清单在 Host 侧是两个平级键（`enabledIds` /
+    // `enabledIdsAi`），共用一个会互相裁掉对方的模型。
+    void runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds: normalizeRosterSave(enabledIds), ...regionField(region) });
   }, [runProviderWrite]);
   const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
   // 全局上下文窗口覆盖：与开关/清单同一写入口（成功后刷快照回显落盘值）。
@@ -345,6 +355,9 @@ export function PanelPage({ tt, localeSubscribe }: {
       { title: tt("section.provider"), open: openSections.provider, onToggle: () => toggleSection("provider"), tt },
       h(ProviderCard, {
         provider,
+        // 缺席（旧 Host / 单账户装配）时显式给 undefined：ProviderCard 据此完全
+        // 走旧路径，DOM 不许多出任何节点。
+        providers: providers ?? undefined,
         busy: providerBusy,
         error: providerError,
         onToggle: toggleProvider,
