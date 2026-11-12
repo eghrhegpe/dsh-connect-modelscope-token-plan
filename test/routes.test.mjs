@@ -87,7 +87,7 @@ assert.ok([SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, PROBE_PATH].every((p) => hand
   // `${PROVIDER_PATH}/…` 拼的派生路由。
   const expected = [
     SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH,
-    PROVIDER_PATH, `${PROVIDER_PATH}/roster`, `${PROVIDER_PATH}/reset`, `${PROVIDER_PATH}/context`,
+    PROVIDER_PATH, `${PROVIDER_PATH}/roster`, `${PROVIDER_PATH}/reset`, `${PROVIDER_PATH}/context`, `${PROVIDER_PATH}/quota-resume`,
     DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH
   ].sort();
   assert.deepEqual(

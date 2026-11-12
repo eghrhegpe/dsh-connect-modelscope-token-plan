@@ -103,7 +103,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const m = tokens / 1e6;
 		return `${m >= 10 || Number.isInteger(m) ? Math.round(m) : Math.round(m * 10) / 10}M`;
 	}
-	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH, MODELSCOPE_TOKEN_URL, MODELSCOPE_INTERNATIONAL_SITE_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
+	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, PROVIDER_QUOTA_RESUME_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH, MODELSCOPE_TOKEN_URL, MODELSCOPE_INTERNATIONAL_SITE_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
 	var init_const = __esmMin((() => {
 		init_wire();
 		NS = "dsh-connect-modelscope-token-plan";
@@ -117,6 +117,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		PROVIDER_ROSTER_PATH = `/api/${NS}/provider/roster`;
 		PROVIDER_CONTEXT_PATH = `/api/${NS}/provider/context`;
 		PROVIDER_RESET_PATH = `/api/${NS}/provider/reset`;
+		PROVIDER_QUOTA_RESUME_PATH = `/api/${NS}/provider/quota-resume`;
 		DRAW_PATH = `/api/${NS}/draw`;
 		DRAW_RESET_PATH = `/api/${NS}/draw/reset`;
 		TREND_WINDOW_PATH = `/api/${NS}/trend/window`;
@@ -212,6 +213,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.groupCount": "{count} 个",
 			"provider.groupSelected": "已选 {count}",
 			"provider.quotaExhausted": "额度耗尽",
+			"provider.suppressedToday": "该源站今日免费额度已耗尽（quota 429）——相关模型已从 DSH 模型选择器临时移除，本地日期翻页后自动恢复。",
+			"provider.quotaResume": "立即恢复",
 			"provider.vision": "视觉",
 			"provider.notConfigured": "还没有访问令牌，先到「接入」tab 配置",
 			"provider.source.panel": "面板",
@@ -388,6 +391,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			"provider.groupCount": "{count}",
 			"provider.groupSelected": "{count} selected",
 			"provider.quotaExhausted": "Quota exhausted",
+			"provider.suppressedToday": "This site's free quota ran out today (quota 429) — its models were removed from the DSH model picker until the local date rolls over.",
+			"provider.quotaResume": "Restore now",
 			"provider.vision": "vision",
 			"provider.notConfigured": "No token yet — configure it in the Access tab",
 			"provider.source.panel": "panel",
@@ -1295,6 +1300,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			region: p.region === "ai" ? "ai" : "cn",
 			llmAvailable: p.llmAvailable === true,
 			registered: p.registered === true,
+			suppressedToday: p.suppressedToday === true,
 			error: typeof p.error === "string" ? p.error : null,
 			modelCount: typeof p.modelCount === "number" && Number.isFinite(p.modelCount) ? p.modelCount : roster.length,
 			enabledCount: typeof p.enabledCount === "number" && Number.isFinite(p.enabledCount) ? p.enabledCount : 0,
@@ -2049,7 +2055,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	* 在卡片里**只渲染一次**，不跟着源站切换。`providers` 缺席（旧 Host / 单账户装配）
 	* 时整张卡退回单块 `provider` 的老路径，DOM 与从前逐字一致。
 	*/
-	function ProviderCard({ provider, providers, busy, error, onToggle, onSaveList, onSaveContextWindow, onReset, tokenPresent, tt }) {
+	function ProviderCard({ provider, providers, busy, error, onToggle, onSaveList, onSaveContextWindow, onReset, onResumeQuota, tokenPresent, tt }) {
 		const regionKeys = providers === void 0 ? [] : ["cn", "ai"].filter((key) => providers[key] !== void 0);
 		const dualRegions = regionKeys.length === 2;
 		const [pickedRegion, setPickedRegion] = useState("cn");
@@ -2091,6 +2097,18 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			...S.formNote,
 			color: "var(--dsw-alias-state-warn-primary)"
 		} }, tt("provider.notConfigured")) : null;
+		const suppressedNode = !(status.suppressedToday === true) ? null : h("div", {
+			style: {
+				...S.formNote,
+				color: "var(--dsw-alias-state-warn-primary)"
+			},
+			role: "alert"
+		}, tt("provider.suppressedToday"), onResumeQuota === void 0 ? null : h("button", {
+			type: "button",
+			style: S.button,
+			disabled: busy,
+			onClick: () => onResumeQuota(region)
+		}, tt("provider.quotaResume")));
 		const sourceKey = status.source === "panel" ? "provider.source.panel" : "provider.source.config";
 		const CONTEXT_TIERS = [
 			{
@@ -2338,7 +2356,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			disabled: busy,
 			onClick: onReset
 		}, tt("provider.reset")));
-		return h("div", null, switchRow, alertNode, tokenHint, h("div", { style: {
+		return h("div", null, switchRow, alertNode, suppressedNode, tokenHint, h("div", { style: {
 			...S.sectionTitle,
 			margin: "18px 0 8px"
 		} }, tt("provider.models")), regionSwitcher, rosterBlock, contextNode, resetRow, error !== null ? h("div", {
@@ -2886,6 +2904,9 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			});
 		}, [runProviderWrite]);
 		const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
+		const resumeProviderQuota = useCallback((region) => {
+			runProviderWrite(PROVIDER_QUOTA_RESUME_PATH, { ...regionField(region) });
+		}, [runProviderWrite]);
 		const saveContextWindow = useCallback((contextWindow) => {
 			runProviderWrite(PROVIDER_CONTEXT_PATH, { contextWindow });
 		}, [runProviderWrite]);
@@ -3052,6 +3073,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			onSaveList: saveRoster,
 			onSaveContextWindow: saveContextWindow,
 			onReset: resetProvider,
+			onResumeQuota: resumeProviderQuota,
 			tokenPresent: data?.token?.present === true,
 			tt
 		})), h(SectionCard, {

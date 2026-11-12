@@ -34,6 +34,12 @@ export const PROVIDER_CONTEXT_PATH = `/api/${NS}/provider/context`;
 /** provider 开关 + 清单回到 patch 默认的路由。 */
 export const PROVIDER_RESET_PATH = `/api/${NS}/provider/reset`;
 /**
+ * 手动解除某源站今日 quota 抑制的路由（body `{region?}`）。quota 类 429 会把
+ * 整个 provider 从 picker 摘出（当日有效）；这是它的撤销按钮——恢复不等本地
+ * 日期翻页。
+ */
+export const PROVIDER_QUOTA_RESUME_PATH = `/api/${NS}/provider/quota-resume`;
+/**
  * 出图工具的开关/状态路由。
  *
  * **与 PROVIDER_PATH 是两条独立路由**：那个管「魔搭作为 chat provider」，这个管

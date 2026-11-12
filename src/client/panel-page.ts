@@ -4,7 +4,7 @@
  * @module dsh-connect-modelscope-token-plan/client/panel-page
  */
 import { SectionCard, BalanceCard, AccountsBalanceCard, LocalDailyCard, TrendBars, EventsList, TokenForm, ProviderCard, DrawCard, TrendWindowPicker } from "./cards.ts";
-import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH } from "./const.ts";
+import { PANEL_ID, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, PROVIDER_QUOTA_RESUME_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH } from "./const.ts";
 import { format, errorText, isoTime } from "./format.ts";
 import { getJson, postJson, writeFailure } from "./http.ts";
 import { viewOf, providerOf, providersOf, drawOf, DEGRADED_PROVIDER, DEGRADED_DRAW } from "./snapshot.ts";
@@ -167,6 +167,11 @@ export function PanelPage({ tt, localeSubscribe }: {
     void runProviderWrite(PROVIDER_ROSTER_PATH, { enabledIds: normalizeRosterSave(enabledIds), ...regionField(region) });
   }, [runProviderWrite]);
   const resetProvider = useCallback(() => void runProviderWrite(PROVIDER_RESET_PATH, {}), [runProviderWrite]);
+  // 手动解除当前源站的今日 quota 抑制。region 走与 roster 同一套 regionField：
+  // 只有国际站才带 region:"ai"，CN 的请求体逐字仍是 `{}`（Host 缺省即 CN）。
+  const resumeProviderQuota = useCallback((region: ProviderRegion) => {
+    void runProviderWrite(PROVIDER_QUOTA_RESUME_PATH, { ...regionField(region) });
+  }, [runProviderWrite]);
   // 全局上下文窗口覆盖：与开关/清单同一写入口（成功后刷快照回显落盘值）。
   // null = 跟随目录（清除覆盖）。Host 保存后会立即带覆盖重注册，签名变化自动
   // 触发重建，无需重启。
@@ -364,6 +369,7 @@ export function PanelPage({ tt, localeSubscribe }: {
         onSaveList: saveRoster,
         onSaveContextWindow: saveContextWindow,
         onReset: resetProvider,
+        onResumeQuota: resumeProviderQuota,
         tokenPresent: data?.token?.present === true,
         tt
       })

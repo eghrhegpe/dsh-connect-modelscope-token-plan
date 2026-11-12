@@ -565,7 +565,7 @@ export function groupByOwner(rows: RosterRow[]): { owner: string; rows: RosterRo
  * 在卡片里**只渲染一次**，不跟着源站切换。`providers` 缺席（旧 Host / 单账户装配）
  * 时整张卡退回单块 `provider` 的老路径，DOM 与从前逐字一致。
  */
-export function ProviderCard({ provider, providers, busy, error, onToggle, onSaveList, onSaveContextWindow, onReset, tokenPresent, tt }: {
+export function ProviderCard({ provider, providers, busy, error, onToggle, onSaveList, onSaveContextWindow, onReset, onResumeQuota, tokenPresent, tt }: {
   provider: ProviderStatus | null;
   /**
    * 按源站分段的 provider 状态（可选块）。缺席 = 旧 Host / 单账户装配，卡片完全
@@ -584,6 +584,12 @@ export function ProviderCard({ provider, providers, busy, error, onToggle, onSav
   /** 保存全局上下文窗口覆盖；`null` = 跟随目录（清除覆盖）。 */
   onSaveContextWindow?: (contextWindow: number | null) => void;
   onReset: () => void;
+  /**
+   * 手动解除**当前源站**的今日 quota 抑制（把被 429 摘出的 provider 重新挂回
+   * picker）。可选：旧装配没有这条按钮。按 region 发请求——抑制是按源站独立
+   * 判定的，恢复也只恢复当前选中的那一站。
+   */
+  onResumeQuota?: (region: ProviderRegion) => void;
   /** 面板是否已有令牌；缺省 = 未知，不渲染「先去配置」提示。 */
   tokenPresent?: boolean | undefined;
   tt: Tt;
@@ -670,6 +676,35 @@ export function ProviderCard({ provider, providers, busy, error, onToggle, onSav
   const tokenHint = enabled && tokenPresent === false
     ? h("div", { style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" } }, tt("provider.notConfigured"))
     : null;
+
+  // quota 抑制横幅：该源站今日被 quota 类 429 整体摘出 DSH 模型选择器。
+  // 单独一行（role=alert，与 error 行同级）：这是「模型为什么从 picker 里消失了」
+  // 的唯一解释——开关看着开着、registered 却是 false，没有这条用户无从诊断。
+  // 恢复按钮按当前源站发请求（抑制按源站独立判定）；busy 期间置灰与其它写路径
+  // 同款。旧 Host 不带 suppressedToday 字段（读侧 false 兜底）→ 横幅不渲染。
+  const suppressed = status.suppressedToday === true;
+  const suppressedNode = !suppressed
+    ? null
+    : h(
+        "div",
+        {
+          style: { ...S.formNote, color: "var(--dsw-alias-state-warn-primary)" },
+          role: "alert"
+        },
+        tt("provider.suppressedToday"),
+        onResumeQuota === undefined
+          ? null
+          : h(
+              "button",
+              {
+                type: "button",
+                style: S.button,
+                disabled: busy,
+                onClick: () => onResumeQuota(region)
+              },
+              tt("provider.quotaResume")
+            )
+      );
 
   // 源标注：面板保存的值 / patch 的默认。
   const sourceKey = status.source === "panel" ? "provider.source.panel" : "provider.source.config";
@@ -982,6 +1017,7 @@ export function ProviderCard({ provider, providers, busy, error, onToggle, onSav
     null,
     switchRow,
     alertNode,
+    suppressedNode,
     tokenHint,
     h("div", { style: { ...S.sectionTitle, margin: "18px 0 8px" } }, tt("provider.models")),
     regionSwitcher,

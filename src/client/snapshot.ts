@@ -230,6 +230,9 @@ export function providerOf(raw: unknown): ProviderStatus {
     region: p.region === "ai" ? "ai" : "cn",
     llmAvailable: p.llmAvailable === true,
     registered: p.registered === true,
+    // quota 抑制位（可选）：旧 Host 不带 → false（不画横幅）。true 是「今天该
+    // 源站被整体摘出 picker」的唯一事实，横幅与恢复按钮都从它派生。
+    suppressedToday: p.suppressedToday === true,
     error: typeof p.error === "string" ? p.error : null,
     // NaN 也是 "number"：`typeof NaN === "number"` 为 true，会把 NaN 渲成
     // 「NaN 个模型」。Number.isFinite 一并挡掉 NaN / Infinity。
