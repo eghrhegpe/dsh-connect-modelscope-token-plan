@@ -16,6 +16,12 @@
         apiBase: https://api-inference.modelscope.cn/v1
         # 站点源站，只用于面板里的外链（访问令牌页 / 文档页）。
         siteBase: https://modelscope.cn
+        # 国际版源站（ModelScope International，modelscope.ai）：把国际账户也接入同一
+        # provider 时用的 apiBase / siteBase。令牌是另一个 DSH 凭据引用
+        # MODELSCOPE_INTERNATIONAL_API_KEY（面板「接入」tab 另存一把）。两站的模型
+        # 目录 / 令牌 / 魔粒余额互相独立，各是一把账户的池子（见 account-pool）。
+        apiBaseInternational: https://api-inference.modelscope.ai/v1
+        siteBaseInternational: https://modelscope.ai
         # ------------------------------------------------------------------
         # 面板头条是**官方魔粒余额**（balance 路由，真实值），所以这里**没有**
         # 额度常数：官方改按「魔粒」计费后，次数口径的「每日 N 次 / 推算剩余」

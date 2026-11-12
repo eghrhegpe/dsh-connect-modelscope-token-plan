@@ -74,6 +74,14 @@ interface ProviderPublisherDeps {
   getLlm?: (service: string) => object | null;
   resolveApiKey?: () => Promise<string>;
   /**
+   * 注册到哪个 provider id。**两个 provider 共用同一套代码**：CN =
+   * `modelscope-token-plan`（沿用），国际 = `modelscope-token-plan-international`
+   * （见 llm-models.ts 的同名常量与 plan 的「拓扑修订」）。
+   */
+  providerId?: string;
+  /** picker 里显示的 provider 名（国际版传「ModelScope International」）。 */
+  displayName?: string;
+  /**
    * 本地计数的写入口，透传给适配器工厂（`usage-observer.ts`）。
    *
    * 缺省即「不套观察层」——那正是 M4 之前的状态：面板四块计数面板恒为 0 与空。
@@ -184,7 +192,9 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
     resolveApiKey,
     usage,
     emit,
-    logger
+    logger,
+    providerId: effectiveProviderId = LLM_PROVIDER_ID,
+    displayName: effectiveDisplayName = LLM_DISPLAY_NAME
   } = deps;
   const effectiveSettings = settings ?? {};
   const effectivePanelSwitch = panelSwitch ?? (async () => null);
@@ -243,8 +253,8 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
    * @returns {void}
    */
   const registerPair = (llm: { registerAdapter: (providerIds: string[], adapter: unknown) => () => void; registerConfigurableProviders?: (rows: object[]) => () => void }, built: { providerIds: string[]; adapter: unknown }, target: PublisherStateBase) => registerProviderPair(llm, built, target, {
-    providerId: LLM_PROVIDER_ID,
-    displayName: LLM_DISPLAY_NAME
+    providerId: effectiveProviderId,
+    displayName: effectiveDisplayName
   });
 
   /**
@@ -335,6 +345,8 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
         resolveApiKey: effectiveResolveApiKey,
         get: effectiveGetLlm,
         unavailableModelIds: state.unavailableIds,
+        providerId: effectiveProviderId,
+        displayName: effectiveDisplayName,
         // 观察层缺席即不套（`exactOptionalPropertyTypes` 下条件展开，不能传
         // undefined 让它与「显式无观察层」变成两件事）。
         ...(usage !== undefined ? { usage } : {}),

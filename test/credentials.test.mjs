@@ -16,7 +16,8 @@
 
 import { strict as assert } from "node:assert";
 import { redactSecrets } from "../src/host/util.ts";
-import { createTokenStore, isPlausibleToken, TOKEN_REF } from "../src/host/ms-auth.ts";
+import { createTokenStore, isPlausibleToken, TOKEN_REF, TOKEN_REF_INTERNATIONAL } from "../src/host/ms-auth.ts";
+import { createAccountPool } from "../src/host/account-pool.ts";
 
 // ── §1 脱敏闸：形状无关性 ──
 //
@@ -294,6 +295,58 @@ for (let hexLen = 12; hexLen <= 80; hexLen += 4) {
     }
   }
   assert.deepEqual(offenders, [], "Host 侧不该有裸 errMsg 进入 wire 字段或日志");
+}
+
+// ── §8 国际账户引用：两站各一把，save/forget/resolve 绝不串到 CN ──
+//
+// 这是一个真正修过的 bug：account-pool 曾给 CN / 国际两把 tokenStore 都用默认
+// ref（MODELSCOPE_API_KEY），ms-auth 的 forget() 还硬编码了 TOKEN_REF、save() 的
+// 无服务兜底分支也硬编码 TOKEN_REF。于是「保存/忘掉国际令牌」会落到 CN 那一把。
+// 这里用一个按 key 记账的假凭据服务把两条引用彻底分开，逐一核三个入口。
+{
+  const map = new Map();
+  const service = {
+    resolve: async (k) => (map.has(k) ? { value: map.get(k) } : undefined),
+    set: async (k, v) => { map.set(k, v); },
+    unset: async (k) => { map.delete(k); }
+  };
+  const CN_TOKEN = "ms-11111111111111111111111111111111";
+  const AI_TOKEN = "ms-22222222222222222222222222222222";
+  const env = {};
+
+  // 单 store 的 ref 覆盖：save 落到国际引用、forget 删的是国际引用。
+  const intl = createTokenStore({ credentials: () => service, env, ref: TOKEN_REF_INTERNATIONAL });
+  await intl.save(AI_TOKEN);
+  assert.equal(map.get(TOKEN_REF_INTERNATIONAL), AI_TOKEN, "save 必须写国际引用");
+  assert.equal(map.has(TOKEN_REF), false, "save 不许碰 CN 引用");
+  assert.equal((await intl.resolve()).value, AI_TOKEN, "resolve 必须读国际引用");
+  await intl.forget();
+  assert.equal(map.has(TOKEN_REF_INTERNATIONAL), false, "forget 必须删国际引用（曾硬编码 TOKEN_REF 删错）");
+
+  // 无凭据服务时的内存兜底同样要认 ref：否则 save 把值写进 CN 的内存键、resolve 读不到。
+  const intlMem = createTokenStore({ credentials: null, env, ref: TOKEN_REF_INTERNATIONAL });
+  await intlMem.save(AI_TOKEN);
+  assert.equal((await intlMem.resolve()).value, AI_TOKEN, "无服务兜底也按国际 ref 存/读内存");
+
+  // 账户池：两个 region 的 tokenStore 各自绑各的引用，互不覆盖；base 也按 region 分开。
+  const pool = createAccountPool({
+    credentials: () => service,
+    env,
+    settings: {
+      apiBase: "https://api-inference.modelscope.cn/v1",
+      siteBase: "https://modelscope.cn",
+      apiBaseInternational: "https://api-inference.modelscope.ai/v1",
+      siteBaseInternational: "https://modelscope.ai"
+    }
+  });
+  await pool.tokenStoreOf("cn").save(CN_TOKEN);
+  await pool.tokenStoreOf("ai").save(AI_TOKEN);
+  assert.equal(map.get(TOKEN_REF), CN_TOKEN, "CN 账户独占 CN 引用");
+  assert.equal(map.get(TOKEN_REF_INTERNATIONAL), AI_TOKEN, "国际账户独占国际引用");
+  assert.equal((await pool.resolveToken("cn")).value, CN_TOKEN, "cn 解析到 CN 令牌");
+  assert.equal((await pool.resolveToken("ai")).value, AI_TOKEN, "ai 解析到国际令牌");
+  assert.ok(pool.apiBaseOf("ai").includes("modelscope.ai"), "国际 apiBase 指向 modelscope.ai");
+  assert.ok(pool.apiBaseOf("cn").includes("modelscope.cn"), "CN apiBase 指向 modelscope.cn");
 }
 
 console.log("credentials.test.mjs: all checks passed");

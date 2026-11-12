@@ -69,7 +69,9 @@
  *
  * @module dsh-connect-modelscope-token-plan
  */
-import { createTokenStore } from "./ms-auth.ts";
+import { createAccountPool } from "./account-pool.ts";
+import type { Region } from "./account-pool.ts";
+import { LLM_PROVIDER_ID, LLM_PROVIDER_ID_INTERNATIONAL, LLM_DISPLAY_NAME, LLM_DISPLAY_NAME_INTERNATIONAL } from "./llm-models.ts";
 import { createFileUsageStore } from "./usage-store.ts";
 import { createInferenceClient } from "./inference-client.ts";
 import { createFileProviderStore } from "./provider-store.ts";
@@ -85,7 +87,7 @@ import { profileSegment } from "./state-store.ts";
 import { registerRoutes } from "./routes.ts";
 import { resolveSettings, inject, name } from "./host-config.ts";
 import { errMsg, redactSecrets } from "./util.ts";
-import type { HostDeps } from "./types.ts";
+import type { HostDeps, RegionProvider } from "./types.ts";
 
 /**
  * Host 入口：装配 wiring、注册路由、挂卸载副作用。
@@ -108,10 +110,27 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   //   - `credentials` 同理：不接线的话，测试注入的假凭据服务会被静默忽略，测的
   //     还是 ctx 里那份——比没有这个缝更糟，因为它让人以为自己覆盖了。
   // 不传 deps 时两者都落回 ctx / process.env，产品行为零漂移。
-  const tokenStore = createTokenStore({
-    credentials: deps.credentials !== undefined ? deps.credentials : () => ctx.get("credentials") ?? null,
-    env: deps.env
+  const credentialsResolver = deps.credentials !== undefined ? deps.credentials : () => ctx.get("credentials") ?? null;
+
+  // 账户池：CN 与国际两站各一把凭据引用、各自的 apiBase/siteBase 与健康态。
+  // 两个 provider 各绑各站的一把令牌（拓扑修订：不是「单 provider 按 region 挑
+  // 令牌」——pi-ai peer 的 resolveApiKey() 不传模型 id，做不到 per-request 选令牌）。
+  const accountPool = createAccountPool({ credentials: credentialsResolver, env: deps.env, settings });
+
+  // 每个 region 的 settings 视图：只有 apiBase/siteBase 换成该源站的，其余（超时、
+  // 缓存、输出上限覆盖…）全插件共用一份。inference-client 与 provider-publish 都从
+  // settings.apiBase/siteBase 读源站，所以「换 base」这一处覆盖就让整条链路
+  // （目录 / 余额 / probe / descriptor 的 baseUrl）自动指向正确的源站。
+  const settingsFor = (region: Region) => ({
+    ...settings,
+    apiBase: accountPool.apiBaseOf(region),
+    siteBase: accountPool.siteBaseOf(region)
   });
+
+  // CN 的 tokenStore 作为 wiring.tokenStore 的向后兼容别名：快照 token 状态、
+  // probe 的 noteValidity、token 路由的 save/forget 现有消费方都只认这一把
+  // （M4 会给 token 路由补 region，让国际站那把也能从面板保存）。
+  const tokenStore = accountPool.tokenStoreOf("cn");
 
   // 本地计数按 profile 分段（usage-store 注释里的裁定）；profile 取不到时
   // 退回共享目录，行为与旧 Host 一致。
@@ -124,14 +143,9 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     logger: ctx.logger
   });
 
-  // 模型目录的 coalesced 缓存长在 inference-client 里（免认证目录不需要
-  // 凭据换手失效——见 routes/token.ts 的注释）。
-  const inference = createInferenceClient({
-    settings,
-    tokenStore,
-    deps,
-    logger: ctx.logger
-  });
+  // 模型目录的 coalesced 缓存长在各 region 的 inference-client 里（免认证目录
+  // 不需要凭据换手失效——见 routes/token.ts 的注释）；实例在下面的 buildRegion
+  // 里按源站各建一份。
 
   // ── M4：把魔搭接入 DSH 作为 LLM provider ──
   // 面板开关持久层（provider-store，按 profile 分段：回答「这个 profile 要不要
@@ -157,67 +171,104 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   // rosterSeenStore 缝），快照与 provider 路由只读——理由见 roster-seen-store.ts
   // 与 types.ts 的 Wiring 注释。
   const rosterSeenStore = createFileRosterSeenStore({ profile, logger: ctx.logger });
-  const publisher = createProviderPublisher({
-    settings,
-    panelSwitch: () => providerStore.enabled(),
-    // 同上：缝不接线就是纸面的。测试注入的 getLlm / emit 必须真的被用上。
-    getLlm: deps.getLlm ?? ((service: string) => ctx.get?.(service) ?? null),
-    resolveApiKey: async () => (await tokenStore.resolve()).value,
-    // 本地计数的唯一生产者：DSH 真实对话经适配器出去时，每一次调用与每一条
-    // 429/错误事件都写进上面那个 usage-store（面板四块计数面板的**唯一**数据
-    // 来源——probe 那条写入路径已随目录表删除）。写同一个 store 实例，所以面板
-    // 读到的就是这里写的账，不会分叉到另一个 profile 目录。
-    //
-    // 两条都吞错：观测失败不是对话失败（`usage-observer.safe` 也再兜一层）。
-    usage: {
-      recordCall: (input) => usageStore.recordCall({ modelId: input.modelId, tokens: input.tokens }).catch(() => {}),
-      recordEvent: (input) => usageStore.recordEvent(input).catch(() => {})
-    },
-    emit: deps.emit ?? ((event: string) => ctx.emit?.(event)),
-    // 离线测试的适配器模块缝（§ deps-wiring）：真模块 import 的 peer 只在 Host
-    // 进程存在，测试进程必败——接通这根线，注入才能到 publisher。条件展开而非
-    // 直传：exactOptionalPropertyTypes 下 `| undefined` 不满足可选属性。
-    ...(deps.loadAdapterModule ? { loadAdapterModule: deps.loadAdapterModule } : {}),
-    logger: ctx.logger
-  });
+  // ── 两个 provider，共享一份 provider-store（拓扑修订）──
+  // CN = `modelscope-token-plan`、国际 = `modelscope-token-plan-international`。
+  // 各自的目录 / 令牌 / baseUrl / displayName，但开关、允许清单、窗口覆盖只有一份
+  // （providerStore），所以面板一次开关 / 一次清单保存同时约束两个 provider 的注册。
+  //
+  // usage / rosterSeenStore 两个共享依赖：
+  //  · usage 写进同一个 usage-store（按 profile 分段那份），两个 provider 的调用
+  //    都记进同一本本地账（面板头条是它，不是跨端总量——事实 1）。
+  //  · rosterSeenStore 的 note() 由两个收敛器各调一次；收敛按 region 顺序串行
+  //    （见下面的 reconcileAll），所以对同一份首见表没有并发写。
+  const buildRegion = (region: Region): RegionProvider => {
+    const regionSettings = settingsFor(region);
+    const inference = createInferenceClient({
+      settings: regionSettings,
+      tokenStore: accountPool.tokenStoreOf(region),
+      deps,
+      logger: ctx.logger
+    });
+    const publisher = createProviderPublisher({
+      settings: regionSettings,
+      panelSwitch: () => providerStore.enabled(),
+      // 同上：缝不接线就是纸面的。测试注入的 getLlm / emit 必须真的被用上。
+      getLlm: deps.getLlm ?? ((service: string) => ctx.get?.(service) ?? null),
+      // 每次请求现从账户池解析该 region 的令牌（静态钥匙、无 refresh）。
+      resolveApiKey: async () => (await accountPool.resolveToken(region)).value,
+      providerId: region === "ai" ? LLM_PROVIDER_ID_INTERNATIONAL : LLM_PROVIDER_ID,
+      displayName: region === "ai" ? LLM_DISPLAY_NAME_INTERNATIONAL : LLM_DISPLAY_NAME,
+      // 本地计数的唯一生产者：DSH 真实对话经适配器出去时，每一次调用与每一条
+      // 429/错误事件都写进上面那个 usage-store（面板四块计数面板的**唯一**
+      // 数据来源——probe 那条写入路径已随目录表删除）。两个 provider 写同一个
+      // store 实例，所以面板读到的就是这里写的账，不会分叉到另一个 profile 目录。
+      //
+      // 两条都吞错：观测失败不是对话失败（`usage-observer.safe` 也再兜一层）。
+      usage: {
+        recordCall: (input) => usageStore.recordCall({ modelId: input.modelId, tokens: input.tokens }).catch(() => {}),
+        recordEvent: (input) => usageStore.recordEvent(input).catch(() => {})
+      },
+      emit: deps.emit ?? ((event: string) => ctx.emit?.(event)),
+      // 离线测试的适配器模块缝（§ deps-wiring）：真模块 import 的 peer 只在 Host
+      // 进程存在，测试进程必败——接通这根线，注入才能到 publisher。条件展开而非
+      // 直传：exactOptionalPropertyTypes 下 `| undefined` 不满足可选属性。
+      ...(deps.loadAdapterModule ? { loadAdapterModule: deps.loadAdapterModule } : {}),
+      logger: ctx.logger
+    });
 
-  // ── M4：provider 注册的 desired-state reconciler ──
-  // 目录轮询与四条 provider 路由曾经是两个各自为政的 driver 往同一个注册态里
-  // 写——runPoll 为此把窗口覆盖**读两遍**（fetch 前后各一次，「期间被改就
-  // 跳过本轮、等下一个 pollSeconds」），那是没有 desired-state 控制器的补丁。
-  // 现在两者都只是「标记 dirty」：收敛逻辑只有一处（读 desired → 拉目录 →
-  // 复查 desired → publish，见 provider-reconcile.ts），保存路由 await 返回时
-  // 新值一定已落地，不再有丢一次更新等一轮的窗口。
-  const { reconcile } = createProviderReconciler({
-    settings,
-    providerStore,
-    inference,
-    publisher,
-    // 额度耗尽集合的生产入口：每轮收敛从**同一个** usage-store 读事件流（按
-    // profile 分段的那份），推给 publisher 的 state.unavailableIds——picker
-    // 与两个面板 roster 消费的都是它。推断规则是纯函数 exhaustedModelIds
-    // （usage-store.ts），窗口在 settings.exhaustionWindowMinutes。
-    usageEvents: () => usageStore.events(),
-    // 首见时间的**唯一写入口**：收敛器拿到完整目录那一刻记一笔（见
-    // provider-reconcile.ts 的 runOnce）。读路径（快照聚合 / provider 路由）
-    // 只 fresh()，绝不在这里顺手写——那会把「谁是新模型」变成「谁最近被读到」。
-    rosterSeenStore,
-    logger: ctx.logger
-  });
+    // provider 注册的 desired-state reconciler（每个 region 一条独立收敛链）。
+    // 目录轮询与四条 provider 路由都只是「标记 dirty」：收敛逻辑只有一处
+    // （读 desired → 拉目录 → 复查 desired → publish，见 provider-reconcile.ts），
+    // 保存路由 await 返回时新值一定已落地，不再有丢一次更新等一轮的窗口。
+    const { reconcile } = createProviderReconciler({
+      settings: regionSettings,
+      providerStore,
+      inference,
+      publisher,
+      // 额度耗尽集合的生产入口：每轮收敛从**同一个** usage-store 读事件流（按
+      // profile 分段的那份），推给 publisher 的 state.unavailableIds——picker
+      // 与两个面板 roster 消费的都是它。推断规则是纯函数 exhaustedModelIds
+      // （usage-store.ts），窗口在 settings.exhaustionWindowMinutes。
+      usageEvents: () => usageStore.events(),
+      // 首见时间的**唯一写入口**：收敛器拿到完整目录那一刻记一笔（见
+      // provider-reconcile.ts 的 runOnce）。读路径（快照聚合 / provider 路由）
+      // 只 fresh()，绝不在这里顺手写——那会把「谁是新模型」变成「谁最近被读到」。
+      rosterSeenStore,
+      logger: ctx.logger
+    });
+    return { inference, publisher, reconcile };
+  };
+
+  const providers: Record<Region, RegionProvider> = {
+    cn: buildRegion("cn"),
+    ai: buildRegion("ai")
+  };
+
+  // 统一触发口：挂载 seed、pollSeconds 定时器、四条 provider 写路由都只调它，
+  // 一次调用把两个 region 的收敛链都驱动一遍。顺序串行而非并发——两个收敛器
+  // 共享同一份 rosterSeenStore 的写路径，串行让「谁先被记」有确定顺序；目录命中
+  // 各自 coalesced 缓存后两轮近乎瞬时。
+  const reconcile = async (): Promise<void> => {
+    for (const region of accountPool.REGIONS) {
+      await providers[region].reconcile();
+    }
+  };
 
   const wiring = {
     settings,
     configError,
-    tokenStore,
+    tokenStore,                       // CN 别名（向后兼容）
     usageStore,
-    inference,
+    inference: providers.cn.inference, // CN 别名：快照 / models / probe / provider 路由
     providerStore,
     drawStore,
     drawJobs,
     usagePrefsStore,
     rosterSeenStore,
-    publisher,
-    reconcile,
+    publisher: providers.cn.publisher, // CN 别名：快照 provider 块 / provider GET 路由
+    reconcile,                         // 触发两个 region 的收敛
+    accountPool,                       // M3/M4：双账户余额、token 路由 region 读它
+    providers,                         // M3/M4：按 region 读各自的 inference/publisher 状态
     logger: ctx.logger
   };
 
@@ -273,9 +324,12 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
       // 只防内存滞水，不改用户可见行为。
       drawJobs.dispose();
       // 顺序承重：先 dispose（闸住后续 publish，不再注册进已撤下本插件的 Host），
-      // 再 release（摘掉已注册的 provider 对）。
-      publisher.dispose();
-      publisher.release();
+      // 再 release（摘掉已注册的 provider 对）。两个 provider 都要走一遍——漏一个
+      // 就会把那个源站的注册对留在已撤下插件的 Host 里（僵尸 provider）。
+      for (const region of accountPool.REGIONS) {
+        providers[region].publisher.dispose();
+        providers[region].publisher.release();
+      }
       for (const off of offs) {
         try {
           off?.();

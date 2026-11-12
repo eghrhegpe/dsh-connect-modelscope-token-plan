@@ -149,6 +149,7 @@ src 文件较多（全量见下方「代码地图」登记表，每个文件须�
 | `usage-prefs-store.ts` | 用量面板显示偏好（趋势显示窗口）的持久化 | `createFileUsagePrefsStore()`, `resolveWindowDays()` |
 | `roster-seen-store.ts` | 模型「本机首次见到」时间戳的持久化（胶囊「· N 新模型」的唯一写入口，写在收敛器里） | `createFileRosterSeenStore()`, `freshIdsOf()` |
 | `context-catalog.ts` | 内置上下文窗口策展表（models.dev 交叉真值） | `curatedWindowOf()` |
+| `account-pool.ts` | **账户池协调器**：CN/国际双源站令牌解析 + 健康态（轮询/故障转移）；协调器方法（非模块级导出）resolveToken / tokenStoreOf / apiBaseOf / siteBaseOf / regions / 冷却 | `createAccountPool()`, `REGIONS`, `Region`, `AccountToken` |
 | **── Provider 注册 ──** | | |
 | `llm-models.ts` | 目录→descriptor 映射（peer-free） | `buildDescriptors()`, `rosterWithAvailability()` |
 | `llm-adapter.ts` | 魔搭适配器装配（peer-dependent 半边） | `createModelScopeAdapter()` |
