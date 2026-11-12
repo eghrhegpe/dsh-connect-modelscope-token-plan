@@ -3247,9 +3247,29 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		if (available === null) return "unknown";
 		return available > 0 ? "ok" : "exhausted";
 	}
+	/** 余额的纯数值（不带单位）：读不到画「—」，读到了画数字。 */
+	function balanceValue(available, tt) {
+		return available === null ? "—" : count(available);
+	}
 	/** 「余额」段的正文：读不到画「—」+ 单位，读到了画数字 + 单位。 */
 	function balanceText(available, tt) {
-		return `${available === null ? "—" : count(available)} ${tt("composer.balanceUnit")}`;
+		return `${balanceValue(available, tt)} ${tt("composer.balanceUnit")}`;
+	}
+	/**
+	* 双账户余额正文（M3）：有 `accounts[]` 时拼成 `CN|AI 魔粒`——每段是各自源站的
+	* 官方魔粒读数，各读不到各画「—」（如 `0|— 魔粒` 表示国际站没读到）。单值
+	* `balanceText` 是它的退化形：老 Host / 软失败省略 `accounts` 时，退回头条
+	* `balance`（仍是官方读数），不补假的第二段。
+	*
+	* 本地次数不在这里（只统计经本插件、按 profile 分段的聚合账，不按源站切），所以
+	* 这一行只负责余额的「两段」显示，次数的「单段」由 {@link callsText} 另算。
+	*/
+	function balanceSegmentText(accounts, fallback, tt) {
+		if (!accounts || accounts.length === 0) return balanceText(fallback, tt);
+		const cn = accounts.find((account) => account.region === "cn")?.available ?? null;
+		const ai = accounts.find((account) => account.region === "ai")?.available ?? null;
+		const unit = tt("composer.balanceUnit");
+		return `${balanceValue(cn, tt)}|${balanceValue(ai, tt)} ${unit}`;
 	}
 	/** 「今日本地」段的正文：读不到画「—」，读到了画次数。 */
 	function callsText(usedToday, tt) {
@@ -3260,8 +3280,8 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	* 一段会让「哪一段是空的」变成排版事故（读者分不清是没读到还是这一栏根本不在），
 	* 而「—」明确说了是前者。
 	*/
-	function readingText(available, usedToday, tt) {
-		return `${balanceText(available, tt)} · ${callsText(usedToday, tt)}`;
+	function readingText(available, usedToday, tt, accounts) {
+		return `${accounts && accounts.length > 0 ? balanceSegmentText(accounts, available, tt) : balanceText(available, tt)} · ${callsText(usedToday, tt)}`;
 	}
 	/**
 	* 数字是否已经算「上次数据」。
@@ -3476,7 +3496,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, `${tt("composer.prefix")} · `), h("span", {
 			className: "dsh-modelscope-composer-pill-text",
 			style: tier === "exhausted" ? S.pillTierExhaustedText : void 0
-		}, pending ? "…" : readingText(available, usedToday, tt)), stale ? h("span", {
+		}, pending ? "…" : readingText(available, usedToday, tt, accounts)), stale ? h("span", {
 			className: "dsh-modelscope-composer-pill-stale",
 			style: S.pillStale
 		}, ` · ${tt("composer.stale")}`) : null, newModels.length === 0 ? null : h("span", {
@@ -3648,6 +3668,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 					usedTodayOf,
 					tierOf,
 					balanceText,
+					balanceSegmentText,
 					callsText,
 					readingText,
 					staleOf,

@@ -6,10 +6,13 @@
  * 没人公布过的数字（口径纪律见 README「诚实声明」一节：本仓库没有单独的计量文档，
  * 那两段就是唯一家）。所以胶囊只显示两个
  * 真实存在的读数，且各标各的来源：
- *   - 官方魔粒余额：`snapshot.balance.available`，来自官方 `openapi/v1/magicubes/balance`；
+ *   - 官方魔粒余额：`snapshot.accounts[]` 的逐源站官方余额（双账户池，CN|AI），
+ *     老 Host / 软失败省略该块时退回头条 `snapshot.balance.available`，来自官方
+ *     `openapi/v1/magicubes/balance`；正文拼成 `0|1 魔粒` 表示 `CN|AI` 两站各自读数；
  *   - 今日本地调用次数：`snapshot.quota.daily.usedLocal`，Host 侧按本地日聚合、
  *     只统计经本插件的调用——所以正文里必须带「本地」二字，否则会被读成官方口径。
- * 正因为两个数字来源不同，正文写成 `魔搭 · 143 魔粒 · 今日本地 7 次`：前缀说
+ *     本地计数按 profile 分段、**不按源站拆分**，所以次数段是单值（不是 `|`）。
+ * 正因为两个数字来源不同，正文写成 `魔搭 · 0|1 魔粒 · 今日本地 7 次`：前缀说
  * 「哪套额度」，后两段各自说「这个数字是谁给的」。
  *
  * **null ≠ 0**：读不到（Host 软失败、上游没给该字段）渲染「—」，绝不渲染 0。
@@ -171,10 +174,35 @@ const TIER_INK: Record<Tier, string> = {
   unknown: S.pillTierUnknown
 };
 
+/** 余额的纯数值（不带单位）：读不到画「—」，读到了画数字。 */
+function balanceValue(available: number | null, tt: Tt): string {
+  return available === null ? "—" : count(available);
+}
+
 /** 「余额」段的正文：读不到画「—」+ 单位，读到了画数字 + 单位。 */
 export function balanceText(available: number | null, tt: Tt): string {
-  const value = available === null ? "—" : count(available);
-  return `${value} ${tt("composer.balanceUnit")}`;
+  return `${balanceValue(available, tt)} ${tt("composer.balanceUnit")}`;
+}
+
+/**
+ * 双账户余额正文（M3）：有 `accounts[]` 时拼成 `CN|AI 魔粒`——每段是各自源站的
+ * 官方魔粒读数，各读不到各画「—」（如 `0|— 魔粒` 表示国际站没读到）。单值
+ * `balanceText` 是它的退化形：老 Host / 软失败省略 `accounts` 时，退回头条
+ * `balance`（仍是官方读数），不补假的第二段。
+ *
+ * 本地次数不在这里（只统计经本插件、按 profile 分段的聚合账，不按源站切），所以
+ * 这一行只负责余额的「两段」显示，次数的「单段」由 {@link callsText} 另算。
+ */
+export function balanceSegmentText(
+  accounts: { region: "cn" | "ai"; available: number | null }[] | undefined,
+  fallback: number | null,
+  tt: Tt
+): string {
+  if (!accounts || accounts.length === 0) return balanceText(fallback, tt);
+  const cn = accounts.find((account) => account.region === "cn")?.available ?? null;
+  const ai = accounts.find((account) => account.region === "ai")?.available ?? null;
+  const unit = tt("composer.balanceUnit");
+  return `${balanceValue(cn, tt)}|${balanceValue(ai, tt)} ${unit}`;
 }
 
 /** 「今日本地」段的正文：读不到画「—」，读到了画次数。 */
@@ -187,8 +215,14 @@ export function callsText(usedToday: number | null, tt: Tt): string {
  * 一段会让「哪一段是空的」变成排版事故（读者分不清是没读到还是这一栏根本不在），
  * 而「—」明确说了是前者。
  */
-export function readingText(available: number | null, usedToday: number | null, tt: Tt): string {
-  return `${balanceText(available, tt)} · ${callsText(usedToday, tt)}`;
+export function readingText(
+  available: number | null,
+  usedToday: number | null,
+  tt: Tt,
+  accounts?: { region: "cn" | "ai"; available: number | null }[]
+): string {
+  const balance = accounts && accounts.length > 0 ? balanceSegmentText(accounts, available, tt) : balanceText(available, tt);
+  return `${balance} · ${callsText(usedToday, tt)}`;
 }
 
 /**
@@ -509,7 +543,7 @@ export function ModelscopePill(props: { tt: Tt }): unknown {
         // 胶囊才安静——否则一个正常数字会和模型选择器本身的字样一样吵。
         style: tier === "exhausted" ? S.pillTierExhaustedText : undefined
       },
-      pending ? "…" : readingText(available, usedToday, tt)
+      pending ? "…" : readingText(available, usedToday, tt, accounts)
     ),
     stale
       ? h("span", { className: "dsh-modelscope-composer-pill-stale", style: S.pillStale }, ` · ${tt("composer.stale")}`)

@@ -48,6 +48,7 @@ if (SRC_MODE) {
       usedTodayOf: pill.usedTodayOf,
       tierOf: pill.tierOf,
       balanceText: pill.balanceText,
+      balanceSegmentText: pill.balanceSegmentText,
       callsText: pill.callsText,
       readingText: pill.readingText,
       staleOf: pill.staleOf,
@@ -168,7 +169,7 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
 
 // ── §3 口径：null ≠ 0、定档、文案、陈旧 ─────────────────────────────────────
 {
-  const { availableOf, usedTodayOf, tierOf, balanceText, callsText, readingText, staleOf } = helpers;
+  const { availableOf, usedTodayOf, tierOf, balanceText, balanceSegmentText, callsText, readingText, staleOf } = helpers;
 
   // 读不到 ≠ 0。只接受有限数；字符串 / NaN / undefined / 缺失一律 null。
   assert.equal(availableOf(null), null);
@@ -200,6 +201,30 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
   assert.equal(readingText(143, 7, ttZh), "143 魔粒 · 今日本地 7 次");
   assert.equal(readingText(0, 0, ttZh), "0 魔粒 · 今日本地 0 次", "两个 0 都是读数，都要画出来");
   assert.ok(readingText(null, null, ttZh).startsWith("— 魔粒"), "两段同时读不到时仍是两段");
+
+  // 双账户余额正文（M3）：有 accounts[] 时拼成 `CN|AI 魔粒`。每段各读不到各画
+  // 「—」，不互相替补；顺序固定 cn 在前、ai 在后。
+  assert.equal(balanceSegmentText(undefined, 143, ttZh), "143 魔粒", "无 accounts → 退回头条单值");
+  assert.equal(balanceSegmentText([], 143, ttZh), "143 魔粒", "空 accounts → 退回头条单值");
+  assert.equal(
+    balanceSegmentText([{ region: "cn", available: 0 }, { region: "ai", available: 1 }], null, ttZh),
+    "0|1 魔粒",
+    "CN=0 / AI=1 → 0|1 魔粒（用户要求的表示）"
+  );
+  assert.equal(
+    balanceSegmentText([{ region: "ai", available: 1 }, { region: "cn", available: null }], null, ttZh),
+    "—|1 魔粒",
+    "CN 读不到 → —|1，不替补成 0"
+  );
+  // 顺序固定：即使 accounts 先给 ai，正文仍是 cn|ai。
+  assert.ok(balanceSegmentText(undefined, 143, ttZh).startsWith("143"), "单值退化形顺序无歧义");
+
+  // readingText 带上 accounts 时余额段走分段形，次数段仍是单份（本地计数不按源站拆）。
+  assert.equal(
+    readingText(null, 7, ttZh, [{ region: "cn", available: 0 }, { region: "ai", available: 1 }]),
+    "0|1 魔粒 · 今日本地 7 次",
+    "胶囊正文：余额分段、次数单值"
+  );
 
   // 陈旧判定：从没读到过不算陈旧（没有「上次」可谈）；读到过之后，失败或超过
   // 3 个声明周期才算。`hasReading` 是承重输入——`updatedAt > 0` 只说明**曾经**
