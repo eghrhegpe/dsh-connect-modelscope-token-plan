@@ -1,5 +1,8 @@
 /** Ids and same-origin routes the client half talks to. */
 
+/** 源站类型：模型详情页外链按行所属源站选站点（见 {@link modelscopeModelUrl}）。 */
+import type { ProviderRegion } from "../shared/wire.ts";
+
 /** Dictionary namespace this plugin owns. */
 export const NS = "dsh-connect-modelscope-token-plan";
 
@@ -80,7 +83,7 @@ export const MODELSCOPE_INTERNATIONAL_SITE_URL = "https://www.modelscope.ai";
 export const MODELSCOPE_USAGE_URL = "https://modelscope.cn/magicube/usage?tab=consume";
 
 /**
- * 模型详情页：魔粒单价（每 1K token 多少魔粒）只在**网页**展示，不在官方
+ * 模型详情页（CN 站）：魔粒单价（每 1K token 多少魔粒）只在**网页**展示，不在官方
  * OpenAPI 里（抓网页/模型卡脆弱且会漂移，不进主数据源，见 docs/REFERENCES.md）。
  * 纯公开 URL，仅外链——面板每个模型行拼出它，让用户在网页快速查「这个模型
  * 烧多少魔粒」。id 即 `owner/model` 标准格式。逐段 `encodeURIComponent` 后
@@ -88,8 +91,32 @@ export const MODELSCOPE_USAGE_URL = "https://modelscope.cn/magicube/usage?tab=co
  * 语义（被当成 fragment 或 query）。
  */
 export const MODELSCOPE_MODEL_URL_BASE = "https://www.modelscope.cn/models";
-export function modelscopeModelUrl(id: string): string {
-  return `${MODELSCOPE_MODEL_URL_BASE}/${id.split("/").map(encodeURIComponent).join("/")}`;
+
+/**
+ * 模型详情页（国际站，modelscope.ai）：与 CN 同一条路径形状
+ * （`/models/{owner}/{model}`，2026-11-17 实测可达，页面标题即模型名），
+ * 所以拼装逻辑仍只有 `modelscopeModelUrl` 一处，差别只在 host。
+ *
+ * **为什么必须按源站选**：两站目录不是同一份（CN 有国际站没有的模型，反过来
+ * 也有——2026-11-17 实测 CN 38 条 / 国际站 36 条，交集之外各有一批）。模型行
+ * 来自哪一站，详情页就必须开哪一站：拿 CN 的 host 去开国际站的模型，用户点
+ * 这一下本是为了核对单价，却落在一个不提供该模型的站上；反过来同理。
+ */
+export const MODELSCOPE_MODEL_URL_BASE_INTL = "https://www.modelscope.ai/models";
+
+/**
+ * 模型详情页外链。`region` 是该行所属源站（缺省 CN，与 Host 的 region 缺省
+ * 一致）：`ai` → modelscope.ai，其余 → modelscope.cn。
+ *
+ * 缺省就是 CN 而不是「跟随快照」：调用方必须自己知道这一行来自哪一站——
+ * 唯一不需要表明源站的调用点是出图候选（出图走 CN apiBase，候选来自 CN 目录）。
+ * @param {string} id - 模型 id（`owner/model`）。
+ * @param {ProviderRegion} [region] - 行所属源站，缺省 `"cn"`。
+ * @returns {string} 详情页绝对 URL。
+ */
+export function modelscopeModelUrl(id: string, region: ProviderRegion = "cn"): string {
+  const base = region === "ai" ? MODELSCOPE_MODEL_URL_BASE_INTL : MODELSCOPE_MODEL_URL_BASE;
+  return `${base}/${id.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 /**

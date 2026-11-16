@@ -1340,13 +1340,25 @@ await settle();
   const aiStatus = {
     enabled: true, source: "panel", llmAvailable: true, registered: true, error: null,
     region: "ai", modelCount: 2, enabledCount: 2, allowed: "list",
-    enabledIds: [AI_DEEPSEEK, AI_GLM],
+    // 故意混一条**国际站目录里没有**的 CN id（QWEN）：这正是 Host 的「国际站清单
+    // 缺席 = 跟随 CN 清单」造成的泄漏形态——跟随值带着 CN 独有 id，一旦保存就写进
+    // `enabledIdsAi`（2026-11-17 某机器实测三条里有一条国际站根本没有）。
+    enabledIds: [AI_DEEPSEEK, AI_GLM, QWEN],
     roster: [row(AI_DEEPSEEK, "DeepSeek V3 Intl"), row(AI_GLM, "GLM 4.6", { vision: true })]
   };
   const dualSnapshot = snapshotWith({ provider: cnStatus, providers: { cn: cnStatus, ai: aiStatus } });
   /** 源站切换器（按 aria-label 找，别让 `role=group` 撞上趋势指标那组或令牌账户那组）。 */
   const regionGroup = () => qa('[role="group"][aria-label]').find((el) => el.getAttribute("aria-label") === tt("provider.regionModels"));
   const regionSwitchButtons = () => [...(regionGroup()?.querySelectorAll("button") ?? [])];
+  /**
+   * provider 卡里模型行的「在魔搭查看 →」外链。
+   *
+   * 必须限定在 provider section 内：出图卡在同一个 tab、也有模型行外链（那批固定
+   * 开 CN——出图走 CN 的 apiBase），全局 `a[href*="/models/"]` 会把两批混在一起，
+   * 让「国际站的行开 .ai」这条断言在出图行上无辜变红。
+   */
+  const rosterLinks = () => [...(sectionBody("section.provider")?.querySelectorAll('a[href*="/models/"]') ?? [])]
+    .map((el) => el.getAttribute("href"));
 
   // ── ① providers 缺席：DOM 与旧版逐字一致（不许冒出任何新节点）──
   snapshotResponses = [{ body: SNAPSHOT }];
@@ -1381,6 +1393,11 @@ await settle();
   assert.equal(rosterChecks().length, 3, "CN 视图：roster 是 CN 目录那三行");
   assert.equal(rosterCheckOf(QWEN)?.checked, true, "CN 清单勾中的是 QWEN");
   assert.equal(rosterCheckOf(AI_DEEPSEEK), undefined, "CN 视图里不出现国际站的模型");
+  assert.deepEqual(
+    rosterLinks().sort(),
+    [DEEPSEEK, GLM, QWEN].map((id) => `https://www.modelscope.cn/models/${id}`).sort(),
+    "CN 视图：每行的「在魔搭查看 →」开 modelscope.cn（缺省源站，与老行为逐字一致）"
+  );
   assert.match(bodyText(), /已启用 1 \/ 3/, "计数按 CN 那份清单算");
   // 开关、上下文窗口覆盖、reset 仍是两站共用的一份 store 字段 → 只渲染一次。
   assert.equal(toggleSwitches().length, 2, "两个滑杆开关（provider / 出图），不随源站翻倍");
@@ -1399,19 +1416,30 @@ await settle();
   assert.match(bodyText(), /已启用 2 \/ 2/, "计数按国际站那份清单算，不沿用 CN 的");
   assert.equal(rosterCheckOf(AI_DEEPSEEK)?.checked, true, "国际站清单逐行勾中");
   assert.equal(rosterCheckOf(AI_GLM)?.checked, true, "国际站清单逐行勾中（第二个）");
+  // 外链跟着**行所属源站**走：国际站的行开 modelscope.ai（两站目录不同，开错站
+  // = 落到一个不提供这个模型的站上）。这正是本节要钉的那个 bug。
+  assert.deepEqual(
+    rosterLinks().sort(),
+    [AI_DEEPSEEK, AI_GLM].map((id) => `https://www.modelscope.ai/models/${id}`).sort(),
+    "国际站视图：每行的「在魔搭查看 →」开 modelscope.ai"
+  );
+  assert.ok(
+    rosterLinks().every((href) => href.startsWith("https://www.modelscope.ai/models/")),
+    "国际站视图里不得残留 modelscope.cn 的模型外链"
+  );
 
   // 开关是两站共用的一份 store 字段：在国际站视图里翻，payload 仍不带 region。
   toggleSwitches()[0].click();
   await settle();
   assert.deepEqual(jsonOf(lastPost(HOST.PROVIDER_PATH)), { enabled: false }, "开关不按源站写（两站共用一份）");
 
-  // ── ④ 保存走当前源站：国际站带 region:"ai" ──
+  // ── ④ 保存走当前源站：国际站带 region:"ai"，且把别站的残留 id 收窄掉 ──
   byText("button", tt("provider.saveList")).click();
   await settle();
   assert.deepEqual(
     jsonOf(lastPost(PROVIDER_ROSTER_PATH)),
     { enabledIds: [AI_DEEPSEEK, AI_GLM], region: "ai" },
-    "国际站保存带 region:\"ai\""
+    "国际站保存带 region:\"ai\"，且跟随 CN 带进来的 CN 独有 id 不落盘（只存本站目录里存在的）"
   );
 
   // 勾掉一个再保存：draft 就是国际站那份的编辑，落盘也只动国际站。
@@ -1482,6 +1510,36 @@ await settle();
     jsonOf(lastPost(PROVIDER_ROSTER_PATH)),
     { enabledIds: [AI_DEEPSEEK, AI_GLM], region: "ai" },
     "单源站国际站保存仍写它自己那份清单"
+  );
+  renderer.unmount();
+  await settle();
+
+  // ── ⑦ 收窄不许把「有清单」裁成「空清单」 ──
+  // 空清单的语义是「不过滤 = 全部提供」（shared/allow-list.ts）。国际站清单若整份
+  // 都是别站的 id（跟随 CN 的极端形态：CN 清单里只有一个 CN 独有模型），裁空就
+  // 等于把「这些这儿都没有」读成「全都给」——正好反了。所以裁完为空必须原样保存。
+  const foreignOnlySnapshot = snapshotWith({
+    provider: cnStatus,
+    providers: {
+      cn: cnStatus,
+      ai: { ...aiStatus, enabledIds: [QWEN], enabledCount: 0 }
+    }
+  });
+  defaultSnapshot = { body: foreignOnlySnapshot };
+  snapshotResponses = [{ body: foreignOnlySnapshot }];
+  renderer.mount(PanelPage, { tt, localeSubscribe: null });
+  await settle();
+  tabButton("tab.models").click();
+  await settle();
+  byText("button", tt("account.international")).click();
+  await settle();
+  assert.equal(rosterChecks().filter((el) => el.checked).length, 0, "只剩别站 id 时国际站视图没有任何一行勾中");
+  byText("button", tt("provider.saveList")).click();
+  await settle();
+  assert.deepEqual(
+    jsonOf(lastPost(PROVIDER_ROSTER_PATH)),
+    { enabledIds: [QWEN], region: "ai" },
+    "收窄不能把有清单裁成空清单（空 = 不过滤 = 全部提供，语义会翻过来）"
   );
   renderer.unmount();
   await settle();

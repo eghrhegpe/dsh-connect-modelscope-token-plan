@@ -36,8 +36,18 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 
 //#endregion
 //#region src/client/const.ts
-	function modelscopeModelUrl(id) {
-		return `${MODELSCOPE_MODEL_URL_BASE}/${id.split("/").map(encodeURIComponent).join("/")}`;
+/**
+	* 模型详情页外链。`region` 是该行所属源站（缺省 CN，与 Host 的 region 缺省
+	* 一致）：`ai` → modelscope.ai，其余 → modelscope.cn。
+	*
+	* 缺省就是 CN 而不是「跟随快照」：调用方必须自己知道这一行来自哪一站——
+	* 唯一不需要表明源站的调用点是出图候选（出图走 CN apiBase，候选来自 CN 目录）。
+	* @param {string} id - 模型 id（`owner/model`）。
+	* @param {ProviderRegion} [region] - 行所属源站，缺省 `"cn"`。
+	* @returns {string} 详情页绝对 URL。
+	*/
+	function modelscopeModelUrl(id, region = "cn") {
+		return `${region === "ai" ? MODELSCOPE_MODEL_URL_BASE_INTL : MODELSCOPE_MODEL_URL_BASE}/${id.split("/").map(encodeURIComponent).join("/")}`;
 	}
 	/** 从 `owner/model` 取 owner（无斜杠时整段作 owner）。 */
 	function catalogOwner(id) {
@@ -103,7 +113,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		const m = tokens / 1e6;
 		return `${m >= 10 || Number.isInteger(m) ? Math.round(m) : Math.round(m * 10) / 10}M`;
 	}
-	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, PROVIDER_QUOTA_RESUME_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH, MODELSCOPE_TOKEN_URL, MODELSCOPE_INTERNATIONAL_SITE_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, FEATURED_OWNERS;
+	var NS, PANEL_ID, SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH, PROVIDER_PATH, PROVIDER_ROSTER_PATH, PROVIDER_CONTEXT_PATH, PROVIDER_RESET_PATH, PROVIDER_QUOTA_RESUME_PATH, DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH, MODELSCOPE_TOKEN_URL, MODELSCOPE_INTERNATIONAL_SITE_URL, MODELSCOPE_USAGE_URL, MODELSCOPE_MODEL_URL_BASE, MODELSCOPE_MODEL_URL_BASE_INTL, FEATURED_OWNERS;
 	var init_const = __esmMin((() => {
 		init_wire();
 		NS = "dsh-connect-modelscope-token-plan";
@@ -125,6 +135,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		MODELSCOPE_INTERNATIONAL_SITE_URL = "https://www.modelscope.ai";
 		MODELSCOPE_USAGE_URL = "https://modelscope.cn/magicube/usage?tab=consume";
 		MODELSCOPE_MODEL_URL_BASE = "https://www.modelscope.cn/models";
+		MODELSCOPE_MODEL_URL_BASE_INTL = "https://www.modelscope.ai/models";
 		FEATURED_OWNERS = Object.freeze([
 			"deepseek-ai",
 			"ZhipuAI",
@@ -2073,6 +2084,37 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		}, [hostKey, region]);
 		const roster = status.roster;
 		const rosterIds = roster.map((row) => row.id);
+		/**
+		* 落盘前把清单收窄到**本源站目录里真实存在的 id**（哨兵 `HIDE_ALL` 原样保留）。
+		*
+		* 为什么要在保存这一侧收：允许清单回答的是「这一站提供哪些模型」，而面板只画得出
+		* 这一站目录里的行——看不见的 id 用户既勾不了也取消不了。把它们原样写进盘，等于
+		* UI 说一份、盘里存另一份。
+		*
+		* 泄漏源是 Host 的「国际站清单缺席 = 跟随 CN 清单」（provider-store.ts 的
+		* storedIdsFor）：跟随值里带着 CN 独有 id（例：`Qwen/Qwen3.8-Flash-Next` 在 CN
+		* 目录里、国际站目录里没有），于是用户在国际站第一次点保存，就把 CN 的 id 写进了
+		* `enabledIdsAi`——此后那份清单里混着别的站的模型，与「这一站提供哪些」自相矛盾
+		* （2026-11-17 实测某机器 `enabledIdsAi` 三条里就有一条国际站根本没有）。
+		* 发布侧 `filterByEnabled` 本来就按目录裁一遍，所以这里只改变**落盘的诚实度**，
+		* 顺带让用户下一次保存把历史残留清掉。
+		*
+		* 目录读不到时 roster 为空——那时整块 roster 不渲染、保存按钮也不在，走不到这里；
+		* 仍留一层 guard：空 roster 一律原样返回，绝不在目录缺席时把清单清空。
+		*
+		* 收窄**不许把「有清单」变成「空清单」**：空清单的语义是「不过滤 = 全部提供」
+		* （shared/allow-list.ts），把一个只含别站 id 的清单裁空，等于把用户的
+		* 「这些这儿都没有」读成「全都给」——正好反了。所以裁完为空就原样保存，
+		* 宁可留一条看不见的残留，也不静默翻转语义（「一个都不提供」的表达式是
+		* `HIDE_ALL_MODELS` 哨兵，只有「全部隐藏」按钮会发）。
+		*/
+		const catalogOnly = (ids) => {
+			const parsed = parseAllowedList(ids);
+			if (parsed.mode !== "list" || rosterIds.length === 0) return ids.slice();
+			const known = new Set(rosterIds);
+			const kept = parsed.ids.filter((id) => known.has(id));
+			return kept.length === 0 ? ids.slice() : kept;
+		};
 		const toggleOne = (id) => setDraft((current) => {
 			const ids = parseAllowedList(current);
 			const kept = ids.mode === "list" ? [...ids.ids] : [];
@@ -2236,7 +2278,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 					marginLeft: "auto",
 					whiteSpace: "nowrap"
 				},
-				href: modelscopeModelUrl(row.id),
+				href: modelscopeModelUrl(row.id, region),
 				target: "_blank",
 				rel: "noreferrer",
 				title: tt("models.viewOnSiteTitle")
@@ -2311,7 +2353,11 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			type: "button",
 			style: S.primary,
 			disabled: busy,
-			onClick: () => onSaveList(draft.slice(), region)
+			onClick: () => {
+				const ids = catalogOnly(draft);
+				setDraft(ids);
+				onSaveList(ids, region);
+			}
 		}, tt("provider.saveList"))), h("div", { style: S.advancedHint }, tt("provider.maxOutputHint")), visibleRows.length === 0 ? h("div", { style: {
 			...S.muted,
 			fontSize: 12,
@@ -2546,7 +2592,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 				marginLeft: "auto",
 				whiteSpace: "nowrap"
 			},
-			href: modelscopeModelUrl(row.id),
+			href: modelscopeModelUrl(row.id, "cn"),
 			target: "_blank",
 			rel: "noreferrer",
 			title: tt("models.viewOnSiteTitle")

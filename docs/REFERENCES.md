@@ -95,9 +95,16 @@ balance，差值≈当日总消耗，见 ROADMAP 的 backlog）。
 
 **按模型的魔粒单价**（每 1K token 多少魔粒）在网页**模型详情页**有展示，但**不在
 官方 OpenAPI 里**——要拿只能抓网页/模型卡，脆弱且会漂移，**不进主数据源**。面板用
-模型详情页 URL（`https://www.modelscope.cn/models/{owner}/{model}`，`owner/model` 即
-标准模型 id）做**外链**（client 半边每个模型行的「在魔搭查看 →」），方便人工核对单价；
-这只是网页跳转，**不是数据源**。
+模型详情页 URL（`owner/model` 即标准模型 id）做**外链**（client 半边每个模型行的
+「在魔搭查看 →」），方便人工核对单价；这只是网页跳转，**不是数据源**。
+
+**外链的站点跟着行所属源站走**（2026-11-17）：两站的详情页路径同构
+（`/models/{owner}/{model}`，实测可达、页面标题即模型名），只有 host 不同——
+CN `https://www.modelscope.cn/models/…`、国际站 `https://www.modelscope.ai/models/…`
+（`src/client/const.ts` 的 `modelscopeModelUrl(id, region)`）。两站目录不是同一份
+（同日实测 CN 38 条 / 国际站 36 条，交集之外各有一批），所以不能拿一个站点的 host
+去开另一个站点的模型：用户点这一下本是为了核对单价，落在不提供该模型的站上等于没给。
+出图候选是唯一固定开 CN 的调用点（出图走 CN 的 `apiBase`）。
 
 ### 模型「能否吃图」（vision）：`/v1/models` 无模态，但详情端点有精确任务标签
 

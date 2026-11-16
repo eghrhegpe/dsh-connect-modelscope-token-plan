@@ -75,4 +75,14 @@ function providerFixture() {
   // 多段 id
   const multi = modelscopeModelUrl("org/team/model");
   assert.match(multi, /org\/team\/model$/, "多段 id 斜杠保留");
+
+  // 源站选择：国际站的行必须开 modelscope.ai。两站目录不同（CN 38 条 / 国际站 36 条，
+  // 交集之外各有一批），拿 CN 的 host 去开国际站的模型 = 落到一个不提供它的站；
+  // 缺省则必须是 CN（与 Host 的 region 缺省一致，老调用点不传参也不变）。
+  assert.equal(modelscopeModelUrl("Qwen/Qwen3-8B"), "https://www.modelscope.cn/models/Qwen/Qwen3-8B", "缺省 region = CN");
+  assert.equal(modelscopeModelUrl("Qwen/Qwen3-8B", "cn"), "https://www.modelscope.cn/models/Qwen/Qwen3-8B", "显式 cn 与缺省逐字相同");
+  assert.equal(modelscopeModelUrl("Qwen/Qwen3-8B", "ai"), "https://www.modelscope.ai/models/Qwen/Qwen3-8B", "国际站的行开 modelscope.ai");
+  // 国际站这一侧同样逐段转义（同一个拼装出口，两站不许各写一份）。
+  assert.match(modelscopeModelUrl("owner/name with space", "ai"), /^https:\/\/www\.modelscope\.ai\/models\/owner\/name%20with%20space$/, "国际站也逐段转义");
+  assert.match(modelscopeModelUrl("owner/model#section", "ai"), /%23/, "国际站的 # 同样转义");
 }

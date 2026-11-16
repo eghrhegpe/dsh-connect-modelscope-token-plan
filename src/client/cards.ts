@@ -644,6 +644,37 @@ export function ProviderCard({ provider, providers, busy, error, onToggle, onSav
 
   const roster = status.roster;
   const rosterIds = roster.map((row) => row.id);
+  /**
+   * 落盘前把清单收窄到**本源站目录里真实存在的 id**（哨兵 `HIDE_ALL` 原样保留）。
+   *
+   * 为什么要在保存这一侧收：允许清单回答的是「这一站提供哪些模型」，而面板只画得出
+   * 这一站目录里的行——看不见的 id 用户既勾不了也取消不了。把它们原样写进盘，等于
+   * UI 说一份、盘里存另一份。
+   *
+   * 泄漏源是 Host 的「国际站清单缺席 = 跟随 CN 清单」（provider-store.ts 的
+   * storedIdsFor）：跟随值里带着 CN 独有 id（例：`Qwen/Qwen3.8-Flash-Next` 在 CN
+   * 目录里、国际站目录里没有），于是用户在国际站第一次点保存，就把 CN 的 id 写进了
+   * `enabledIdsAi`——此后那份清单里混着别的站的模型，与「这一站提供哪些」自相矛盾
+   * （2026-11-17 实测某机器 `enabledIdsAi` 三条里就有一条国际站根本没有）。
+   * 发布侧 `filterByEnabled` 本来就按目录裁一遍，所以这里只改变**落盘的诚实度**，
+   * 顺带让用户下一次保存把历史残留清掉。
+   *
+   * 目录读不到时 roster 为空——那时整块 roster 不渲染、保存按钮也不在，走不到这里；
+   * 仍留一层 guard：空 roster 一律原样返回，绝不在目录缺席时把清单清空。
+   *
+   * 收窄**不许把「有清单」变成「空清单」**：空清单的语义是「不过滤 = 全部提供」
+   * （shared/allow-list.ts），把一个只含别站 id 的清单裁空，等于把用户的
+   * 「这些这儿都没有」读成「全都给」——正好反了。所以裁完为空就原样保存，
+   * 宁可留一条看不见的残留，也不静默翻转语义（「一个都不提供」的表达式是
+   * `HIDE_ALL_MODELS` 哨兵，只有「全部隐藏」按钮会发）。
+   */
+  const catalogOnly = (ids: string[]): string[] => {
+    const parsed = parseAllowedList(ids);
+    if (parsed.mode !== "list" || rosterIds.length === 0) return ids.slice();
+    const known = new Set(rosterIds);
+    const kept = parsed.ids.filter((id) => known.has(id));
+    return kept.length === 0 ? ids.slice() : kept;
+  };
   // 勾一个真实模型 = 退出「全部隐藏」：哨兵是独占态，不能被真实 id 稀释成
   // 混排清单（Host 会把混排判成 none，而面板会把它画成勾中——UI 与落盘撒谎）。
   const toggleOne = (id: string) => setDraft((current) => {
@@ -855,7 +886,10 @@ export function ProviderCard({ provider, providers, busy, error, onToggle, onSav
           : null,
         // 外链保留**可读的**「在魔搭查看 →」：缩成一枚 ↗ 省了宽度，却让第一次看到
         // 它的人猜不出它干什么。省下的那点宽度不值得这个代价（2026-10-17）。
-        h("a", { style: { ...S.formNote, margin: 0, marginLeft: "auto", whiteSpace: "nowrap" }, href: modelscopeModelUrl(row.id), target: "_blank", rel: "noreferrer", title: tt("models.viewOnSiteTitle") }, tt("models.viewOnSite"))
+        //
+        // 站点按**这一行所属的源站**选（M6）：两站目录不同，国际站的行开 CN 的
+        // 详情页 = 开一个不提供它的站（见 const.ts 的 modelscopeModelUrl）。
+        h("a", { style: { ...S.formNote, margin: 0, marginLeft: "auto", whiteSpace: "nowrap" }, href: modelscopeModelUrl(row.id, region), target: "_blank", rel: "noreferrer", title: tt("models.viewOnSiteTitle") }, tt("models.viewOnSite"))
       )
     );
   };
@@ -945,7 +979,9 @@ export function ProviderCard({ provider, providers, busy, error, onToggle, onSav
           }, tt("provider.hideAll")),
           h("button", {
             type: "button", style: S.primary, disabled: busy,
-            onClick: () => onSaveList(draft.slice(), region)
+            // 草稿里可能残留本源站目录里没有的 id（跟随 CN 的历史值），落盘前收窄；
+            // 同时把草稿同步成落盘值，免得下一次保存又把它们带回来。
+            onClick: () => { const ids = catalogOnly(draft); setDraft(ids); onSaveList(ids, region); }
           }, tt("provider.saveList"))
         ),
         // 输出上限的**缺省说明**，常驻一行。它存在的理由是这个面板最反直觉的一件
@@ -1253,7 +1289,9 @@ export function DrawCard({ draw, busy, error, onToggle, onReset, onSelectModel, 
             () => onSelectModel(row.id),
             [
               ...capabilityBadges(row),
-              h("a", { key: "link", style: { ...S.formNote, margin: 0, marginLeft: "auto", whiteSpace: "nowrap" }, href: modelscopeModelUrl(row.id), target: "_blank", rel: "noreferrer", title: tt("models.viewOnSiteTitle") }, tt("models.viewOnSite"))
+              // 出图候选来自 **CN 目录**（draw-runtime 走 CN 的 apiBase），所以这里
+              // 显式给 "cn"：出图没有国际站版本，链接跟着目录而不是跟着某个页面状态。
+              h("a", { key: "link", style: { ...S.formNote, margin: 0, marginLeft: "auto", whiteSpace: "nowrap" }, href: modelscopeModelUrl(row.id, "cn"), target: "_blank", rel: "noreferrer", title: tt("models.viewOnSiteTitle") }, tt("models.viewOnSite"))
             ]
           )
         )
