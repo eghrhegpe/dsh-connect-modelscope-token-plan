@@ -175,13 +175,13 @@ const TIER_INK: Record<Tier, string> = {
 };
 
 /** 余额的纯数值（不带单位）：读不到画「—」，读到了画数字。 */
-function balanceValue(available: number | null, tt: Tt): string {
+function balanceValue(available: number | null): string {
   return available === null ? "—" : count(available);
 }
 
 /** 「余额」段的正文：读不到画「—」+ 单位，读到了画数字 + 单位。 */
 export function balanceText(available: number | null, tt: Tt): string {
-  return `${balanceValue(available, tt)} ${tt("composer.balanceUnit")}`;
+  return `${balanceValue(available)} ${tt("composer.balanceUnit")}`;
 }
 
 /**
@@ -202,7 +202,7 @@ export function balanceSegmentText(
   const cn = accounts.find((account) => account.region === "cn")?.available ?? null;
   const ai = accounts.find((account) => account.region === "ai")?.available ?? null;
   const unit = tt("composer.balanceUnit");
-  return `${balanceValue(cn, tt)}|${balanceValue(ai, tt)} ${unit}`;
+  return `${balanceValue(cn)}|${balanceValue(ai)} ${unit}`;
 }
 
 /** 「今日本地」段的正文：读不到画「—」，读到了画次数。 */

@@ -14,15 +14,19 @@
  * registerAdapter 之间没有 await」由此前的注释论证升级为语言级保证。相位
  * （idle/serving/failing/broken/disposed）从契约字段推导，不双写。
  *
- * 与 sensenova 版的关系：**结构同源、代码不等价**——去注释后代码行重叠 77%
- * （2026-10-16 实测；复核：`node tools/dev/cross-repo-drift.mjs`）。所以差异**不止**
- * 三个标签：除工厂导出名 `"createModelScopeAdapter"`、`registerPair` 用的
+ * 与 sensenova 版的关系：**已分家**——2026-11-17 实测去注释行重叠 59%，低于本仓判
+ * 「同族」的 60% 线（复核：`node tools/dev/cross-repo-drift.mjs`）。这条原先写的是
+ * 「结构同源、代码行重叠 77%（2026-10-16 实测）」：那个读数在 main 上已漂到 64%，
+ * 本文件随双源站拓扑（M2–M6）再掉一档——区域专属的 `providerId`/`displayName`
+ * 依赖、`gatherPublish`/`publish` 的 `quotaSuppressed` 参数、`state.suppressed`
+ * 字段，sensenova 侧没有这些概念。所以**不可照搬**，差异也不止三个标签：除工厂
+ * 导出名 `"createModelScopeAdapter"`、`registerPair` 用的 provider 常量
  * `LLM_PROVIDER_ID`/`LLM_DISPLAY_NAME`、`warnBuildFailure` 的 label `"ModelScope"`
  * 之外，vision 判定这里取自 `llm-models.ts`（sensenova 侧走 `parsers.ts` 的
  * `identifyVisionModel`），usage 观察层的接线位置也不同。
  *
- * 可以跨仓库**对着读**的是三条承重语义（队列 / disposed 闸 / 单点 registerPair，
- * 它们是 `publish-core.ts` 的骨头，三处 91% 同源）；具体代码不可照搬。
+ * 可以跨仓库**对着读**的只剩三条承重语义（队列 / disposed 闸 / 单点 registerPair，
+ * 它们是 `publish-core.ts` 的骨头，三处 91% 共用同一批原语）。
  *
  * peer-free：不 import 任何运行时 peer。适配器工厂由调用方注入
  * （`loadAdapterModule`，默认 `import("./llm-adapter.ts")`），所以离线套件可以换

@@ -230,6 +230,28 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
     };
   };
 
+  /**
+   * 五条写路由共用的收尾：「落盘（或清运行时状态）→ 触发收敛 → 回读快照」。
+   *
+   * 提出来是因为同一副骨架此前在 provider / roster / context / reset / quota-resume
+   * 里各抄了一遍——`npm run duplicate-check` 因此从 6 clones 涨到 8（判据 min-tokens 70）。
+   * 失败语义保持原样：落盘或收敛失败走 `respondError` 且**不回** 200——用户的显式
+   * 操作必须看得见它没生效。
+   *
+   * @param response - HTTP 响应。
+   * @param commit - 真正的写操作 + `reconcile()`。
+   * @returns {Promise<void>}
+   */
+  const commitAndRespond = async (response: any, commit: () => Promise<void>): Promise<void> => {
+    try {
+      await commit();
+    } catch (error) {
+      respondError(response, error);
+      return;
+    }
+    writeJson(response, 200, await snapshot({}, { tolerateCatalogFailure: true }), { "cache-control": "no-store" });
+  };
+
   const offs: (() => void)[] = [];
 
   // 开关路由（GET 读 / POST 写 enabled）。
@@ -258,22 +280,21 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
       }
       const body = await readJsonBodyOr400(request, response);
       if (body === null) return;
-      if (typeof body.enabled !== "boolean") {
+      // 收窄后的值先落成局部量：闭包里不能再靠 `body` 的属性收窄（TS 不把对
+      // 可变对象属性的收窄穿过函数边界）。
+      const enabled = body.enabled;
+      if (typeof enabled !== "boolean") {
         writeJson(response, 400, { ok: false, error: "expected { enabled: boolean }" }, { "cache-control": "no-store" });
         return;
       }
-      try {
-        await providerStore.save(body.enabled);
-        // 开关只决定「提不提供模型」，不决定「提供哪些」——落盘后触发收敛：
-        // reconciler 带**当前窗口覆盖**拉目录、按**落盘清单**重注册，不等
-        // 下一次轮询。失败在 publish 内部回滚到上一对并落进
-        // publisher.state.error。
+      // 开关只决定「提不提供模型」，不决定「提供哪些」——落盘后触发收敛：
+      // reconciler 带**当前窗口覆盖**拉目录、按**落盘清单**重注册，不等
+      // 下一次轮询。失败在 publish 内部回滚到上一对并落进
+      // publisher.state.error。
+      await commitAndRespond(response, async () => {
+        await providerStore.save(enabled);
         await reconcile();
-      } catch (error) {
-        respondError(response, error);
-        return;
-      }
-      writeJson(response, 200, await snapshot({}, { tolerateCatalogFailure: true }), { "cache-control": "no-store" });
+      });
     }, settings.allowedHosts)
   }));
 
@@ -298,18 +319,14 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
       // 清单按源站分段（M6）：`region:"ai"` 只写国际站那份（`enabledIdsAi`），
       // 缺省/脏值写 CN 那份——老客户端 `{enabledIds}` 的落点与磁盘键都不变。
       const region = regionOf(body);
-      try {
+      await commitAndRespond(response, async () => {
         // 持久化该源站的允许清单（provider-store 具备时）；随后触发收敛——reconciler
         // 用**落盘的**清单重注册（不是本环传进来的这份：落盘优先是
         // resolveEnabledIds 的判据，见 provider-reconcile.ts）。两个 region 的收敛链
         // 都会被驱动一遍，各自读到自己那份键，所以保存任一站的清单都能当场生效。
         await providerStore.saveEnabledIds?.(ids, region);
         await reconcile();
-      } catch (error) {
-        respondError(response, error);
-        return;
-      }
-      writeJson(response, 200, await snapshot({}, { tolerateCatalogFailure: true }), { "cache-control": "no-store" });
+      });
     }, settings.allowedHosts)
   }));
 
@@ -327,21 +344,19 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
       if (body === null) return;
       // 与 roster 同一纪律：缺字段要拒。`undefined` 静默当作「跟随目录」会把
       // 一个格式坏掉的 body 读成重置——用户以为是保存，实际什么都没存。
-      if (body.contextWindow !== null && (typeof body.contextWindow !== "number" || !Number.isFinite(body.contextWindow) || body.contextWindow <= 0)) {
+      // 同 enabled：闭包里只用局部量，收窄才成立。
+      const contextWindowValue = body.contextWindow;
+      if (contextWindowValue !== null && (typeof contextWindowValue !== "number" || !Number.isFinite(contextWindowValue) || contextWindowValue <= 0)) {
         writeJson(response, 400, { ok: false, error: "expected { contextWindow: number | null }" }, { "cache-control": "no-store" });
         return;
       }
-      try {
+      await commitAndRespond(response, async () => {
         // 持久化覆盖（provider-store 具备时）；随后触发收敛——覆盖随本次重注册
         // 生效（reconciler 读 desired 时把覆盖喂给 fetchModels），不再有
         // 「先存窗口、再存清单把未打标目录注册上去」的窗口。
-        await providerStore.saveContextWindow?.(body.contextWindow);
+        await providerStore.saveContextWindow?.(contextWindowValue);
         await reconcile();
-      } catch (error) {
-        respondError(response, error);
-        return;
-      }
-      writeJson(response, 200, await snapshot({}, { tolerateCatalogFailure: true }), { "cache-control": "no-store" });
+      });
     }, settings.allowedHosts)
   }));
 
@@ -358,7 +373,7 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
       // reset 不接受参数：body 可有可无（空 body 也合法），所以不能用
       // readJsonBodyOr400——那会对空 body 先写一个 400，再继续就没意义了。
       await readJsonBody(request, MAX_JSON_BODY_BYTES).catch(() => ({ ok: false, error: "ignored" }));
-      try {
+      await commitAndRespond(response, async () => {
         // 忘掉面板开关（回到 patch 默认，本插件默认 false = 不注册）并清空允许清单
         // = 不过滤全部模型。`forget()` 现在清**两份**清单（CN + 国际站，M6）：reset
         // 是一个按钮，只清其中一份会留下看不见的幽灵勾选。随后触发收敛：reset 的
@@ -368,11 +383,7 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
         // 回显「全部提供」而不是「未设置」。国际站那份保持缺席即可，语义同样是不过滤。
         await providerStore.saveEnabledIds?.([], "cn");
         await reconcile();
-      } catch (error) {
-        respondError(response, error);
-        return;
-      }
-      writeJson(response, 200, await snapshot({}, { tolerateCatalogFailure: true }), { "cache-control": "no-store" });
+      });
     }, settings.allowedHosts)
   }));
 
@@ -396,22 +407,20 @@ export function registerProviderRoute(ctx: any, wiring: ProviderRouteWiring) {
       if (body === null) return;
       // region 判据与 roster 同款：只有字面 "ai" 走国际站，缺省/脏值全 CN。
       const region = regionOf(body);
-      if (typeof usageStore?.clearQuotaSuppress !== "function") {
+      // 同上：先取局部量再判 function，闭包里直接调用它（属性收窄穿不过去）。
+      const clearQuotaSuppress = usageStore?.clearQuotaSuppress;
+      if (typeof clearQuotaSuppress !== "function") {
         // 机制缺席（老装配/测试桩）：说清楚而不是谎报成功——谎报会让面板把
         // 「恢复」画成完成，而 provider 仍被摘着。
         writeJson(response, 200, { ok: false, error: "quota suppression is not available in this build" }, { "cache-control": "no-store" });
         return;
       }
-      try {
-        await usageStore.clearQuotaSuppress(region);
+      await commitAndRespond(response, async () => {
+        await clearQuotaSuppress(region);
         // 解除后立刻收敛：provider 重挂不等下一次轮询。reconcile 内部读抑制位
         // 时标记已清，gatherPublish 的开关判定恢复原值 → 走正常注册路径。
         await reconcile();
-      } catch (error) {
-        respondError(response, error);
-        return;
-      }
-      writeJson(response, 200, await snapshot({}, { tolerateCatalogFailure: true }), { "cache-control": "no-store" });
+      });
     }, settings.allowedHosts)
   }));
 
