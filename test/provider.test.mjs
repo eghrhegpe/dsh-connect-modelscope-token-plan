@@ -289,6 +289,38 @@ import { createPublishQueue, swapRegistration, createPairReleaser, BAD_FACTORY_S
   await store.saveEnabledIds(["a/A", "a/A", "", "b/B"]);
   assert.deepEqual(await store.enabledIds(), ["a/A", "b/B"], "重复与空白剔除");
 
+  // ── M6 国际站清单跟随 CN（2026-11-12 用户实测回归）──
+  // 国际站清单没保存过（enabledIdsAi 缺席）时必须**跟随 CN 清单**，而不是读成
+  // 「不过滤」：后者会让 DSH 模型选择器放出国际站目录里的全部模型，绕开「模型」
+  // tab 的勾选约束。跟随方向安全——CN 独有 id 在国际站目录里不存在，
+  // filterByEnabled 天然裁掉，国际站 offer 自动收敛到两站交集。
+  {
+    const follow = createFileProviderStore({ dir: mkdtempSync(join(tmpdir(), "ms-provider-follow-")) });
+    await follow.save(true);
+    await follow.saveEnabledIds(["cn/Only", "both/Shared"]);
+    // 国际站没保存过 → 跟随 CN（不是 []）。
+    assert.deepEqual(await follow.enabledIds("ai"), ["cn/Only", "both/Shared"], "国际站没保存过 → 跟随 CN 清单（不是不过滤）");
+    // 国际站一旦保存了自己的清单 → 接管（跟随结束）。
+    await follow.saveEnabledIds(["intl/Own"], "ai");
+    assert.deepEqual(await follow.enabledIds("ai"), ["intl/Own"], "国际站保存过 → 自己的清单接管");
+    assert.deepEqual(await follow.enabledIds(), ["cn/Only", "both/Shared"], "国际站保存不影响 CN");
+    // CN 清单变化只影响「还在跟随」的国际站：这里国际站已接管，CN 改动不波及。
+    await follow.saveEnabledIds(["cn/New"]);
+    assert.deepEqual(await follow.enabledIds("ai"), ["intl/Own"], "已接管的国际站不随 CN 变化");
+    // 冷读（新 store 实例）也必须保持同一语义：跟随是读侧判据，不是缓存巧合。
+    {
+      const coldFollow = createFileProviderStore({ dir: mkdtempSync(join(tmpdir(), "ms-provider-follow-cold-")) });
+      await coldFollow.saveEnabledIds(["cn/Cold"]);
+      assert.deepEqual(await coldFollow.enabledIds("ai"), ["cn/Cold"], "冷读同样跟随 CN（跟随是读侧语义）");
+    }
+    // forget 清两份清单 → 国际站回到跟随（CN 也没了 → 跟随一个空清单 = 不过滤，
+    // 与 CN 同态，这是「回到默认」的正确形状）。
+    await follow.forget();
+    assert.deepEqual(await follow.enabledIds("ai"), [], "forget 后国际站回到跟随（CN 空 → 同态空）");
+    assert.equal(await follow.enabledIds("ai").then((v) => v.length), 0);
+  }
+
+
   // 忘掉：回到「未设置」
   await store.forget();
   assert.equal(await store.enabled(), null);

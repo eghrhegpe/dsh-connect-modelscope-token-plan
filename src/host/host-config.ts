@@ -38,6 +38,14 @@ export const CONFIG_DEFAULTS = Object.freeze({
   /** 站点源站，只用于面板外链（访问令牌页 / 文档）。 */
   siteBase: "https://modelscope.cn",
   /**
+   * 国际版推理源站（ModelScope International，modelscope.ai）。与 `apiBase` 是两套
+   * 端点——各站模型目录 / 令牌 / 魔粒余额互相独立，所以两个源站各是一把账户的池子
+   * （见 `account-pool.ts`）。默认值是检索到的官方国际版 OpenAI 兼容端点。
+   */
+  apiBaseInternational: "https://api-inference.modelscope.ai/v1",
+  /** 国际版站点源站，只用于面板外链（访问令牌页 / 文档）。 */
+  siteBaseInternational: "https://modelscope.ai",
+  /**
    * 趋势图**显示**天数（面板标题「近 N 天」与图上柱数）——默认值，用户可在面板里
    * 改看多长。
    *
@@ -224,6 +232,10 @@ export function resolveMaxTokensOverrides(raw: unknown): Record<string, number> 
 export interface ResolvedSettings {
   apiBase: string;
   siteBase: string;
+  /** 国际版推理源站（modelscope.ai）。 */
+  apiBaseInternational: string;
+  /** 国际版站点源站（modelscope.ai）。 */
+  siteBaseInternational: string;
   trendDays: number;
   /** 本地趋势的保留窗口（天桶修剪用），恒 ≥ trendDays。 */
   retentionDays: number;
@@ -268,6 +280,10 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
     const siteBase = str(source.siteBase, CONFIG_DEFAULTS.siteBase).replace(/\/+$/, "");
     assertHttpUrl(apiBase, "apiBase");
     assertHttpUrl(siteBase, "siteBase");
+    const apiBaseInternational = str(source.apiBaseInternational, CONFIG_DEFAULTS.apiBaseInternational).replace(/\/+$/, "");
+    const siteBaseInternational = str(source.siteBaseInternational, CONFIG_DEFAULTS.siteBaseInternational).replace(/\/+$/, "");
+    assertHttpUrl(apiBaseInternational, "apiBaseInternational");
+    assertHttpUrl(siteBaseInternational, "siteBaseInternational");
     // 出图总预算先算出来：它是单次等待预算的**上界**（下面那条）。两个数必须在
     // 一处派生，否则「等待不该超过总放弃线」这条不变量就在两个地方各写一遍，
     // 改一处忘一处。
@@ -280,6 +296,8 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
       settings: {
         apiBase,
         siteBase,
+        apiBaseInternational,
+        siteBaseInternational,
         trendDays: clampInt(source.trendDays, CONFIG_DEFAULTS.trendDays, 1, retentionDays),
         retentionDays,
         // 三个时长都必须有上界。`clampInt` 的 max 默认 Infinity，而这三个值直接
@@ -326,6 +344,8 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
       settings: {
         apiBase: CONFIG_DEFAULTS.apiBase,
         siteBase: CONFIG_DEFAULTS.siteBase,
+        apiBaseInternational: CONFIG_DEFAULTS.apiBaseInternational,
+        siteBaseInternational: CONFIG_DEFAULTS.siteBaseInternational,
         trendDays: CONFIG_DEFAULTS.trendDays,
         retentionDays: CONFIG_DEFAULTS.retentionDays,
         cacheSeconds: CONFIG_DEFAULTS.cacheSeconds,

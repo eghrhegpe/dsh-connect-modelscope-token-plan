@@ -172,6 +172,35 @@ assert.match(cfgView.guidance ?? "", /插件配置有误/);
   assert.equal(panel.providerOf(infProvider).enabledCount, 0, "-Infinity enabledCount 回退");
 }
 
+// §3d 按源站分段的 provider 状态（M6）：`providersOf` 是 `providers` 块的唯一读法。
+//
+// 它决定面板会不会出现「CN / 国际站」切换器：只有真的读到两站状态才出现，所以
+// 「无有效键 → null」是承重的兼容承诺——providers 缺席或形状不对时，DOM 必须与
+// 旧版逐字一致（端到端那一半在 `test/dom-render.test.mjs` §19）。键在而值不是
+// 对象 = 那个源站这块读不到（wire.ts 的「省略而非假块」纪律），不许归一成一份
+// 降级块再让面板对着编出来的第二源站说话。
+{
+  const { providersOf } = await import("../src/client/snapshot.ts");
+  assert.equal(providersOf(undefined), null, "providers 缺席 → null（退回单块 provider 路径）");
+  assert.equal(providersOf(null), null, "null 块 → null");
+  assert.equal(providersOf("cn"), null, "非对象块 → null");
+  assert.equal(providersOf({}), null, "空块没有有效键 → null");
+  assert.equal(providersOf({ cn: null }), null, "键在但值不是对象 = 读不到，不编降级块");
+  assert.equal(providersOf({ other: okBody.provider }), null, "只认 cn / ai，未知键不算有效");
+
+  const both = providersOf({
+    cn: { ...okBody.provider, region: "cn", enabledIds: ["deepseek-ai/DeepSeek-V3"] },
+    ai: { ...okBody.provider, region: "ai", enabledIds: [""] }
+  });
+  assert.deepEqual(Object.keys(both ?? {}).sort(), ["ai", "cn"], "两个源站都归一");
+  assert.equal(both.cn.region, "cn", "region 字段随块保留（旧 Host 缺省时由读侧按 cn 处理）");
+  assert.deepEqual(both.cn.enabledIds, ["deepseek-ai/DeepSeek-V3"], "每个键都走 providerOf 同一套归一");
+  assert.deepEqual(both.ai.enabledIds, [], "空串被滤掉（与单块 provider 同一判据）");
+
+  const aiOnly = providersOf({ ai: { ...okBody.provider, region: "ai" } });
+  assert.deepEqual(Object.keys(aiOnly ?? {}), ["ai"], "单源站原样返回——缺的键就是不编一份出来");
+}
+
 // §3c internal_error 必须有引导文案，且**不能**被导去「配令牌」。
 //
 // 回归用例：soft() 与 failureCode() 在错误无 code 时统一产出 internal_error，而
@@ -214,6 +243,44 @@ assert.ok(balanceText.includes("143"), "余额数字 143 上屏");
 const balanceErr = panel.components.BalanceCard({ balance: { available: null, total: null, frozen: null, fetchedAt: null, error: "boom" }, tt: (key) => zh[key] });
 assert.ok(JSON.stringify(balanceErr).includes("boom"), "错误形状渲染错误行而非崩溃");
 
+// §5b M4 AccountsBalanceCard：两站并排、各标签、各读数；空块不渲染；读不到画「—」。
+{
+  const ttOnly = (key) => zh[key];
+  const acct = (region, available, present, error = null) => ({
+    region, providerId: region === "ai" ? "modelscope-token-plan-international" : "modelscope-token-plan",
+    token: { present, source: "credentials", valid: null, checkedAt: null, ephemeral: false },
+    balance: { available, total: available, frozen: 0, fetchedAt: null, error },
+    registered: true, llmAvailable: true
+  });
+  const dual = panel.components.AccountsBalanceCard({
+    accounts: [acct("cn", 143, true), acct("ai", 7, true)],
+    tt: ttOnly
+  });
+  const dualText = JSON.stringify(dual);
+  assert.ok(dualText.includes(zh["account.cn"]), "CN 账户标签上屏");
+  assert.ok(dualText.includes(zh["account.international"]), "国际账户标签上屏");
+  assert.ok(dualText.includes("143") && dualText.includes("7"), "两站各自的官方余额都上屏（不合并成一个数）");
+
+  // 空 / 非数组 accounts → 整块不渲染（老 Host 省略该块，面板回落单账户卡）。
+  assert.equal(panel.components.AccountsBalanceCard({ accounts: [], tt: ttOnly }), null, "空 accounts → null");
+  assert.equal(panel.components.AccountsBalanceCard({ accounts: null, tt: ttOnly }), null, "accounts 非数组 → null");
+
+  // 该站读不到（null）画「—」而不是 0；令牌未配补一句「还没接」。
+  const unreadable = panel.components.AccountsBalanceCard({
+    accounts: [acct("ai", null, false)], tt: ttOnly
+  });
+  const unreadableText = JSON.stringify(unreadable);
+  assert.ok(unreadableText.includes("—"), "读不到画「—」（null ≠ 0）");
+  assert.ok(unreadableText.includes(zh["account.balanceEmpty"]), "令牌未配说「还没接」，不让全「—」被读成余额 0");
+  assert.ok(!unreadableText.includes("NaN") && !unreadableText.includes("undefined"), "脏值不上屏");
+
+  // 余额块带 error → 把 Host 的原因说出来。
+  const errored = panel.components.AccountsBalanceCard({
+    accounts: [acct("cn", null, true, "balance endpoint refused")], tt: ttOnly
+  });
+  assert.ok(JSON.stringify(errored).includes("balance endpoint refused"), "该站错误原因透出");
+}
+
 // §6 client 的路由与 Host 的 paths.ts 一致。产物里的路由是**模板拼接**
 // （"/api/"+NS+后缀，NS 来自 REGISTRATION.id），所以分别核：Host 字面量全集、
 // 产物里的 slug 与各后缀模板。
@@ -238,6 +305,7 @@ const ALL_SUFFIXES = [
   "/provider/roster",
   "/provider/reset",
   "/provider/context",
+  "/provider/quota-resume",
   "/draw",
   "/draw/reset",
   "/trend/window"
@@ -246,7 +314,7 @@ const ALL_SUFFIXES = [
 // provider.ts 里用 `${PROVIDER_PATH}/reset` 拼的派生路由——两个家族的写法不同，
 // 清单按各自实际形态归类，不要为了让分类整齐去改生产代码的形状。
 const LITERAL_SUFFIXES = ["/snapshot", "/models", "/token", "/token/forget", "/probe", "/provider", "/draw", "/draw/reset", "/trend/window"];
-const DERIVED_SUFFIXES = ["/provider/roster", "/provider/reset", "/provider/context"];
+const DERIVED_SUFFIXES = ["/provider/roster", "/provider/reset", "/provider/context", "/provider/quota-resume"];
 
 for (const suffix of ALL_SUFFIXES) {
   // ① client 产物里必须有这条模板（浏览器实际打的路径）。

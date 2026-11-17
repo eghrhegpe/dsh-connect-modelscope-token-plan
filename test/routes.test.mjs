@@ -87,7 +87,7 @@ assert.ok([SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, PROBE_PATH].every((p) => hand
   // `${PROVIDER_PATH}/…` 拼的派生路由。
   const expected = [
     SNAPSHOT_PATH, MODELS_PATH, TOKEN_PATH, TOKEN_FORGET_PATH, PROBE_PATH,
-    PROVIDER_PATH, `${PROVIDER_PATH}/roster`, `${PROVIDER_PATH}/reset`, `${PROVIDER_PATH}/context`,
+    PROVIDER_PATH, `${PROVIDER_PATH}/roster`, `${PROVIDER_PATH}/reset`, `${PROVIDER_PATH}/context`, `${PROVIDER_PATH}/quota-resume`,
     DRAW_PATH, DRAW_RESET_PATH, TREND_WINDOW_PATH
   ].sort();
   assert.deepEqual(
@@ -230,6 +230,86 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   const forgotten = await call(handlers, TOKEN_FORGET_PATH, makeReq("POST", { body: {} }));
   assert.equal(forgotten.ok, true);
   assert.equal(forgotten.present, false);
+}
+
+// ── M4 region：两把令牌各存各的凭据引用，forget 只清指定账户 ──
+//
+// 账户池给 CN / 国际各建一把 tokenStore（ref 分别是 MODELSCOPE_API_KEY /
+// MODELSCOPE_INTERNATIONAL_API_KEY）。请求体带 region:"ai" 时，token/probe 路由
+// 必须选国际那把，绝不能把国际令牌写进 CN 的引用（M2 修过的 ref 串线 bug）。
+// 缺省 / 其它值一律按 CN——老客户端不带 region，行为逐字不变。
+{
+  credentialsService.store.clear();
+  const CN_REF = "MODELSCOPE_API_KEY";
+  const AI_REF = "MODELSCOPE_INTERNATIONAL_API_KEY";
+
+  // 缺省 region（不带字段）→ CN 引用，响应 region:"cn"。
+  const cnSave = await call(handlers, TOKEN_PATH, makeReq("POST", { body: { token: "ms-11111111111111111111111111111111" } }));
+  assert.equal(cnSave.ok, true);
+  assert.equal(cnSave.region, "cn", "缺省 region → 响应标 cn");
+  assert.equal(credentialsService.store.get(CN_REF), "ms-11111111111111111111111111111111", "CN 令牌落 CN 引用");
+  assert.equal(credentialsService.store.has(AI_REF), false, "CN 保存绝不碰国际引用");
+
+  // region:"ai" → 国际引用，CN 引用原样不动。
+  const aiSave = await call(handlers, TOKEN_PATH, makeReq("POST", { body: { token: "ms-22222222222222222222222222222222", region: "ai" } }));
+  assert.equal(aiSave.ok, true);
+  assert.equal(aiSave.region, "ai", "响应标 ai");
+  assert.equal(credentialsService.store.get(AI_REF), "ms-22222222222222222222222222222222", "国际令牌落国际引用");
+  assert.equal(credentialsService.store.get(CN_REF), "ms-11111111111111111111111111111111", "国际保存不动 CN 引用");
+
+  // 脏 region 值按 CN 处理（不让脏值选错账户）。
+  await call(handlers, TOKEN_PATH, makeReq("POST", { body: { token: "ms-33333333333333333333333333333333", region: "garbage" } }));
+  assert.equal(credentialsService.store.get(CN_REF), "ms-33333333333333333333333333333333", "非法 region 回落 CN");
+
+  // forget region:"ai" 只删国际引用，CN 保留。
+  const aiForget = await call(handlers, TOKEN_FORGET_PATH, makeReq("POST", { body: { region: "ai" } }));
+  assert.equal(aiForget.ok, true);
+  assert.equal(aiForget.region, "ai");
+  assert.equal(credentialsService.store.has(AI_REF), false, "国际引用已删");
+  assert.equal(credentialsService.store.has(CN_REF), true, "CN 引用仍在（forget 只清指定账户）");
+
+  // forget 缺省 region（CN）只删 CN 引用。
+  await call(handlers, TOKEN_FORGET_PATH, makeReq("POST", { body: {} }));
+  assert.equal(credentialsService.store.has(CN_REF), false, "缺省 forget 清 CN");
+  assert.equal(credentialsService.store.size, 0, "两把都清干净了");
+}
+
+// ── M4 probe region：验国际令牌走国际 inference + 国际 noteValidity ──
+{
+  const validityOf = { cn: [], ai: [] };
+  const seenProbes = [];
+  const directCtx = { webServer: { register: ({ path, handler }) => { if (path === PROBE_PATH) seenProbes.push({ path, handler }); return () => {}; } } };
+  const cnStore = { state: async () => ({ present: true }), noteValidity: (v) => validityOf.cn.push(v) };
+  const aiStore = { state: async () => ({ present: true }), noteValidity: (v) => validityOf.ai.push(v) };
+  let usedInference = null;
+  const inference = { probe: async () => { usedInference = "cn"; return { ok: true, status: 200, modelId: "m", elapsedMs: 1 }; } };
+  const aiInference = { probe: async () => { usedInference = "ai"; return { ok: true, status: 200, modelId: "m", elapsedMs: 1 }; } };
+  registerProbeRoute(directCtx, {
+    settings: resolveSettings({}).settings,
+    tokenStore: cnStore,
+    usageStore: { recordEvent: async () => {} },
+    inference,
+    accountPool: { tokenStoreOf: (r) => r === "ai" ? aiStore : cnStore },
+    providers: { ai: { inference: aiInference }, cn: { inference } },
+    logger: { warn: () => {} }
+  });
+  const probeHandler = seenProbes.find((p) => p.path === PROBE_PATH).handler;
+
+  // 缺省 region → CN inference + CN noteValidity。
+  let res = makeRes();
+  await probeHandler(makeReq("POST", { body: { modelId: "m" } }), res);
+  assert.equal(res.body.ok, true);
+  assert.equal(usedInference, "cn", "缺省 probe 用 CN inference");
+  assert.deepEqual(validityOf.cn, [true], "缺省 probe 记 CN 令牌好");
+  assert.deepEqual(validityOf.ai, [], "缺省 probe 不动国际令牌");
+
+  // region:"ai" → 国际 inference + 国际 noteValidity。
+  res = makeRes();
+  await probeHandler(makeReq("POST", { body: { modelId: "m", region: "ai" } }), res);
+  assert.equal(res.body.ok, true);
+  assert.equal(usedInference, "ai", "region ai probe 用国际 inference（不同 apiBase/令牌）");
+  assert.deepEqual(validityOf.ai, [true], "region ai 记国际令牌好");
+  assert.deepEqual(validityOf.cn, [true], "region ai 不动 CN 令牌结论");
 }
 
 // ── 魔粒余额：官方端点走 Bearer 令牌；形状漂移降级 ──
@@ -952,6 +1032,83 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   const cleared = await post({ windowDays: null });
   assert.equal(cleared.body.windowDays, null, "null = 清除覆盖");
   assert.equal(cleared.body.days, defaults.trendDays, "清除后回到配置默认");
+}
+
+// ── M3 双账户快照：accounts 可选块，逐源站 token/balance/注册态 ──
+//
+// 装配有账户池时，聚合器按 REGIONS 逐站取**各自**的令牌状态与官方余额；两站各有
+// 一把令牌、一个 provider（plan「拓扑修订」）。装配缺账户池（旧 Host / 直接驱动的
+// 单测）时整块省略——accounts 是可选块，省略是合法形状，客户端退回单源站视图。
+{
+  const cnBalance = { available: 100, total: 200, frozen: 0, fetchedAt: "2026-11-12T00:00:00.000Z" };
+  const aiBalance = { available: 7, total: 9, frozen: 1, fetchedAt: "2026-11-12T00:00:00.000Z" };
+  const base = {
+    settings: resolveSettings({}).settings,
+    tokenStore: { state: async () => ({ present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false }) },
+    usageStore: {
+      daily: async () => ({ calls: 3 }),
+      perModelToday: async () => [],
+      trend: async () => [],
+      events: async () => [],
+      anomaly: () => null
+    },
+    inference: { fetchModels: async () => ({ ids: [], entries: [] }), fetchBalance: async () => cnBalance },
+    providerStore: { enabled: async () => null, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
+    drawStore: { enabled: async () => null, modelId: async () => null, versionNote: async () => null },
+    usagePrefsStore: { windowDays: async () => null, versionNote: async () => null },
+    rosterSeenStore: { fresh: async () => [], versionNote: async () => null },
+    publisher: { state: { enabledIds: [], llmAvailable: false, registered: false, error: null, unavailableIds: [] } },
+    logger: { warn: () => {} }
+  };
+
+  const accountPool = {
+    REGIONS: ["cn", "ai"],
+    tokenState: async (region) => ({
+      present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false,
+      // 借一个字段把 region 带出来，验证聚合器确实读的是「该 region」的状态而不是同一把。
+      readError: region
+    })
+  };
+  const providers = {
+    cn: {
+      inference: { fetchBalance: async () => cnBalance },
+      publisher: { state: { registered: true, llmAvailable: true } }
+    },
+    ai: {
+      // 国际站余额端点可能不存在/抛错：软失败，balance.error 说明原因，available 为 null（红线 3）。
+      inference: { fetchBalance: async () => aiBalance },
+      publisher: { state: { registered: false, llmAvailable: true } }
+    }
+  };
+
+  const withPool = await buildSnapshotBody({ ...base, accountPool, providers });
+  assert.ok(Array.isArray(withPool.accounts), "有账户池装配时 accounts 必须存在（可选块，但此时该给）");
+  assert.equal(withPool.accounts.length, 2, "CN + 国际两站各一项");
+  assert.deepEqual(withPool.accounts.map((a) => a.region), ["cn", "ai"], "顺序按 REGIONS");
+  assert.equal(withPool.accounts[0].providerId, "modelscope-token-plan", "CN provider id");
+  assert.equal(withPool.accounts[1].providerId, "modelscope-token-plan-international", "国际 provider id");
+  assert.equal(withPool.accounts[0].balance.available, 100, "CN 用自己的余额");
+  assert.equal(withPool.accounts[1].balance.available, 7, "国际用自己的余额（不是把 CN 那份重复一遍）");
+  assert.equal(withPool.accounts[0].registered, true, "CN provider 注册态逐账户");
+  assert.equal(withPool.accounts[1].registered, false, "国际 provider 注册态逐账户");
+  // 兼容：顶层 token/balance 仍是 CN 单源站视图，不被 accounts 顶掉。
+  assert.equal(withPool.balance.available, 100, "顶层 balance 兼容聚合仍是 CN");
+  assert.equal(withPool.token.present, true, "顶层 token 兼容聚合仍在");
+
+  // 没配令牌的国际账户：fetchBalance 抛 AUTH_ERROR 也必须压成「静默缺席」，不报假故障。
+  const noAiToken = await buildSnapshotBody({
+    ...base,
+    accountPool: { ...accountPool, tokenState: async (region) => region === "ai"
+      ? { present: false, source: "none", valid: null, checkedAt: null, ephemeral: true, readError: null }
+      : { present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false, readError: null } },
+    providers: { ...providers, ai: { ...providers.ai, inference: { fetchBalance: async () => { throw new Error("no token"); } } } }
+  });
+  assert.equal(noAiToken.accounts[1].balance.available, null, "没令牌的国际站余额为 null（读不到 ≠ 0）");
+  assert.equal(noAiToken.accounts[1].balance.error, null, "没令牌是「还没接」，不是一条假故障");
+
+  // 装配缺账户池 → 整块省略（旧 Host / 直接驱动聚合器的单测走这条路）。
+  const withoutPool = await buildSnapshotBody({ ...base });
+  assert.equal(withoutPool.accounts, undefined, "无 accountPool/providers 时省略 accounts（可选块，省略是合法形状）");
 }
 
 console.log("routes.test.mjs: all checks passed");

@@ -15,6 +15,23 @@ export type PluginError = Error & {
 };
 
 /**
+ * 单源站（region）的一套 provider 装配：目录 HTTP 出口 + 注册状态机 + 该 region
+ * 的收敛触发口。`index.ts` 的 buildRegion 为每个源站各建一份，wiring.providers
+ * 按 region 收拢。两个 provider 共享同一份 provider-store / usage-store /
+ * rosterSeenStore（拓扑修订：不是单 provider 按 region 挑令牌）。
+ *
+ * **刻意放在 HostDeps 接口之前**：deps-wiring 门禁（§1）用两段字面锚点裁出
+ * HostDeps 的字段块来扫描两空格缩进的 `name?:`。若把本接口夹进那段文本里，
+ * 它的 `inference` / `publisher` / `reconcile` 会被误读成「声明了没接线的缝」；
+ * 注释里也别写出那两段锚点字面串，否则 `indexOf` 会提前命中、把裁切起点挪走。
+ */
+export interface RegionProvider {
+  inference: ReturnType<typeof import("./inference-client.ts").createInferenceClient>;
+  publisher: ReturnType<typeof import("./provider-publish.ts").createProviderPublisher>;
+  reconcile: () => Promise<void>;
+}
+
+/**
  * `apply()` 的测试缝：真实 Loader 不传任何东西，测试用它替换 peer 模块、fetch
  * 与可选服务。**每个字段都必须在 `index.ts` 里真的被读到**——声明了不接线的缝
  * 比没有更坏：注入被静默忽略，测试以为自己覆盖了，其实测的还是 ctx 里那份。
@@ -128,6 +145,19 @@ export interface Wiring {
    * 「本次触发已被消费，注册态已反映 desired」。
    */
   reconcile: () => Promise<void>;
+  /**
+   * 账户池协调器（account-pool.ts）：CN/国际双源站各一把凭据引用 + 各自 base +
+   * 健康态。M3 的双账户余额、M4 的 token 路由 region 都从它取各站的
+   * tokenStore / apiBase / siteBase。两个 provider 各绑各站的一把令牌。
+   */
+  accountPool: ReturnType<typeof import("./account-pool.ts").createAccountPool>;
+  /**
+   * 按 region 装配的两套 provider（CN / 国际）。wiring 上的 `inference` /
+   * `publisher` / `tokenStore` 是 `providers.cn` 的**向后兼容别名**——现有快照、
+   * models / probe / token / provider 路由都只认单源站那一套；M3/M4 的双账户
+   * 面板从这里按 region 读各自的注册状态与目录。
+   */
+  providers: Record<import("./account-pool.ts").Region, RegionProvider>;
   logger?: { warn?: (message: string, error?: unknown) => void };
 }
 

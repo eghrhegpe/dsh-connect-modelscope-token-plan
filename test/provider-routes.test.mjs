@@ -293,6 +293,79 @@ assert.ok(handlers.has(PROVIDER_PATH), "provider 路由已注册");
   assert.equal(adapters.has("modelscope-token-plan"), false, "假 Host 的注册表必须摘干净");
 }
 
+// ── quota-resume：解除当日抑制 → provider 重挂 ──
+//
+// 全链路（真实 usage-store，不桩）：写一份带今日 quota 事件的 usage.json →
+// 开关开着 → GET 读到 suppressedToday:true → POST quota-resume → 标记清除 →
+// 收敛把 provider 重挂回 picker。摘除动作本身的语义（unregister 连目录行）
+// 在 provider-publish.test.mjs §14 钉。
+{
+  const adapters = new Map();
+  const llmService = {
+    registerAdapter(providerIds, adapter) {
+      for (const p of providerIds) adapters.set(p, adapter);
+      return () => { for (const p of providerIds) adapters.delete(p); };
+    }
+  };
+  const resumeHandlers = new Map();
+  apply({
+    get: (service) => (service === "llm" ? llmService : service === "credentials" ? credentialsService : undefined),
+    logger: { warn: () => {} },
+    effect: () => {},
+    webServer: {
+      register({ path, handler }) { resumeHandlers.set(path, handler); return () => resumeHandlers.delete(path); }
+    }
+  }, {}, {
+    env: {},
+    // 工厂按入参回显 providerId：CN 与国际站各自注册各自的 id。固定回一个 id
+    // 会让国际站的注册也顶着 CN 的键进表——「CN 被摘了」的断言就永远测不真。
+    loadAdapterModule: async () => ({
+      createModelScopeAdapter: async (input) => ({ adapter: { tag: "resume-e2e" }, providerIds: [input.providerId] })
+    })
+  });
+  const stateDir = join(process.env.DSH_HOME, "state", PLUGIN_ID);
+  mkdirSync(stateDir, { recursive: true });
+  const today = new Date();
+  const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  writeFileSync(join(stateDir, "usage.json"), JSON.stringify({
+    version: 1,
+    days: {},
+    models: {},
+    events: [],
+    quotaSuppress: { cn: dateKey }
+  }), "utf8");
+  currentFetch = async () => new Response(JSON.stringify({
+    object: "list",
+    data: [{ id: "Qwen/Qwen3.5-35B-A3B" }]
+  }), { status: 200, headers: { "content-type": "application/json" } });
+
+  // 开关开着（面板保存），收敛一轮：抑制位压住注册 → provider 摘着。
+  const saved = await call(resumeHandlers, PROVIDER_PATH, makeReq("POST", { body: { enabled: true } }));
+  assert.equal(saved.body.ok, true);
+  assert.equal(saved.body.suppressedToday, true, "GET/POST 回读带 suppressedToday（当日 quota 摘除的可见事实）");
+  assert.equal(saved.body.registered, false, "抑制位 true → provider 被摘（开关开着也摘）");
+  assert.equal(adapters.has("modelscope-token-plan"), false, "适配器不在 Host 注册表里");
+
+  // resume：解除 CN 抑制 → 立即收敛重挂。
+  const resumed = await call(resumeHandlers, PROVIDER_PATH + "/quota-resume", makeReq("POST", { body: {} }));
+  assert.equal(resumed.body.ok, true, "resume 成功");
+  assert.equal(resumed.body.suppressedToday, false, "解除后回读 suppressedToday:false");
+  assert.equal(resumed.body.registered, true, "resume → 收敛 → provider 重挂");
+  assert.ok(adapters.has("modelscope-token-plan"), "适配器回到 Host 注册表");
+
+  // 幂等：再 resume 一次（无抑制）→ 照常成功（多一轮收敛是可接受的 churn）。
+  const again = await call(resumeHandlers, PROVIDER_PATH + "/quota-resume", makeReq("POST", { body: { region: "ai" } }));
+  assert.equal(again.body.ok, true, "无抑制时 resume 是幂等 no-op（不报错）");
+
+  // 坏方法 → 405（与其它写路由同一围栏）。
+  const wrong = makeRes();
+  await resumeHandlers.get(PROVIDER_PATH + "/quota-resume")(makeReq("GET"), wrong);
+  assert.equal(wrong.status, 405, "GET 打 resume 路由 → 405");
+
+  // 收尾：清掉状态文件，别把抑制标记漏给后面的 section。
+  rmSync(join(stateDir, "usage.json"), { force: true });
+}
+
 // ── 目录读不到 ≠ 0 个模型（GET 如实报，POST 回读宽容但说明原因）──
 //
 // 旧实现把 fetchModels 失败降级成 `{entries: []}`，于是 GET 回 `ok:true,

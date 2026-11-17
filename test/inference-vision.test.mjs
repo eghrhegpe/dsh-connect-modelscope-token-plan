@@ -113,4 +113,49 @@ assert.equal(detailCalls, beforeSwap, "换目录缓存键后详情端点不得�
   assert.equal(attempts, 2, "两轮各打一次（失败那轮没有被记住）");
 }
 
+// ── 详情端点返回非 JSON 时，弃权响应体不得留下未处理的 rejection ──
+//
+// 0.7.0 实测崩溃（crash-2026-11-12T13-16-58-378Z-host.log）：详情端点回了一个
+// 非 JSON 的 200（网关错误页），`response.json()` 在半路抛错，此时 body 仍被
+// reader 锁着（locked=true）；旧 discardBody 的 `void response.body?.cancel()`
+// 丢掉了一个以 ERR_INVALID_STATE 拒绝的 promise（Node 的 cancel 在 locked 时
+// **不抛**，而是 reject）。宿主在加载期把这条未处理 rejection 当成
+// `fatal load failure`，直接把 DSH 进程杀掉——面板再好也没机会出现。
+{
+  // 前提钉住：json() 抛错后 body 确实是 locked 的，否则这条用例测不到真场景。
+  const probe = new Response("<html>bad gateway</html>", { status: 200, headers: { "content-type": "text/html" } });
+  await assert.rejects(probe.json());
+  assert.equal(probe.body.locked, true, "前提：json() 抛错后 body 仍被 reader 锁着");
+
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    const HTML_CATALOG = { object: "list", data: [{ id: "Gateway/Pretty-Error", object: "", owned_by: "system", created: 1 }] };
+    const htmlDetail = createInferenceClient({
+      settings,
+      tokenStore,
+      deps: {
+        fetchImpl: async (url) => {
+          if (url.endsWith("/models")) {
+            return new Response(JSON.stringify(HTML_CATALOG), { status: 200, headers: { "content-type": "application/json" } });
+          }
+          return new Response("<html>bad gateway</html>", { status: 200, headers: { "content-type": "text/html" } });
+        }
+      }
+    });
+    const { entries } = await htmlDetail.fetchModels();
+    // unhandledRejection 在 microtask 队列耗尽后派发，给它一个宏任务。
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(
+      unhandled.map((e) => String(e?.code ?? e?.message ?? e)),
+      [],
+      "discardBody 弃权 locked body 时不得留下未处理的 rejection（宿主会当成 fatal 杀进程）"
+    );
+    assert.equal(entries.find((e) => e.id === "Gateway/Pretty-Error")?.vision, false, "读不到标签不猜视觉能力，照常出目录");
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+}
+
 console.log("inference-vision.test.mjs: all checks passed");

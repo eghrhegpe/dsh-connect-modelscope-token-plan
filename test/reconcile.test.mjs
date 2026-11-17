@@ -283,4 +283,58 @@ function makeDeps({ store, fetch, logger, usageEvents } = {}) {
   assert.equal(published.length, 1, "恢复后收敛照常发布");
 }
 
+// §10 quota 抑制：kind==="quota" 的 429 当日把整个 provider 摘出 picker。
+// 收敛器只负责「读到位、传下去」：摘除动作本身（unregister 连 releaseDirectory）
+// 在 provider-publish.test.mjs 钉。四条各有用例：
+//   ① 抑制位 true → publish 的第 4 参 true（publisher 走开关关同一条 unregister）；
+//   ② 缺省缝（老装配没有 usageQuotaSuppressed）→ 恒 false，M4 行为不变；
+//   ③ 读失败 → false + warn（摘除方向的坏读宁可让模型继续可用，但不说沉默）；
+//   ④ 读失败的原因在日志里。
+{
+  const { deps, published } = makeDeps({ store: makeStore({ enabled: true }) });
+  deps.publisher.publish = async (entries, enabledIds, unavailable, quotaSuppressed) => {
+    published.push({ entries, enabledIds, unavailable, quotaSuppressed });
+    return { ok: true };
+  };
+  let suppressed = true;
+  deps.usageQuotaSuppressed = async () => suppressed;
+  const { reconcile } = createProviderReconciler(deps);
+  await reconcile();
+  assert.equal(published[0].quotaSuppressed, true, "抑制位 true → 第 4 参 true（整体摘除）");
+
+  suppressed = false;
+  await reconcile();
+  assert.equal(published[1].quotaSuppressed, false, "抑制解除 → 正常注册路径");
+}
+
+{
+  // ② 缺省缝：没有 usageQuotaSuppressed（老装配）→ 第 4 参恒 false。
+  const { deps, published } = makeDeps({ store: makeStore({ enabled: true }) });
+  deps.publisher.publish = async (entries, enabledIds, unavailable, quotaSuppressed) => {
+    published.push({ quotaSuppressed });
+    return { ok: true };
+  };
+  const { reconcile } = createProviderReconciler(deps);
+  await reconcile();
+  assert.equal(published[0].quotaSuppressed, false, "老装配（缝缺席）→ 永不整体摘除，M4 行为");
+}
+
+{
+  // ③④ 读失败：false 兜底 + warn 留痕。
+  const warnings = [];
+  const { deps, published } = makeDeps({
+    store: makeStore({ enabled: true }),
+    logger: { warn: (m) => warnings.push(m) }
+  });
+  deps.publisher.publish = async (entries, enabledIds, unavailable, quotaSuppressed) => {
+    published.push({ quotaSuppressed });
+    return { ok: true };
+  };
+  deps.usageQuotaSuppressed = async () => { throw new Error("disk gone"); };
+  const { reconcile } = createProviderReconciler(deps);
+  await reconcile();
+  assert.equal(published[0].quotaSuppressed, false, "抑制读失败 → 未抑制兜底（不能把一次坏读变成摘 provider）");
+  assert.ok(warnings.some((m) => /quota suppression read failed/.test(m)), "读失败的原因留一条 warn（不说沉默）");
+}
+
 console.log("reconcile.test.mjs: all checks passed");

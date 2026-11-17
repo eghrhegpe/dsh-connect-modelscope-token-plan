@@ -265,4 +265,70 @@ function allSources() {
   assert.equal(models[0].contextWindow, 262144, "注册 descriptor 的 contextWindow 必须是覆盖值");
 }
 
+// ── §4 两个 provider：CN 与国际各自注册（拓扑修订）──
+//
+// 账户池落地后 apply() 会装配两套 inference/publisher/reconcile。这里用记录式假
+// 适配器工厂截获每次 createModelScopeAdapter 收到的 providerId / displayName /
+// baseUrl，断言两个 provider 真的都注册、各自指向各的源站、展示名可区分。只测
+// 「有没有两个」不够——同名同 base 的两个 provider 在 picker 里分辨不出来。
+{
+  const cleanups = [];
+  const makeCtx2 = (extra = {}) => ({
+    get: () => undefined,
+    emit: () => {},
+    logger: { warn: () => {} },
+    effect: (fn) => { const off = fn(); if (typeof off === "function") cleanups.push(off); },
+    webServer: { register: () => () => {} },
+    ...extra
+  });
+  const MODEL_LIST = JSON.stringify({ object: "list", data: [{ id: "Qwen/Qwen3-Coder" }] });
+  const fetchImpl = async (url) =>
+    String(url).includes("/models")
+      ? new Response(MODEL_LIST, { status: 200, headers: { "content-type": "application/json" } })
+      : new Response("{}", { status: 401 });
+
+  const seen = [];
+  apply(
+    makeCtx2(),
+    { registerProvider: true },
+    {
+      getLlm: () => ({
+        registerAdapter: () => () => {},
+        registerConfigurableProviders: () => () => {}
+      }),
+      credentials: {
+        async resolve() { return { value: "ms-0123456789abcdef0123456789abcdef" }; },
+        async set() {},
+        async unset() {}
+      },
+      fetchImpl,
+      env: {},
+      loadAdapterModule: async () => ({
+        createModelScopeAdapter: ({ providerId, displayName, baseUrl }) => {
+          seen.push({ providerId, displayName, baseUrl });
+          return { adapter: { getModels: () => [] }, providerIds: [providerId] };
+        }
+      })
+    }
+  );
+
+  // 两个 region 的收敛按 REGIONS 顺序串行跑完（reconcileAll）。等两条都出现。
+  const deadline = Date.now() + 5000;
+  while (seen.length < 2 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  for (const off of cleanups.splice(0)) off();
+
+  assert.ok(seen.some((s) => s.providerId === "modelscope-token-plan"),
+    "CN provider（modelscope-token-plan）必须被注册");
+  assert.ok(seen.some((s) => s.providerId === "modelscope-token-plan-international"),
+    "国际 provider（modelscope-token-plan-international）必须被注册");
+  const cn = seen.find((s) => s.providerId === "modelscope-token-plan");
+  const ai = seen.find((s) => s.providerId === "modelscope-token-plan-international");
+  assert.ok(cn.baseUrl.includes("modelscope.cn"), "CN provider 必须用 CN apiBase");
+  assert.ok(ai.baseUrl.includes("modelscope.ai"), "国际 provider 必须用国际 apiBase");
+  assert.equal(ai.displayName, "ModelScope International", "国际 provider 展示名必须与 CN 区分");
+  assert.notEqual(cn.displayName, ai.displayName, "两个 provider 展示名不能相同");
+}
+
 console.log("deps-wiring.test.mjs: all checks passed");

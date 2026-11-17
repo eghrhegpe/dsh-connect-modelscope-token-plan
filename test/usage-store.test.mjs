@@ -388,4 +388,71 @@ assert.equal(localDateKey(new Date(2026, 9, 4)), "2026-10-04");
   );
 }
 
+// §12 quota 抑制标记：kind==="quota" 的 429 当日把整个 provider 摘出 picker 的
+// 持久化状态。四条规则各有用例：只有 quota 盖标记、按源站独立、日期翻页自动
+// 解除、手动清除（resume 路由的后端）。与 §10 的 per-model 耗尽集合并列——那是
+// 「灰显谁」，这是「整体摘不摘」。
+{
+  const suppress = makeStore({ profile: "quota-suppress" });
+  const tMorning = new Date(2026, 9, 18, 9, 0, 0);
+  clock = tMorning;
+
+  // ① 只有 quota 盖标记：rate_limit（限频退避）与 error（未知）都不摘 provider。
+  await suppress.recordEvent({ modelId: "a/A", kind: "rate_limit", message: "backoff", at: tMorning });
+  assert.equal(await suppress.isQuotaSuppressed("cn"), false, "rate_limit 不是抑制证据");
+  await suppress.recordEvent({ modelId: "a/A", kind: "error", message: "unknown", at: tMorning });
+  assert.equal(await suppress.isQuotaSuppressed("cn"), false, "error 不是抑制证据");
+  await suppress.recordEvent({ modelId: "a/A", kind: "quota", message: "429 quota", at: tMorning });
+  assert.equal(await suppress.isQuotaSuppressed("cn"), true, "窗口内 quota 事件 → 当日抑制");
+
+  // ② 按源站独立：CN 的 429 不摘国际站（两个 provider 各判各的）。
+  assert.equal(await suppress.isQuotaSuppressed("ai"), false, "CN 的 quota 不波及国际站");
+  await suppress.recordEvent({ modelId: "b/B", kind: "quota", message: "429 quota", region: "ai", at: tMorning });
+  assert.equal(await suppress.isQuotaSuppressed("ai"), true, "国际站自己的 429 只摘国际站");
+  assert.equal(await suppress.isQuotaSuppressed("cn"), true, "CN 的标记保持");
+
+  // 事件行带上 region（排查用），缺省不带键（与旧事件行同形）。
+  const events = await suppress.events();
+  assert.equal(events.find((e) => e.kind === "quota" && e.modelId === "b/B")?.region, "ai", "ai 事件行带 region 标注");
+  assert.equal(events.find((e) => e.kind === "quota" && e.modelId === "a/A")?.region, undefined, "缺省事件行不带 region 键");
+
+  // ③ 日期翻页自动解除：标记存的是触发当日的本地日期键，只认今天。
+  const tNextDay = new Date(2026, 9, 19, 8, 0, 0);
+  clock = tNextDay;
+  assert.equal(await suppress.isQuotaSuppressed("cn"), false, "本地日期翻页后自动解除（CN）");
+  assert.equal(await suppress.isQuotaSuppressed("ai"), false, "本地日期翻页后自动解除（AI）");
+
+  // ④ 手动清除：resume 路由的后端。幂等——没标记时清除也是 no-op。
+  await suppress.recordEvent({ modelId: "a/A", kind: "quota", message: "429 quota", at: tNextDay });
+  assert.equal(await suppress.isQuotaSuppressed("cn"), true, "当天再次耗尽 → 再次抑制");
+  await suppress.clearQuotaSuppress("cn");
+  assert.equal(await suppress.isQuotaSuppressed("cn"), false, "手动清除立即解除");
+  await suppress.clearQuotaSuppress("cn");
+  assert.equal(await suppress.isQuotaSuppressed("cn"), false, "清除幂等（没标记时是 no-op）");
+  assert.equal(await suppress.isQuotaSuppressed("ai"), false, "清除只影响本源站");
+
+  // ⑤ 持久化：新实例读回同一份抑制标记（state 目录里,不是内存态）。
+  const tLater = new Date(2026, 9, 19, 10, 0, 0);
+  clock = tLater;
+  await suppress.recordEvent({ modelId: "c/C", kind: "quota", message: "429 quota", region: "ai", at: tLater });
+  const reopenedSuppress = makeStore({ profile: "quota-suppress" });
+  assert.equal(await reopenedSuppress.isQuotaSuppressed("ai"), true, "重启后抑制标记仍在");
+  assert.equal(await reopenedSuppress.isQuotaSuppressed("cn"), false, "另一源站不受影响");
+
+  // ⑥ 磁盘形状防御：手写的坏形状读作「无抑制」，不是崩溃也不是抑制。
+  const corruptFile = join(home, "state", "quota-suppress", PLUGIN_ID, "usage.json");
+  const raw = JSON.parse(readFileSync(corruptFile, "utf8"));
+  raw.quotaSuppress = "not-an-object";
+  writeFileSync(corruptFile, JSON.stringify(raw));
+  const healed = makeStore({ profile: "quota-suppress" });
+  assert.equal(await healed.isQuotaSuppressed("ai"), false, "形状坏的抑制标记按未抑制读");
+
+  // ⑦ 纯函数判定与 store 方法同一份解释：昨日标记 ≠ 未抑制。
+  const { quotaSuppressedOf } = await import("../src/host/usage-store.ts");
+  const stalePayload = { version: 1, days: {}, models: {}, events: [], quotaSuppress: { cn: "2026-10-17" } };
+  assert.equal(quotaSuppressedOf(stalePayload, "cn", tLater), false, "昨天的标记是过期残留，读作未抑制");
+  const freshPayload = { version: 1, days: {}, models: {}, events: [], quotaSuppress: { cn: localDateKey(tLater) } };
+  assert.equal(quotaSuppressedOf(freshPayload, "cn", tLater), true, "今天的标记 = 抑制");
+}
+
 console.log("usage-store.test.mjs: all checks passed");

@@ -41,15 +41,19 @@ if (SRC_MODE) {
     styles: S,
     helpers: {
       MODELSCOPE_PROVIDER: pill.MODELSCOPE_PROVIDER,
+      MODELSCOPE_PROVIDER_INTERNATIONAL: pill.MODELSCOPE_PROVIDER_INTERNATIONAL,
+      isModelscopeProvider: pill.isModelscopeProvider,
       selectedProviderOf: pill.selectedProviderOf,
       availableOf: pill.availableOf,
       usedTodayOf: pill.usedTodayOf,
       tierOf: pill.tierOf,
       balanceText: pill.balanceText,
+      balanceSegmentText: pill.balanceSegmentText,
       callsText: pill.callsText,
       readingText: pill.readingText,
       staleOf: pill.staleOf,
-      newModelsOf: pill.newModelsOf
+      newModelsOf: pill.newModelsOf,
+      accountsOf: pill.accountsOf
     },
     components: { ComposerUsagePill: pill.ComposerUsagePill, ModelscopePill: pill.ModelscopePill }
   };
@@ -88,6 +92,11 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
   const hostId = hostSrc.match(/export const LLM_PROVIDER_ID = "([^"]+)"/)?.[1];
   assert.ok(hostId, "必须能从 src/host/llm-models.ts 读到 LLM_PROVIDER_ID");
   assert.equal(helpers.MODELSCOPE_PROVIDER, hostId, "胶囊认领的 provider 必须与 Host 注册的 provider id 逐字一致");
+  // M4 拓扑修订：还有第二个 provider。国际 id 同样要与 Host 常量逐字对齐——
+  // 拼错一处就是「接入了国际模型但胶囊永不出现」。
+  const hostIntlId = hostSrc.match(/export const LLM_PROVIDER_ID_INTERNATIONAL = "([^"]+)"/)?.[1];
+  assert.ok(hostIntlId, "必须能从 src/host/llm-models.ts 读到 LLM_PROVIDER_ID_INTERNATIONAL");
+  assert.equal(helpers.MODELSCOPE_PROVIDER_INTERNATIONAL, hostIntlId, "国际 provider id 与 Host 常量逐字一致");
   assert.ok(pillSrc.includes("modelscope-token-plan"), "胶囊源码里的值要可读（别只靠 import）");
 }
 
@@ -106,6 +115,16 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
   assert.equal(providers({ next: { provider: "" } }), undefined, "空串不是 provider");
   assert.equal(providers(undefined), undefined);
   assert.equal(providers({ next: null, lastUsed: null }), undefined);
+
+  // M4 两站门控：CN 与国际站任一 provider 都算归属，别家仍整块缺席。
+  const owns = helpers.isModelscopeProvider;
+  assert.equal(owns(helpers.MODELSCOPE_PROVIDER), true, "CN provider 属本插件");
+  assert.equal(owns(helpers.MODELSCOPE_PROVIDER_INTERNATIONAL), true, "国际 provider 属本插件（拓扑修订：两个 id）");
+  assert.equal(owns("sensenova-token-plan"), false, "别家 provider 不属本插件");
+  assert.equal(owns(""), false, "空串不属本插件");
+  assert.equal(owns(undefined), false, "判不出 provider 不属本插件");
+  const intlTree = components.ComposerUsagePill({ tt: ttZh, useProjection: () => ({ next: { provider: helpers.MODELSCOPE_PROVIDER_INTERNATIONAL } }) });
+  assert.ok(intlTree, "选中国际站模型时胶囊必须出现（否则一半模型把胶囊藏了）");
 
   // 非归属会话：外层完全不渲染（也就不会跑任何请求）。
   const foreign = components.ComposerUsagePill({ tt: ttZh, useProjection: () => ({ next: { provider: "other-provider" } }) });
@@ -150,7 +169,7 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
 
 // ── §3 口径：null ≠ 0、定档、文案、陈旧 ─────────────────────────────────────
 {
-  const { availableOf, usedTodayOf, tierOf, balanceText, callsText, readingText, staleOf } = helpers;
+  const { availableOf, usedTodayOf, tierOf, balanceText, balanceSegmentText, callsText, readingText, staleOf } = helpers;
 
   // 读不到 ≠ 0。只接受有限数；字符串 / NaN / undefined / 缺失一律 null。
   assert.equal(availableOf(null), null);
@@ -183,6 +202,30 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
   assert.equal(readingText(0, 0, ttZh), "0 魔粒 · 今日本地 0 次", "两个 0 都是读数，都要画出来");
   assert.ok(readingText(null, null, ttZh).startsWith("— 魔粒"), "两段同时读不到时仍是两段");
 
+  // 双账户余额正文（M3）：有 accounts[] 时拼成 `CN|AI 魔粒`。每段各读不到各画
+  // 「—」，不互相替补；顺序固定 cn 在前、ai 在后。
+  assert.equal(balanceSegmentText(undefined, 143, ttZh), "143 魔粒", "无 accounts → 退回头条单值");
+  assert.equal(balanceSegmentText([], 143, ttZh), "143 魔粒", "空 accounts → 退回头条单值");
+  assert.equal(
+    balanceSegmentText([{ region: "cn", available: 0 }, { region: "ai", available: 1 }], null, ttZh),
+    "0|1 魔粒",
+    "CN=0 / AI=1 → 0|1 魔粒（用户要求的表示）"
+  );
+  assert.equal(
+    balanceSegmentText([{ region: "ai", available: 1 }, { region: "cn", available: null }], null, ttZh),
+    "—|1 魔粒",
+    "CN 读不到 → —|1，不替补成 0"
+  );
+  // 顺序固定：即使 accounts 先给 ai，正文仍是 cn|ai。
+  assert.ok(balanceSegmentText(undefined, 143, ttZh).startsWith("143"), "单值退化形顺序无歧义");
+
+  // readingText 带上 accounts 时余额段走分段形，次数段仍是单份（本地计数不按源站拆）。
+  assert.equal(
+    readingText(null, 7, ttZh, [{ region: "cn", available: 0 }, { region: "ai", available: 1 }]),
+    "0|1 魔粒 · 今日本地 7 次",
+    "胶囊正文：余额分段、次数单值"
+  );
+
   // 陈旧判定：从没读到过不算陈旧（没有「上次」可谈）；读到过之后，失败或超过
   // 3 个声明周期才算。`hasReading` 是承重输入——`updatedAt > 0` 只说明**曾经**
   // 读到过，读失败时轮询 hook 会清空 data 却保留 updatedAt（只看 updatedAt 会在
@@ -202,7 +245,9 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
 
 // ── §4 字典与样式族 ────────────────────────────────────────────────────────
 {
-  const keys = ["composer.prefix", "composer.pillTitle", "composer.balanceUnit", "composer.localCalls", "composer.stale"];
+  const keys = ["composer.prefix", "composer.pillTitle", "composer.balanceUnit", "composer.localCalls", "composer.stale",
+    // M4 双账户余额行的字典键（胶囊展开面板里并排列两站）。
+    "composer.accountsBalance", "composer.accountCnBalance", "composer.accountIntlBalance"];
   for (const key of keys) {
     assert.equal(typeof zh[key], "string", `${key} 必须在 zh 里（键集的真源）`);
     assert.equal(typeof en[key], "string", `${key} 必须在 en 里（en 是 typeof zh，缺键即编译错）`);
@@ -316,6 +361,59 @@ const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.ur
     assert.ok(zh[key] !== "", `${key} 的 zh 不许是空串`);
     assert.ok(en[key] !== "", `${key} 的 en 不许是空串`);
   }
+}
+
+// ── §5 M4 accountsOf：双账户余额行的纯规则 ────────────────────────────────
+//
+// 只测规则本身（不挂 React）：accounts 是**可选块**，省略 / 形状脏 / 每站 null
+// 都要诚实降级。两站是两份独立官方读数，绝不合并成一个总数。
+{
+  const { accountsOf } = helpers;
+  assert.equal(typeof accountsOf, "function", "accountsOf 必须从测试面拿得到");
+
+  // 老 Host / 软失败省略 accounts → 空数组（胶囊正文继续用兼容聚合那一笔）。
+  assert.deepEqual(accountsOf(null), [], "null snapshot → 空");
+  assert.deepEqual(accountsOf(undefined), [], "undefined snapshot → 空");
+  assert.deepEqual(accountsOf({ ok: true }), [], "无 accounts 键 → 空");
+  assert.deepEqual(accountsOf({ accounts: null }), [], "accounts 不是数组 → 空");
+  assert.deepEqual(accountsOf({ accounts: "junk" }), [], "accounts 是字符串 → 空");
+
+  const account = (region, available, extra = {}) => ({
+    region, providerId: region === "ai" ? "modelscope-token-plan-international" : "modelscope-token-plan",
+    token: { present: true, source: "credentials", valid: null, checkedAt: null, ephemeral: false },
+    balance: { available, total: available, frozen: 0, fetchedAt: null, error: null },
+    registered: true, llmAvailable: true,
+    ...extra
+  });
+
+  // 两站各自的读数逐字保留（143 / 7），不合并。
+  assert.deepEqual(
+    accountsOf({ accounts: [account("cn", 143), account("ai", 7)] }),
+    [{ region: "cn", available: 143 }, { region: "ai", available: 7 }],
+    "CN / 国际各一笔，互不混合"
+  );
+
+  // null ≠ 0：读不到就是 null，不许推成 0。
+  assert.deepEqual(
+    accountsOf({ accounts: [account("cn", null), account("ai", "143")] }),
+    [{ region: "cn", available: null }, { region: "ai", available: null }],
+    "available 缺失/字符串 → null（读不到 ≠ 0）"
+  );
+  assert.deepEqual(accountsOf({ accounts: [account("ai", 0)] }), [{ region: "ai", available: 0 }], "0 是读数，要保留");
+
+  // 脏行过滤：region 越界、null 行、重复 region 只认第一份。
+  assert.deepEqual(
+    accountsOf({ accounts: [account("cn", 10), null, { region: "xx", balance: { available: 1 } }, account("cn", 999), account("ai", 5)] }),
+    [{ region: "cn", available: 10 }, { region: "ai", available: 5 }],
+    "越界 region / null 行 / 重复 region 都挡掉"
+  );
+
+  // 余额整块缺席（Host 软失败给的空形状）也不炸。
+  assert.deepEqual(
+    accountsOf({ accounts: [{ region: "cn" }, { region: "ai", balance: null }] }),
+    [{ region: "cn", available: null }, { region: "ai", available: null }],
+    "balance 缺席 → null，不抛"
+  );
 }
 
 console.log("composer-pill.test.mjs: all checks passed");

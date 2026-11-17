@@ -62,7 +62,7 @@ export interface ProviderReconcilerDeps {
   };
   publisher: {
     state: { enabledIds: string[] };
-    publish: (entries: unknown[], enabledIds: string[], unavailable?: string[]) => Promise<unknown>;
+    publish: (entries: unknown[], enabledIds: string[], unavailable?: string[], quotaSuppressed?: boolean) => Promise<unknown>;
   };
   /**
    * 429/错误事件流的读取入口（`usageStore.events`，按 profile 分段的那份）。
@@ -74,6 +74,17 @@ export interface ProviderReconcilerDeps {
    * `exhaustedModelIds`（usage-store.ts），窗口来自 `settings`。
    */
   usageEvents?: () => Promise<readonly QuotaEvent[] | null>;
+  /**
+   * 该源站「今日 quota 抑制」的读入口（`usageStore.isQuotaSuppressed(region)`，
+   * 与 `usageEvents` 同源同 store，按 region 在 index.ts 闭包绑定）。
+   *
+   * true = 这轮 publish 把整个 provider 从 picker 摘出（第 4 参传给
+   * `publisher.publish`，publisher 走与「开关关」同一条 unregister 路径）。
+   * 缺席 = 老装配没有这层（回到 M4 行为：从不整体摘除）。读失败按「未抑制」
+   * 兜底——摘除方向上的读失败宁可让模型继续可用，不能把一次读坏变成「当天
+   * 模型全没了」。
+   */
+  usageQuotaSuppressed?: () => Promise<boolean>;
   /**
    * 首见表：**这是它唯一的写入口**（胶囊那句「· N 新模型」的事实源）。
    *
@@ -107,7 +118,7 @@ interface Desired {
  * @returns {{reconcile: () => Promise<void>; health: () => {{ lastError: unknown }} }}
  */
 export function createProviderReconciler(deps: ProviderReconcilerDeps) {
-  const { settings, providerStore, inference, publisher, usageEvents, logger, rosterSeenStore } = deps;
+  const { settings, providerStore, inference, publisher, usageEvents, usageQuotaSuppressed, logger, rosterSeenStore } = deps;
 
   /**
    * 把一次 store 读取收成「值或 null」——**同步抛与异步拒收都降级**。
@@ -172,6 +183,27 @@ export function createProviderReconciler(deps: ProviderReconcilerDeps) {
   };
 
   /**
+   * 读这一轮的 quota 抑制位。
+   *
+   * 读失败按**未抑制**兜底（false）且不吞原因——方向与 {@link readUnavailable}
+   * 相反但理由同一：一次观测路径的坏读不能变成一次用户可见的销毁（摘 provider），
+   * 但也不能沉默——「这一轮没摘」的原因在日志里。缺省缝 = 永远 false（老装配
+   * 保持 M4 行为）。
+   * @returns {Promise<boolean>}
+   */
+  const readQuotaSuppressed = async (): Promise<boolean> => {
+    if (usageQuotaSuppressed === undefined) return false;
+    try {
+      return await usageQuotaSuppressed() === true;
+    } catch (error) {
+      logger?.warn?.(
+        `${name}: quota suppression read failed (${redactSecrets(errMsg(error))}) — provider stays registered this pass`
+      );
+      return false;
+    }
+  };
+
+  /**
    * 收敛一遍：读 desired → 拉目录 → 复查 desired → publish。
    * @returns {Promise<void>}
    */
@@ -225,8 +257,12 @@ export function createProviderReconciler(deps: ProviderReconcilerDeps) {
     // 消费者——picker（buildDescriptors 丢弃）、面板 roster（snapshot 聚合与
     // provider GET 路由）——都以 publisher 最近发布的这份为准，不会各说一套。
     const unavailable = await readUnavailable();
+    // quota 抑制：kind==="quota" 的 429 当日把整个 provider 摘出 picker。与
+    // 耗尽集合同轮读取，同一次 publish 一起交给 publisher（开关翻转 / resume
+    // 路由触发的收敛也会带上最新值）。
+    const quotaSuppressed = await readQuotaSuppressed();
     try {
-      await publisher.publish(entries, enabledIds, unavailable);
+      await publisher.publish(entries, enabledIds, unavailable, quotaSuppressed);
     } catch (error) {
       // 收敛失败不影响面板：下一轮再试。原因不丢——「目录是当前的，只有注册
       // 没落地」对操作员是可处置的信息。

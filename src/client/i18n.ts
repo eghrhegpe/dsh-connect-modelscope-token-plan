@@ -36,6 +36,15 @@ export const zh = {
   "panel.payloadError": "Host 返回了无法读取的响应（可能页面被登录墙或代理截获）。",
   "shape.missingKeys": "Host 快照缺少必需的顶层键：{keys}",
 
+  // 双账户（模型选择器里的「ModelScope 家族」：CN / 国际两把令牌、两份官方余额）。
+  // 本地用量刻意不按账户切分——份额是同一本按 profile 分段的合并账（见 README 三条
+  // 事实 #1），所以只有账户名与「各自余额」的文案，没有「各自今日本地次数」。
+  "account.cn": "魔搭社区 · CN",
+  "account.international": "国际版 · modelscope.ai",
+  "account.balanceSection": "魔粒余额（官方数据 · 两个账户）",
+  "account.balanceEmpty": "该账户还没有余额读数（未配置令牌或本次读不到）。",
+  "account.tokenRegion": "选择要管理的账户",
+
   "common.httpError": "无法读取 Host 响应（非预期响应，可能页面被登录墙截获）。",
   "common.timeout": "请求超时，请重试。",
 
@@ -98,6 +107,11 @@ export const zh = {
   "provider.llmMissing": "本机 Host 未提供 LLM 注册服务",
   "provider.error": "接入失败：{error}",
   "provider.models": "启用哪些模型",
+  // 允许清单按源站分段（M6）：CN 与国际站的目录不同，清单也各自保存。两句话分工：
+  // regionModels 是切换按钮组的名（读屏念的），regionHint 说明「各自保存 + 选择器
+  // 只出现该站目录里的模型」——否则用户会以为在改一份共享清单。
+  "provider.regionModels": "按源站选择模型",
+  "provider.regionHint": "两个源站的允许清单各自保存（国际站没单独保存过时跟随国内清单）；DSH 模型选择器里只会出现该源站目录里的模型。",
   "provider.allowAll": "全部",
   "provider.hideAll": "全部隐藏",
   "provider.saveList": "保存清单",
@@ -109,6 +123,8 @@ export const zh = {
   "provider.groupCount": "{count} 个",
   "provider.groupSelected": "已选 {count}",
   "provider.quotaExhausted": "额度耗尽",
+  "provider.suppressedToday": "该源站今日免费额度已耗尽（quota 429）——相关模型已从 DSH 模型选择器临时移除，本地日期翻页后自动恢复。",
+  "provider.quotaResume": "立即恢复",
   "provider.vision": "视觉",
   "provider.notConfigured": "还没有访问令牌，先到「接入」tab 配置",
   "provider.source.panel": "面板",
@@ -199,6 +215,9 @@ export const zh = {
   "token.ephemeral": "此 Host 没有凭据服务：面板保存的令牌重启即丢，请改用凭据服务或环境变量。",
   "token.readError": "读不到凭据存储，无法确认令牌状态（不代表没配令牌）：{error}",
   "token.link": "打开魔搭访问令牌页 →",
+  // 国际账户的令牌：引用名是 MODELSCOPE_INTERNATIONAL_API_KEY，不是 CN 那把。
+  "token.hintInternational": "在 ModelScope International「访问令牌」页生成。保存即生效（写入 DSH 凭据服务的 MODELSCOPE_INTERNATIONAL_API_KEY 引用，不依赖重启）。环境变量同名者只在 DSH 启动时读一次，优先级高于此处保存的值。",
+  "token.linkInternational": "打开国际版站点 →",
   "source.credentials": "凭据服务",
   "source.env": "环境变量",
   "source.memory": "内存",
@@ -234,6 +253,11 @@ export const zh = {
   "composer.newModelsTitle": "本机首次见到的模型：",
   "composer.newModelsSep": "、",
   "composer.newModelsNote": "「新」指本机首次记到它，与上游何时上架无关。只列最近 7 天内首见的。",
+  // 胶囊展开面板里的两站余额（各自官方读数，null 画「—」）。本地次数仍是合并账，
+  // 只在上面那一行出现一次，不按账户重复。
+  "composer.accountsBalance": "两个账户的官方魔粒余额",
+  "composer.accountCnBalance": "魔搭社区 · CN",
+  "composer.accountIntlBalance": "国际版 · modelscope.ai",
 };
 
 /** English dictionary, key-parity pinned by the type. */
@@ -253,6 +277,16 @@ export const en: typeof zh = {
   "panel.shapeDrift": "Upstream shape may have changed: {detail}",
   "panel.payloadError": "Host returned an unreadable response (a login wall or proxy may have intercepted it).",
   "shape.missingKeys": "Host snapshot omitted required top-level key(s): {keys}",
+
+  // Dual accounts (the "ModelScope family" in the model picker: CN / International,
+  // two tokens, two official balances). Local usage is deliberately NOT split by
+  // account — it is one merged ledger segmented by profile (README, three facts #1),
+  // so there is no "today's local calls per account" wording here.
+  "account.cn": "ModelScope · CN",
+  "account.international": "International · modelscope.ai",
+  "account.balanceSection": "Magicube balance (official · two accounts)",
+  "account.balanceEmpty": "No balance reading for this account yet (no token configured, or unreadable this time).",
+  "account.tokenRegion": "Choose the account to manage",
 
   "common.httpError": "Unexpected Host response (a login wall or proxy may have intercepted it).",
   "common.timeout": "Request timed out; please retry.",
@@ -312,6 +346,12 @@ export const en: typeof zh = {
   "provider.llmMissing": "This Host exposes no LLM service",
   "provider.error": "Provider error: {error}",
   "provider.models": "Which models to enable",
+  // Allow-lists are split by source site (M6): CN and International have different
+  // catalogues and keep their own lists. regionModels names the switch group for
+  // screen readers; regionHint states "saved separately + picker only shows this
+  // site's catalogue" so nobody thinks they are editing one shared list.
+  "provider.regionModels": "Model list by source site",
+  "provider.regionHint": "Each source site keeps its own allow-list (the international site follows the CN list until you save one of its own); the DSH model picker only offers models from that site's catalogue.",
   "provider.allowAll": "All",
   "provider.hideAll": "Hide all",
   "provider.saveList": "Save list",
@@ -323,6 +363,8 @@ export const en: typeof zh = {
   "provider.groupCount": "{count}",
   "provider.groupSelected": "{count} selected",
   "provider.quotaExhausted": "Quota exhausted",
+  "provider.suppressedToday": "This site's free quota ran out today (quota 429) — its models were removed from the DSH model picker until the local date rolls over.",
+  "provider.quotaResume": "Restore now",
   "provider.vision": "vision",
   "provider.notConfigured": "No token yet — configure it in the Access tab",
   "provider.source.panel": "panel",
@@ -402,6 +444,9 @@ export const en: typeof zh = {
   "token.ephemeral": "This Host has no credentials service: a token saved in the panel is lost on restart. Use the credentials service or an environment variable.",
   "token.readError": "Could not read the credential store, so the token state is unknown (this does NOT mean no token is configured): {error}",
   "token.link": "Open the ModelScope access-token page →",
+  // International token: the reference is MODELSCOPE_INTERNATIONAL_API_KEY, not the CN one.
+  "token.hintInternational": "Generate one on the ModelScope International access-token page. Saving takes effect immediately (written to the MODELSCOPE_INTERNATIONAL_API_KEY reference in the DSH credentials service, no restart needed). A same-named environment variable is read once at DSH launch and ranks ABOVE a value saved here.",
+  "token.linkInternational": "Open the International site →",
   "source.credentials": "credentials",
   "source.env": "environment",
   "source.memory": "memory",
@@ -430,6 +475,11 @@ export const en: typeof zh = {
   "composer.newModelsTitle": "First seen on this device: ",
   "composer.newModelsSep": ", ",
   "composer.newModelsNote": "\"New\" means first recorded on this device, not newly listed by the gateway. Only models first seen within the last 7 days are listed.",
+  // Two official balances in the pill popover (each own reading, null drawn as "—").
+  // Local calls are the merged ledger and appear once in the row above, not per account.
+  "composer.accountsBalance": "Official Magicube balance by account",
+  "composer.accountCnBalance": "ModelScope · CN",
+  "composer.accountIntlBalance": "International · modelscope.ai",
 };
 
 export type DictionaryKey = keyof typeof zh;

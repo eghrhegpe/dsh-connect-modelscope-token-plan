@@ -53,8 +53,27 @@ export interface CatalogEntry {
  */
 export const LLM_PROVIDER_ID = "modelscope-token-plan";
 
-/** DSH 模型选择器里显示的 provider 名。 */
+/**
+ * 国际版（ModelScope International，modelscope.ai）的 provider id。
+ *
+ * **两个 provider，不是 region 前缀**：DSH 的 pi-ai peer 每个 provider 只能绑一个
+ * 令牌解析器、且 `resolveApiKey()` 不传模型 id（见 llm-adapter-core.ts），所以「单一
+ * provider + 按 region 挑两把令牌」做不到。两个源站各注册一个 provider，各自账户
+ * 的令牌，面板作为「ModelScope 家族」并排呈现（见 plan 的「拓扑修订」）。
+ */
+export const LLM_PROVIDER_ID_INTERNATIONAL = "modelscope-token-plan-international";
+
+/** DSH 模型选择器里显示的 provider 名（CN 源站）。 */
 export const LLM_DISPLAY_NAME = "ModelScope Token Plan";
+
+/**
+ * 国际版（modelscope.ai）在 DSH 模型选择器里显示的 provider 名。
+ *
+ * 两个 provider 并列时若都叫「ModelScope Token Plan」，picker 里就是两条同名、
+ * 分不清谁是谁的条目；透传路径见 llm-adapter.ts 的 `displayName` 参数与
+ * provider-publish.ts 的 `effectiveDisplayName`。
+ */
+export const LLM_DISPLAY_NAME_INTERNATIONAL = "ModelScope International";
 
 /** pi-ai 展示的凭据名（静态令牌，形如 `ms-…`）。 */
 export const LLM_API_KEY_NAME = "ModelScope token";
