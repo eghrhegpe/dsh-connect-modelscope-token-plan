@@ -1,6 +1,6 @@
 # ROADMAP
 
-## 现状（0.8.0，2026-11-17）
+## 现状（0.8.1，2026-11-17）
 
 M0–M4+ 全部落地，其后又交付 0.2–0.8（出图工具、用量胶囊、上下文窗口、面板收敛、
 只读盘点、双源站账户池等，逐版公开行为变化见 [CHANGELOG.md](../CHANGELOG.md)）。当前
@@ -14,6 +14,10 @@ M0–M4+ 全部落地，其后又交付 0.2–0.8（出图工具、用量胶囊�
   目录→pi-ai descriptor 映射、发布状态机、429 自愈（QUOTA 快速失败 vs
   RATE_LIMIT 退避 + peer 误判纠正层）；保存与轮询已收编为单一 desired-state
   收敛链（`provider-reconcile.ts`）；
+- **目录 stale-while-revalidate**（0.8.1）：目录缓存过期后**先给上次的好目录**
+  （快照带 `catalogAgeMs` / `catalogStale`，面板与 shapeWarnings 标出年龄）、后台刷新；
+  实测一次冷取 8.6s 曾把整块面板（含本地计数）堵在「加载中」，现在首屏不再等它。
+  首次安装/缓存为空时仍要等一次真实取数；
 - **双源站账户池**（0.8.0）：CN（modelscope.cn）与国际站（modelscope.ai）各一把
   令牌（凭据引用 `MODELSCOPE_API_KEY` / `MODELSCOPE_INTERNATIONAL_API_KEY`）、
   各一个 provider id（`modelscope-token-plan` /
