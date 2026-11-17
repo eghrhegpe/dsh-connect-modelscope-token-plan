@@ -1,9 +1,9 @@
 # ROADMAP
 
-## 现状（0.7.0，2026-10-26）
+## 现状（0.8.0，2026-11-17）
 
-M0–M4+ 全部落地，其后又交付 0.2–0.5 四个版本（出图工具、用量胶囊、上下文窗口、
-面板收敛与只读盘点等，逐版公开行为变化见 [CHANGELOG.md](../CHANGELOG.md)）。当前
+M0–M4+ 全部落地，其后又交付 0.2–0.8（出图工具、用量胶囊、上下文窗口、面板收敛、
+只读盘点、双源站账户池等，逐版公开行为变化见 [CHANGELOG.md](../CHANGELOG.md)）。当前
 能力面：
 
 - **本地用量面板**（Plugins 页插件卡，额度 / 模型 / 接入三 tab）：头条是官方魔粒
@@ -14,6 +14,11 @@ M0–M4+ 全部落地，其后又交付 0.2–0.5 四个版本（出图工具、
   目录→pi-ai descriptor 映射、发布状态机、429 自愈（QUOTA 快速失败 vs
   RATE_LIMIT 退避 + peer 误判纠正层）；保存与轮询已收编为单一 desired-state
   收敛链（`provider-reconcile.ts`）；
+- **双源站账户池**（0.8.0）：CN（modelscope.cn）与国际站（modelscope.ai）各一把
+  令牌（凭据引用 `MODELSCOPE_API_KEY` / `MODELSCOPE_INTERNATIONAL_API_KEY`）、
+  各一个 provider id（`modelscope-token-plan` /
+  `modelscope-token-plan-international`）、各自 apiBase 与官方魔粒余额；面板并排
+  显示两份余额，本地用量仍是**一份**按 profile 分段的账，不按源站切；
 - **上下文窗口四级真值链**：目录声明 > 用户档位 > 内置策展表（models.dev 交叉
   核对，带核对日期与过期提醒）> 128K 兜底；
 - **出图工具**（opt-in，默认关）：两段式（提交→带 jobId 续查），一次工具调用不
@@ -27,6 +32,9 @@ M0–M4+ 全部落地，其后又交付 0.2–0.5 四个版本（出图工具、
 - **额度耗尽集合接线**（2026-10-18）：窗口内出现过 quota 事件的模型不进
   picker、面板 roster 灰显——从本插件事件流推断的保守口径（恢复不可观测，
   规则与取舍见 [PROVIDER-M4.md](PROVIDER-M4.md) §15）；
+- **当日 quota 429 整体摘除 + 手动恢复**（0.8.0）：某源站当天撞上 quota 类 429 时，
+  该 provider 整行从 picker 摘除（比逐模型灰显激进一档，且按源站独立判定）；面板给
+  「恢复」按钮，点一下立刻重挂，本地日期翻页自动解除；
 - **门禁体系**：全套离线测试（含产物新鲜度 `test/build-gate.mjs`、文档一致性
   `test/docs.test.mjs`、两档真 DOM/真 React 渲染套件）+ CI
   （`.github/workflows/gate.yml`）。
