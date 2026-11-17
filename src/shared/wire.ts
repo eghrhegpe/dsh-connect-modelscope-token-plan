@@ -413,6 +413,17 @@ export interface Snapshot {
    */
   draw?: DrawStatus;
   /**
+   * 模型目录的年龄（ms，可选）：stale-while-revalidate 下 Host 可能给的是上次的
+   * 好目录、同时在后台刷新。**可选**：旧 Host 不带它（读侧按「新鲜」处理，
+   * 与没有 SWR 时的行为逐字一致）。
+   */
+  catalogAgeMs?: number;
+  /**
+   * 这份目录是不是**旧值**（可选）。true = 过期但仍在陈旧预算内、后台刷新在跑；
+   * 不是错误，也不能渲染成「刚拉到的」——面板照常用它，只需标出年龄。
+   */
+  catalogStale?: boolean;
+  /**
    * 双源站账户快照（M3）。**可选**，与 `provider` / `draw` 同一条纪律：旧 Host /
    * 过渡期没有账户池时省略整块，面板据缺席退回单源站视图（读顶层 `token` /
    * `balance` / `quota`），不补假块、不挂假的契约漂移警告。

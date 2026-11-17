@@ -668,6 +668,49 @@ const stateDirPath = join(process.env.DSH_HOME, "state", name);
   );
 }
 
+
+// ── 目录用了 stale-while-revalidate：年龄与「这是旧值」必须一起上快照 ──
+//
+// 面板是**单响应**：目录（要公网、60s TTL 一到就同步重取）一慢，连本地计数一起
+// 停在「加载中」。SWR 让过期目录先顶上、后台刷新；但**旧值不许冒充新值**——
+// catalogAgeMs / catalogStale 与那条 shapeWarnings 是同一件事的三个面，少一个
+// 就是「绿灯撒谎」。
+{
+  const makeBase = (models) => ({
+    settings: resolveSettings({}).settings,
+    tokenStore: { state: async () => ({ present: false, source: "none", valid: null, checkedAt: null, ephemeral: true }) },
+    usageStore: { daily: async () => ({ calls: 3 }), perModelToday: async () => [], trend: async () => [], events: async () => [], anomaly: () => null },
+    inference: { fetchModels: async () => models, fetchBalance: async () => { throw new Error("no token"); } },
+    providerStore: { enabled: async () => null, enabledIds: async () => [], contextWindow: async () => null, versionNote: async () => null },
+    drawStore: { enabled: async () => null, modelId: async () => null, versionNote: async () => null },
+    usagePrefsStore: { windowDays: async () => null, versionNote: async () => null },
+    rosterSeenStore: { fresh: async () => [], versionNote: async () => null },
+    publisher: { state: { enabledIds: [], llmAvailable: false, registered: false, error: null } },
+    logger: { warn: () => {} }
+  });
+
+  const staleBody = await buildSnapshotBody(makeBase({
+    entries: [], ids: [], fetchedAt: "2026-11-17T00:00:00.000Z", catalogAgeMs: 120_000, catalogStale: true
+  }));
+  assert.equal(staleBody.catalogAgeMs, 120_000, "目录年龄必须透传到快照（面板据此说清卡点）");
+  assert.equal(staleBody.catalogStale, true, "「这是旧值」必须标记，不许当成新鲜答案");
+  assert.ok(
+    staleBody.shapeWarnings.some((w) => w.startsWith("models: serving a 120s-old catalog")),
+    "旧目录必须有一条可读的警告"
+  );
+
+  const freshBody = await buildSnapshotBody(makeBase({
+    entries: [], ids: [], fetchedAt: "2026-11-17T00:00:00.000Z", catalogAgeMs: 0, catalogStale: false
+  }));
+  assert.equal(freshBody.catalogAgeMs, 0, "新鲜目录也带年龄（0 是可信读数）");
+  assert.equal(freshBody.catalogStale, false);
+  assert.ok(!freshBody.shapeWarnings.some((w) => w.startsWith("models: serving")), "新鲜目录不许挂警告");
+
+  const oldHostBody = await buildSnapshotBody(makeBase({ entries: [], ids: [], fetchedAt: "2026-11-17T00:00:00.000Z" }));
+  assert.equal(oldHostBody.catalogAgeMs, undefined, "没有年龄字段（旧 Host 形态）→ 省略，不许编一个 0");
+  assert.equal(oldHostBody.catalogStale, undefined);
+}
+
 // ── 趋势读不到：trend 抛错 → `buckets` 必须是 null，不是 [] ──
 //
 // 红线 3 在聚合层的落点。`trend.ok ? trend.value : []` 是本轮修掉的那半条：soft()

@@ -120,11 +120,14 @@ export function createCoalescedFetch(options: {
   cache?: Map<string, { body: unknown; at: number; gen: number }>;
   inflight?: Map<string, Promise<unknown>>;
   maxAgeMs?: number;
+  /** 时钟注入（测试用假时钟；缺省 Date.now）。 */
+  now?: () => number;
 } = {}) {
   const {
     cache = new Map(),
     inflight = new Map(),
-    maxAgeMs = MAX_CACHE_AGE_MS
+    maxAgeMs = MAX_CACHE_AGE_MS,
+    now = () => Date.now()
   } = options;
 
   // Generation counters, one per key and one global: `clear()` bumps them so a
@@ -144,9 +147,9 @@ export function createCoalescedFetch(options: {
 
   /** Drop entries past the sweep ceiling; called after every write. */
   const sweep = () => {
-    const nowMs = Date.now();
+    const at = now();
     for (const [key, entry] of cache) {
-      if (nowMs - entry.at > maxAgeMs) cache.delete(key);
+      if (at - entry.at > maxAgeMs) cache.delete(key);
     }
   };
 
@@ -161,7 +164,7 @@ export function createCoalescedFetch(options: {
    */
   const read = async (key: string, producer: () => Promise<unknown>, ttlMs: number) => {
     const cached = cache.get(key);
-    if (cached !== undefined && cached.gen === genOf(key) && Date.now() - cached.at < ttlMs) return cached.body;
+    if (cached !== undefined && cached.gen === genOf(key) && now() - cached.at < ttlMs) return cached.body;
     const pending = inflight.get(key);
     if (pending !== undefined) return pending;
     // Capture the generation the flight is born under: if `clear()` runs while
@@ -170,7 +173,7 @@ export function createCoalescedFetch(options: {
     const born = genOf(key);
     const flight = (async () => {
       const body = await producer();
-      cache.set(key, { body, at: Date.now(), gen: born });
+      cache.set(key, { body, at: now(), gen: born });
       sweep();
       return body;
     })().finally(() => {
@@ -195,6 +198,41 @@ export function createCoalescedFetch(options: {
     return flight;
   };
 
+
+  /**
+   * 带年龄的读取：**过期但仍在陈旧预算内**时立刻给旧值，同时在后台刷新。
+   *
+   * 为什么需要它：快照是**单响应**，目录（要公网、60s 过期就同步重取）一慢，
+   * 整块面板连本地计数一起停在「加载中」。stale-while-revalidate 把首屏从
+   * 「等上游」改成「给上次的好数据 + 后台刷新」，面板不再被上游拖住。
+   *
+   * 语义边界（与红线 3「读不到 ≠ 0」同一方向）：返回的 `ageMs` 是**已知年龄**，
+   * `stale:true` 明确表示「这是旧值，不是新鲜读到的」——调用方必须把它透传给
+   * 用户（快照的 catalogAgeMs/catalogStale），不许静默当成新鲜答案。
+   *
+   * 没有缓存、或缓存老出 `staleMs` 预算时，行为与 {@link read} 完全一致：等生产者。
+   * 后台刷新的失败**不落盘**（read 不缓存 rejection），旧值继续保持可用，直到超预算。
+   * @param {string} key - 缓存键。
+   * @param {() => Promise<unknown>} producer - 现取。
+   * @param {number} ttlMs - 多久算新鲜。
+   * @param {number} [staleMs] - 过期后还允许多久给旧值（0 = 不用 SWR）。必须 ≤ maxAgeMs，
+   *   否则条目会先被清扫掉。
+   * @returns {Promise<{value: unknown, ageMs: number, stale: boolean}>}
+   */
+  const readDetailed = async (key: string, producer: () => Promise<unknown>, ttlMs: number, staleMs = 0) => {
+    const cached = cache.get(key);
+    if (cached !== undefined && cached.gen === genOf(key)) {
+      const ageMs = now() - cached.at;
+      if (ageMs < ttlMs) return { value: cached.body, ageMs, stale: false };
+      if (staleMs > 0 && ageMs < staleMs) {
+        // 后台刷新：单飞由 read 的 inflight 保证；失败吞掉，旧值继续服务。
+        void read(key, producer, 0).catch(() => {});
+        return { value: cached.body, ageMs, stale: true };
+      }
+    }
+    return { value: await read(key, producer, ttlMs), ageMs: 0, stale: false };
+  };
+
   /**
    * Drop one key's cached answer, or the whole cache.
    *
@@ -209,5 +247,5 @@ export function createCoalescedFetch(options: {
    */
   const clear = (key?: string) => clearCoalescedFetch(cache, inflight, key);
 
-  return { read, clear };
+  return { read, readDetailed, clear };
 }

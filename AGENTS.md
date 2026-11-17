@@ -365,6 +365,7 @@ test/
 ├── config.test.mjs          # 配置解析
 ├── catalog.test.mjs         # 模型目录
 ├── allow-list.test.mjs      # 允许清单
+├── coalesced-fetch.test.mjs # 目录 SWR：过期给旧值 + 后台刷新；年龄/陈旧标记、超预算老实等
 ├── reconcile.test.mjs       # 收敛器
 ├── retry.test.mjs           # 重试策略
 ├── usage-store.test.mjs     # 本地计数持久化

@@ -90,7 +90,16 @@ export function createInferenceClient({ settings, tokenStore, deps = {}, logger 
 }) {
   void logger;
   const doFetch = deps.fetchImpl ?? fetch;
-  const { read } = createCoalescedFetch();
+  const { read, readDetailed } = createCoalescedFetch();
+
+  /**
+   * 目录的**陈旧预算**：过期后最多还能用多久的旧目录，同时后台刷新。
+   *
+   * 与 coalesced 的清扫上限（1 小时）对齐——超过它的条目会被 sweep 删掉，
+   * 再长的预算也没有条目可给。真正要防的是「目录要公网、一慢就把整块快照
+   * （连本地计数）堵在『加载中』」：60s TTL 之后的第一轮取数在实测里能到 8.6s。
+   */
+  const CATALOG_STALE_MS = 3600_000;
 
   /**
    * 详情端点任务标签的**独立**缓存与 TTL——与目录/余额的 `read` 刻意分开。
@@ -263,7 +272,7 @@ function tokenFingerprint(token: string): string {
       * 兜底之前——它是「更聪明的 128k」，不是新权威。
      * @param {number|null} [contextOverride] - 全局窗口覆盖（tokens），null = 跟随目录。
      */
-    async fetchModels(contextOverride?: number | null): Promise<{ entries: CatalogEntry[]; ids: string[]; fetchedAt: string }> {
+    async fetchModels(contextOverride?: number | null): Promise<{ entries: CatalogEntry[]; ids: string[]; fetchedAt: string; catalogAgeMs: number; catalogStale: boolean }> {
       const url = settings.apiBase + "/models";
       // 覆盖值的缓存用更短的 TTL：每个不同的覆盖值都会产生一个独立的缓存条目，
       // 如果用户在面板上频繁改覆盖值（128K→256K→512K→1M），每个值都会缓存一份
@@ -271,7 +280,7 @@ function tokenFingerprint(token: string): string {
       // 避免恶意或无意的切换撑大缓存。
       const cacheKey = contextOverride != null ? `models:override:${contextOverride}` : "models:catalog";
       const cacheTtl = contextOverride != null ? Math.min(settings.cacheSeconds * 1000, 5000) : settings.cacheSeconds * 1000;
-      const body = await read(cacheKey, async () => {
+      const catalog = await readDetailed(cacheKey, async () => {
         const response = await fetchWithTimeout(url, { method: "GET" });
         if (!response.ok) {
           const message = await readErrorMessage(response);
@@ -344,8 +353,11 @@ function tokenFingerprint(token: string): string {
           .filter((entry) => entry.id !== "");
         const ids2 = entries.map((entry) => entry.id);
         return { entries, ids: ids2, fetchedAt: new Date().toISOString() };
-      }, cacheTtl) as { entries: CatalogEntry[]; ids: string[]; fetchedAt: string };
-      return body;
+      }, cacheTtl, CATALOG_STALE_MS);
+      const body = catalog.value as { entries: CatalogEntry[]; ids: string[]; fetchedAt: string };
+      // 年龄与「这是旧值」一起交出去：调用方（快照 / 轮询）必须把它说给用户，
+      // 不许把 stale 的目录当成「刚读到的新鲜答案」。
+      return { ...body, catalogAgeMs: catalog.ageMs, catalogStale: catalog.stale };
     },
 
     /**

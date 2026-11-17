@@ -46,7 +46,9 @@ assert.equal(
 // 判据写死在这里而不是靠人记得：**接口里带 `?` 的顶层字段，本清单必须没有**。
 // 判据本身由下面「机械解析 Snapshot 接口」的三向交叉钉住（清单腐化、可选块漏登记
 // 都会判红），不再依赖人读接口守。
-const OPTIONAL_BLOCK_KEYS = ["provider", "providers", "draw", "accounts"];
+// 可选顶层字段（块的**和非块的**都在这）：`catalogAgeMs`/`catalogStale` 是标量，
+// 但同一条纪律——旧 Host 不给时客户端按「新鲜」读，不许当成契约破裂。
+const OPTIONAL_BLOCK_KEYS = ["provider", "providers", "draw", "accounts", "catalogAgeMs", "catalogStale"];
 {
   // 正面清单：Snapshot 里声明为可选的顶层块，一个都不许出现在必给清单里。
   for (const key of OPTIONAL_BLOCK_KEYS) {
