@@ -117,6 +117,15 @@ export async function buildSnapshotBody(wiring: SnapshotWiring): Promise<Snapsho
   ]);
   const modelIds = models.ok ? models.value.ids : [];
   const modelEntries = models.ok ? models.value.entries : [];
+  // 目录可能是**旧值**（stale-while-revalidate：过期先给上次的好目录、后台刷新）。
+  // 必须说出口：把旧目录渲染成「刚拉到的新鲜答案」就是第二种「绿灯撒谎」。
+  const catalogAgeMs = models.ok && typeof models.value.catalogAgeMs === "number" ? models.value.catalogAgeMs : null;
+  const catalogStale = models.ok && models.value.catalogStale === true;
+  if (catalogStale && catalogAgeMs !== null) {
+    shapeWarnings.push(
+      `models: serving a ${Math.round(catalogAgeMs / 1000)}s-old catalog while refreshing (upstream slow; the panel is not blocked)`
+    );
+  }
   if (!models.ok && models.code !== "network_error") {
     // 网络抖动不值得一条常驻警告（下一轮轮询自愈）；形状漂移值得。
     shapeWarnings.push(`models: ${models.error}`);
@@ -420,6 +429,9 @@ export async function buildSnapshotBody(wiring: SnapshotWiring): Promise<Snapsho
     // 据 providers 缺席退回单 provider 路径。在场时带 cn/ai 两份各自的 roster 与
     // 勾选，ProviderCard 据此渲染源站切换器（否则国际站没有选择模型的界面）。
     ...(segmentedProviders !== undefined ? { providers: segmentedProviders } : {}),
+    // 目录年龄（可选）：只有 Host 真用了 SWR 才给。`catalogStale:true` 是
+    // **旧值**标记，不是错误——与 shapeWarnings 里那条同源。
+    ...(catalogAgeMs !== null ? { catalogAgeMs, catalogStale } : {}),
     shapeWarnings,
     // quotaError 为 M4 预留（wire.ts 语义）；v0.1 的失败都走 shapeWarnings /
     // balance.error 呈现，此字段恒 null。
