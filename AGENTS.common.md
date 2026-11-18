@@ -43,4 +43,4 @@
 
 - **按域裁剪，禁止无脑全量**；但动了契约/接缝文件（`src/shared/*`、`client.js`、`lib/index.js` 及被多模块消费的文件，消费者不可枚举）必须跑全量——按域裁剪会漏掉跨域契约。
 - **别把会随并行会话变化的数写死进文档**：测试数、文件数、套件数都不是契约（某个时点的总数当场就过期）。要计数自己量。
-- **改 `src/` 后必须先 build 并把产物与源码同一次提交**：GitHub 直装源不跑 prepack，产物不入库则装上就坏；build-freshness / build-gate 门禁会拦漂移；产物不许加回 `.gitignore`。
+- **改 `src/` 后必先 `npm run build` 重建产物**（`lib/` 与根 `client.js`）：两者由 `package.json` 的 `prepare` 在安装/发布时**现场构建、不入库**（gitignore）；`github:` 直装走 pnpm git-dep，需把本插件加进对应 profile 的 `~/.dsh/profiles/<profile>/pnpm-workspace.yaml` 的 `allowBuilds`（未批准报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`，pnpm 会打印要加的那行；安装说明见各仓 README 安装节）；`build-gate` 仍校验「产物是 src 的忠实重建 + 切分闭包」，与是否入库无关。
