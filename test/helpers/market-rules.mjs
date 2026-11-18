@@ -44,7 +44,7 @@
 import { parseEntry } from "./submission-entry.mjs";
 
 /** 上游 `scripts/lib/entries.mjs` 第 145 行：条目文件允许带的键。 */
-export const ENTRY_KEYS = new Set(["url", "name", "category", "description", "tarball", "file"]);
+export const ENTRY_KEYS = new Set(["url", "name", "category", "description", "icon", "tarball", "file"]);
 
 /** 上游第 20 行：站点渲染的 locale。 */
 export const LOCALE_CODES = ["en", "zh"];
@@ -94,6 +94,31 @@ export function slugFor(url) {
   return sub ? `${base}--${sub.replaceAll("/", "-")}` : base;
 }
 
+/** 上游第 116–117 行：图标只认这几家 GitHub 托管与位图扩展名。 */
+export const ICON_HOSTS = new Set(["raw.githubusercontent.com", "user-images.githubusercontent.com", "camo.githubusercontent.com", "github.com"]);
+export const ICON_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"];
+
+/**
+ * 上游第 119–132 行：返回一个 icon URL 的问题描述，合规返回 null。
+ *
+ * 判据是「市场卡片会不会去不可担保的图床取图」——SVG 与第三方图床一律拒。
+ */
+export function iconProblem(value) {
+  if (typeof value !== "string" || !value.trim()) return "must be a URL string";
+  let u;
+  try {
+    u = new URL(value);
+  } catch {
+    return `is not a valid URL: ${value}`;
+  }
+  if (u.protocol !== "https:") return "must be https";
+  if (!ICON_HOSTS.has(u.hostname)) return `must be hosted on GitHub (got ${u.hostname})`;
+  if (!ICON_EXTENSIONS.some((ext) => u.pathname.toLowerCase().endsWith(ext))) {
+    return `must point at a raster image (${ICON_EXTENSIONS.join(", ")})`;
+  }
+  return null;
+}
+
 /** 上游第 116–128 行：返回一个 tarball URL 的问题描述，合规返回 null。 */
 export function tarballProblem(value) {
   if (typeof value !== "string" || !value.trim()) return "must be a URL string";
@@ -132,6 +157,7 @@ function stemOf(file) {
  *   - description.en 必填、不能为空、必须单行；description.zh 给了就不能是空串
  *     （第 191–201 行）；没给不算错（维护者会补，第 193 行）。
  *   - description 里出现站点不渲染的 locale 也不行（第 208–216 行）。
+ *   - icon 给了就得是 GitHub 托管上的位图（第 250–253 行，规则见 iconProblem）。
  *   - tarball 给了就得是 GitHub 发布托管上的 .tgz（第 221–224 行）。
  *
  * @param {object} doc 已解析的条目（YAML 顶层映射）
@@ -208,6 +234,11 @@ export function validateEntry(doc, { file } = {}) {
           `but the site renders only ${LOCALE_CODES.join(" and ")} — remove the extra key(s)`
       );
     }
+  }
+
+  if (doc.icon !== undefined) {
+    const bad = iconProblem(doc.icon);
+    if (bad) problems.push(`${at}: "icon" ${bad}`);
   }
 
   if (doc.tarball !== undefined) {

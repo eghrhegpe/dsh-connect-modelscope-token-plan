@@ -41,6 +41,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   BASE_LOCALE,
+  iconProblem,
   CAT_IDS,
   ENTRY_KEYS,
   LOCALE_CODES,
@@ -117,7 +118,7 @@ assertProblem(entryOf({ npm: "dsh-connect-modelscope-token-plan" }), 'unknown fi
 {
   const problems = validateEntry(entryOf({ npm: "x" }));
   assert.ok(
-    problems[0].includes("may only declare url, name, category, description, tarball"),
+    problems[0].includes("may only declare url, name, category, description, icon, tarball"),
     `未知字段的提示应说明允许哪些键，实际：${problems[0]}`
   );
 }
@@ -162,6 +163,16 @@ assertProblem(entryOf({ description: { en: "Sentence.", zh: "" } }), "present bu
 // 站点不渲染的 locale 一律不许多带（上游 :208-216）。
 assertProblem(entryOf({ description: { en: "Sentence.", ja: "こんにちは。" } }), "remove the extra key(s)");
 
+// icon 给了就得是 GitHub 托管上的位图（上游 :116-132、:250-253）。
+assert.equal(
+  iconProblem("https://raw.githubusercontent.com/o/r/main/assets/icon-180.png"),
+  null,
+  "合法的 GitHub 位图 icon 不该被报"
+);
+assertProblem(entryOf({ icon: "https://raw.githubusercontent.com/o/r/main/assets/icon.svg" }), "must point at a raster image");
+assertProblem(entryOf({ icon: "https://example.com/icon.png" }), "must be hosted on GitHub");
+assertProblem(entryOf({ icon: "http://raw.githubusercontent.com/o/r/main/icon.png" }), "must be https");
+
 // tarball 给了就得是 GitHub 发布托管上的 .tgz（上游 :113、:116-128、:221-224）。
 assert.equal(
   tarballProblem("https://github.com/o/r/releases/download/v1.0.0/p.tgz"),
@@ -178,7 +189,7 @@ assert.equal(slugFor("https://github.com/o/r"), "o__r");
 assert.equal(slugFor("https://github.com/o/r/tree/main/packages/my-plugin"), "o__r--packages-my-plugin");
 
 // 镜像自己的常量：允许的键、locale、类别表。
-assert.deepEqual([...ENTRY_KEYS].sort(), ["category", "description", "file", "name", "tarball", "url"]);
+assert.deepEqual([...ENTRY_KEYS].sort(), ["category", "description", "file", "icon", "name", "tarball", "url"]);
 assert.deepEqual(LOCALE_CODES, ["en", "zh"]);
 assert.equal(BASE_LOCALE, "en");
 assert.ok(CAT_IDS.includes("model"), "我们投稿用的 category 必须在 CAT_IDS 里");

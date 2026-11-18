@@ -177,3 +177,17 @@ live `api.json` 与 live `/v1/models`（37 条）复核，结论已回填
   InternVL3_5、XiYanSQL、CompassJudger 等）在任何数据源都没有窗口真值；
 - 传输体积（运行时直取的成本依据）：api.json 解压后 **5.6 MiB**，230 providers /
   8850 models（全部带 `limit.context`），本机拉全量约 1.6s。
+
+## 9. 2026-11-18 复查：Kimi-K3.1-Pro 补入策展表
+
+live `/v1/models` 已到 **38 条**（10-23 之后新上架 `moonshotai/Kimi-K3.1-Pro`），
+而策展表停在 21 条——它与当时的 V4.1-Flash-1017 是同一类缺口：目录不声明窗口、
+表里没有，于是落 128k 兜底。
+
+- **补入** `moonshotai/Kimi-K3.1-Pro` → 1048576（canon `moonshotai/kimi-k3.1-pro`，
+  63 host 众数，modalities text|image|pdf|video|text，多模态对话模型）；
+- 复跑同一判据（canon 匹配 + 跨 host 众数）：live 38 条命中 **22 条**，与补入后的
+  表完全一致；剩余 16 条（ERNIE-4.5 全系、Intern-S1/S2 系、InternVL3_5、XiYanSQL、
+  CompassJudger 等）仍无窗口真值，继续落兜底——这是「没有真值」，不是待办遗漏；
+- 4 条十进制/二进制拼写差（V4-Pro 系 1048576 vs live 1000000、Step-3.5/3.7-Flash
+  262144 vs 256000）沿用上一轮裁定，维持原值并在表内注明。

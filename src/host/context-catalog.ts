@@ -13,8 +13,8 @@
  * 最大值：个别网关把窗口抄大（如 openrouter 抄 1M）不代表魔搭侧真开那么宽。
  *
  * 维护纪律：
- * 1. 只收**当前魔搭目录里真实存在**的 id（2026-10-23 实拉 `/v1/models` 全集
- *    37 个中筛出 21 个）；目录下架的条目应随手删除，表不是历史档案。
+ * 1. 只收**当前魔搭目录里真实存在**的 id（2026-11-18 实拉 `/v1/models` 全集
+ *    38 个中筛出 22 个）；目录下架的条目应随手删除，表不是历史档案。
  * 2. 每条注明来源 host 与核对日期；有多个数据源时写主流值并留离群说明。
  * 3. 覆盖优先级由 `curatedWindowOf` 的调用方（inference-client 打标）保证：
  *    目录声明过窗口的条目不进打标，策展表永不推翻平台声明。
@@ -29,7 +29,7 @@
  * 而使用者无从判断一个值是三个月前还是三年前核的。快照侧据此在表过期时给一条
  * shapeWarning（见 {@link curatedCatalogStale}）。
  */
-export const CURATED_AS_OF = "2026-10-23";
+export const CURATED_AS_OF = "2026-11-18";
 
 /**
  * 策展表距上次核对已经过去多少天；日期解析不了返回 `null`。
@@ -78,6 +78,10 @@ export const CURATED_CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
   // MiniMax-M3：models.dev 多数 host 1048576（ambient 262144 离群）。
   // 2026-10-16 核。
   "MiniMax/MiniMax-M3": 1048576,
+  // moonshotai/Kimi-K3.1-Pro：models.dev canon moonshotai/kimi-k3.1-pro，63 host
+  // 共识 1048576（modalities text|image|pdf|video|text——多模态对话模型）。
+  // 2026-11-18 补入（10-23 后新上架，曾落 128k 兜底）。
+  "moonshotai/Kimi-K3.1-Pro": 1048576,
   // nex-agi：models.dev kilo/openrouter 两 host 一致 262144。2026-10-16 核。
   "nex-agi/Nex-N2.5-mini": 262144,
   "nex-agi/Nex-N2.5-Pro": 262144,
