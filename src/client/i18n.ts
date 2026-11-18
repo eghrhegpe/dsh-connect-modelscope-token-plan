@@ -21,6 +21,7 @@ import type { Tt } from "./runtime.ts";
  */
 export const zh = {
   "panel.refresh": "刷新",
+  "nav.entry": "接入 模搭社区",
   "panel.updated": "更新于 {time}",
   "panel.loading": "加载中…",
   "panel.error": "读取失败：{error}",
@@ -263,6 +264,7 @@ export const zh = {
 /** English dictionary, key-parity pinned by the type. */
 export const en: typeof zh = {
   "panel.refresh": "Refresh",
+  "nav.entry": "Access ModelScope",
   "panel.updated": "Updated {time}",
   "panel.loading": "Loading…",
   "panel.error": "Read failed: {error}",

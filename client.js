@@ -149,6 +149,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 	var init_i18n = __esmMin((() => {
 		zh = {
 			"panel.refresh": "刷新",
+			"nav.entry": "接入 模搭社区",
 			"panel.updated": "更新于 {time}",
 			"panel.loading": "加载中…",
 			"panel.error": "读取失败：{error}",
@@ -327,6 +328,7 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 		};
 		en = {
 			"panel.refresh": "Refresh",
+			"nav.entry": "Access ModelScope",
 			"panel.updated": "Updated {time}",
 			"panel.loading": "Loading…",
 			"panel.error": "Read failed: {error}",
@@ -3634,6 +3636,21 @@ var dsh_connect_modelscope_token_plan_client = (function() {
 			}, PanelPage)));
 		} catch (error) {
 			console.warn(`[${NS}] config card registration failed:`, error);
+		}
+		try {
+			disposers.push(ctx.slots.inject("settings.section", () => ctx.slots.register({
+				name: "settings.section",
+				id: NS,
+				order: 30,
+				label: () => tt("nav.entry"),
+				locale: NS,
+				inject: () => ({
+					tt,
+					localeSubscribe: ctx.locale.subscribe.bind(ctx.locale)
+				})
+			}, PanelPage)));
+		} catch (error) {
+			console.warn(`[${NS}] settings section registration failed:`, error);
 		}
 		try {
 			disposers.push(ctx.slots.inject("conversation.input.right", () => ctx.slots.register({

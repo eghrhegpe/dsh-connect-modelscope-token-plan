@@ -76,6 +76,30 @@ export function apply(ctx: ClientCtx): void {
     console.warn(`[${NS}] config card registration failed:`, error);
   }
 
+  // 设置页座席（入口迁移）：`settings.section` 是 shell 给「这个插件拥有一页设置」的座席，
+  // id 用包名、order 30（排在官方段之后，不撞内建）。注册即探针——`slots.inject` 本身等声明：
+  // 宿主声明了就跑、没声明就无操作（不抛错），旧 Host 由插件卡兜底。导航字形不注册
+  // （shell 回退默认字形）：字形是装饰，页才是入口。
+  try {
+    disposers.push(
+      ctx.slots.inject("settings.section", () =>
+        ctx.slots.register(
+          {
+            name: "settings.section",
+            id: NS,
+            order: 30,
+            label: () => tt("nav.entry"),
+            locale: NS,
+            inject: () => ({ tt, localeSubscribe: ctx.locale.subscribe.bind(ctx.locale) })
+          },
+          PanelPage
+        )
+      ) as () => void
+    );
+  } catch (error) {
+    console.warn(`[${NS}] settings section registration failed:`, error);
+  }
+
   // 对话框用量胶囊：输入框工具栏 `conversation.input.right` 座席。
   //
   // 座席契约以**宿主随包发布的客户端**为准（本机实测 app.asar 里的
