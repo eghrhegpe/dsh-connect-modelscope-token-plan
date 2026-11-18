@@ -93,7 +93,7 @@ npm run context-catalog:check   # 内置策展表 × models.dev 上游 + live �
 本仓补充：
 
 - **`git push`：不设禁区，改走自检**——推前过三条：① 要推的提交是不是自己的活；② 提交是否路径限定（见下条）；③ `git status --short` 复核没带走别人的东西。三条过完直接推，用户明确要求推时不必再确认。注意本仓多会话共用同一 git 身份，`git log --format=%ae` 分不出归属，别拿作者字段当归属证据。
-- **产物必须入库**：`lib/` 与根 `client.js` 已版本化入库。改 `src/` 后必须 `npm run build` 并把产物一并提交（GitHub 直装源不跑 prepack）。
+- **产物不入库**：`lib/` 与根 `client.js` 由 `prepare` 在安装/发布时**现场构建、不入库**（gitignore）。改 `src/` 后必先 `npm run build` 重建；GitHub 直装需先在对应 profile 的 `~/.dsh/profiles/<profile>/pnpm-workspace.yaml` 的 `allowBuilds` 批准本插件（未批准报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`，见 README 安装节）。
 
 ---
 

@@ -75,6 +75,7 @@
    dsh plugin --profile web add dsh-connect-modelscope-token-plan       # Web 端
    dsh plugin --profile desktop add dsh-connect-modelscope-token-plan  # 桌面端
    ```
+   > **`github:` 直装**若报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`：把 pnpm 打印的 `allowBuilds:` 那行加进 `~/.dsh/profiles/<profile>/pnpm-workspace.yaml`（桌面端即 `~/.dsh/profiles/desktop/pnpm-workspace.yaml`），再重试——`prepare` 现场构建 `lib/` 与 `client.js`。
 
 2. **完全退出 DSH（含托盘）再启动**。
 

@@ -52,7 +52,8 @@
     "market-rules:check": "node tools/check-market-rules.mjs --check",
     "context-catalog:check": "node tools/check-context-catalog.mjs",
     "build": "tsdown -c tsdown.config.mjs",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+  "prepare": "npm run build"
   },
   "dsh": {
     "bundle": {

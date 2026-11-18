@@ -316,9 +316,11 @@ glm/ZhipuAI 在底）。新增 `FEATURED_OWNERS`（`deepseek-ai` / `ZhipuAI` / `
 ## 仓库起步与审核修复
 
 - **仓库起步**：清单 / 配置面 / 构建纪律（与姊妹插件同构）。`npm run build` 产物
-  （`lib/` + `client.js`）**入库**——`files` 白名单含 `lib`，但 git 依赖安装时跑不到构建脚本
-  （pnpm 的 `allowBuilds` 是装插件的用户没有的入口），所以产物必须随源码一起入库，新鲜度由
-  `test/build-gate.mjs` 用内容哈希逐字节比对钉住。
+  （`lib/` + `client.js`）**不入库**——`files` 白名单含 `lib`，git 依赖安装时由 `prepare`
+  现场构建（pnpm 对 git 依赖只在 `allowBuilds` 批准后跑 prepare，未批准报
+  `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` 并打印要加的那行——装插件的用户把该行加进
+  `~/.dsh/profiles/<profile>/pnpm-workspace.yaml` 的 `allowBuilds` 即可，见 README 安装节），
+  新鲜度由 `test/build-gate.mjs` 用内容哈希逐字节比对钉住。
 - **`tools/doctor.mjs` 落地**（+`src/host/doctor.ts`）：只读盘点 `$DSH_HOME/state` 下各
   profile 的 usage.json 与 provider.json（损坏 / 未知版本 → 同一个症状，速览另标
   `versionKnown:false` 区分「坏了」与「更新的构建写的」）与 env 令牌在场性；
