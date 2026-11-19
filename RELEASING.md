@@ -147,8 +147,12 @@ git commit -m "chore: 版本升级至 X.Y.Z"
 `test/config.test.mjs` 钉着这两处相等——`PLUGIN_VERSION` 会进快照与日志，只改 `package.json`
 会让面板报的版本与包的实际版本对不上。
 
-改完 `src/` 必须 `npm run build` 再提交：`lib/` + `client.js` 是**入库产物**，`github:` 源
-安装不跑 `prepack`，不重建则用户装到旧代码。`test/build-gate.mjs` 会红——**红得对**。
+改完 `src/` 必须先本地 `npm run build` 重建（测试跑的是构建产物 `client.js`，不重建
+跑的是旧码）；但 `lib/` + `client.js` **不入库**（gitignore）——由 `prepare` 在安装/
+发布时现场重建；`github:` 源直装需先在对应 profile 的 `allowBuilds` 批准本插件
+（未批准报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`，修法见 README 安装节）。
+`test/build-gate.mjs` 校验「client.js 是 src 的忠实重建 + 切分闭包」，与是否入库
+无关——改 `src/` 后没重建会红——**红得对**。
 
 ### 3. 更新 CHANGELOG.md
 
@@ -271,7 +275,8 @@ gh release create vX.Y.Z \
   看里面的 `dist-tags`（`modified` 时间戳没动 = registry 真的还没收到）。
 - **`config.test` 红「版本不一致」**：版本号烧在 `package.json` 与 `src/host/host-config.ts`
   两处（见第 2 步），只改了一处。
-- **`build-gate` 红「产物过期」**：改了 `src/` 没 `npm run build`。先 build 再提交，
+- **`build-gate` 红「产物过期」**：改了 `src/` 没本地 `npm run build`。先 build 再提交
+  （产物不入库；build 保证的是本地测试与门禁跑在当前 src 上），
   **不要**改门禁让它变绿。
 - **`release.test` 红「截图不在 files 里」**：`assets/` 被移出 `package.json` 的 `files`
   白名单。恢复白名单，不要改门禁。
