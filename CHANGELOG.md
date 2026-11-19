@@ -26,6 +26,22 @@
 > **发版时**：顶部开 `## [X.Y.Z] — YYYY-MM-DD`，完整流程见
 > [RELEASING.md](RELEASING.md) §3（本文开头这段是**写作者规范**，那是**发布操作流程**）。
 
+## [0.9.0] — 2026-11-19
+
+**面板入口搬进设置页：侧栏新增「接入 模搭社区」专属座席**
+
+- 面板迁出 Plugins 页卡，在设置页侧栏注册 `settings.section` 专属座席（order 30，
+  排官方段之后），入口名「接入 模搭社区」/「Access ModelScope」，页内就是原来的
+  三 tab 面板（额度 / 模型 / 接入）。宿主还没声明该座席时注册是探针、无操作，
+  旧 Host 由 Plugins 页插件卡兜底。
+
+**构建产物不再入库**
+
+- `lib/` 与根 `client.js` 移出仓库（gitignore），改由 `prepare` 在安装/发布时
+  现场构建。npm 安装无感知；GitHub 直装（`github:` 源）需先在对应 profile 的
+  `pnpm-workspace.yaml` 的 `allowBuilds` 批准本插件，未批准报
+  `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`（报错自带要加的那行），安装节已写明修法。
+
 ## [0.8.2] — 2026-11-18
 
 **新上架的 Kimi-K3.1-Pro 不再落 128K 兜底**

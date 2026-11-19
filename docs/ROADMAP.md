@@ -1,12 +1,14 @@
 # ROADMAP
 
-## 现状（0.8.2，2026-11-18）
+## 现状（0.9.0，2026-11-19）
 
-M0–M4+ 全部落地，其后又交付 0.2–0.8（出图工具、用量胶囊、上下文窗口、面板收敛、
+M0–M4+ 全部落地，其后又交付 0.2–0.9（出图工具、用量胶囊、上下文窗口、面板收敛、
 只读盘点、双源站账户池等，逐版公开行为变化见 [CHANGELOG.md](../CHANGELOG.md)）。当前
 能力面：
 
-- **本地用量面板**（Plugins 页插件卡，额度 / 模型 / 接入三 tab）：头条是官方魔粒
+- **本地用量面板**（额度 / 模型 / 接入三 tab）：主入口 0.9.0 起是设置页侧栏的
+  专属座席「接入 模搭社区」（`settings.section`；宿主未声明时旧 Host 由 Plugins 页
+  插件卡兜底）。头条是官方魔粒
   余额（真实值），下面接**本客户端（本 profile）内经本插件**的调用分布 / 趋势 /
   429 事件流（口径见 README「诚实声明」；profile 分段的裁定见 `usage-store.ts`
   头注；未接入时面板明示计数的生产者依赖，见 0.6.4）；
@@ -43,6 +45,10 @@ M0–M4+ 全部落地，其后又交付 0.2–0.8（出图工具、用量胶囊�
 - **门禁体系**：全套离线测试（含产物新鲜度 `test/build-gate.mjs`、文档一致性
   `test/docs.test.mjs`、两档真 DOM/真 React 渲染套件）+ CI
   （`.github/workflows/gate.yml`）。
+- **分发纪律**（0.9.0）：构建产物（`lib/`、根 `client.js`）不入库，由 `prepare` 在
+  安装/发布时现场构建；npm 安装无感知，GitHub 直装（`github:` 源）需先在对应 profile
+  的 `pnpm-workspace.yaml` 的 `allowBuilds` 批准本插件（未批准报
+  `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`，报错自带要加的那行；见 README 安装节）；
 
 每一步的病灶、判据、取舍见 [IMPLEMENTATION.md](IMPLEMENTATION.md)（实施过程档案）与
 [PROVIDER-M4.md](PROVIDER-M4.md)（M4 契约）；上游端点全景见 [REFERENCES.md](REFERENCES.md)。
